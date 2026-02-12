@@ -1,96 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
-
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --molten-lava: 0 100% 24%;
+    --brick-red: 354 89% 41%;
+    --papaya-whip: 38 92% 91%;
+    --deep-space-blue: 203 100% 14%;
+    --steel-blue: 207 37% 57%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --background: 38 92% 91%;
+    --foreground: 203 100% 14%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --card: 38 92% 93%;
+    --card-foreground: 203 100% 14%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --popover: 38 92% 95%;
+    --popover-foreground: 203 100% 14%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --primary: 0 100% 24%;
+    --primary-foreground: 38 92% 91%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --secondary: 207 37% 57%;
+    --secondary-foreground: 38 92% 91%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --muted: 38 40% 85%;
+    --muted-foreground: 207 37% 57%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --accent: 203 100% 14%;
+    --accent-foreground: 38 92% 91%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --destructive: 354 89% 41%;
+    --destructive-foreground: 38 92% 91%;
 
-    --radius: 0.5rem;
+    --border: 207 37% 77%;
+    --input: 207 37% 77%;
+    --ring: 203 100% 14%;
 
-    --sidebar-background: 0 0% 98%;
+    --radius: 0.75rem;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
-
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 203 100% 14%;
+    --sidebar-foreground: 38 92% 91%;
+    --sidebar-primary: 0 100% 24%;
+    --sidebar-primary-foreground: 38 92% 91%;
+    --sidebar-accent: 203 80% 20%;
+    --sidebar-accent-foreground: 38 92% 91%;
+    --sidebar-border: 203 60% 25%;
+    --sidebar-ring: 207 37% 57%;
   }
 }
 
@@ -98,8 +57,54 @@ All colors MUST be HSL.
   * {
     @apply border-border;
   }
-
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-montserrat;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+}
+
+@layer components {
+  .touch-btn {
+    @apply min-h-[48px] min-w-[48px] select-none cursor-pointer transition-all duration-200 active:scale-95;
+  }
+  .pos-card {
+    @apply bg-card rounded-xl border border-steel-blue/30 shadow-md p-4;
+  }
+  .header-bar {
+    @apply bg-accent text-accent-foreground;
+  }
+  .nav-sidebar {
+    @apply bg-accent text-accent-foreground;
+  }
+  .service-card {
+    @apply pos-card touch-btn hover:border-steel-blue hover:shadow-lg;
+  }
+  .service-card-active {
+    @apply border-2 border-brick-red shadow-lg ring-2 ring-brick-red/20;
+  }
+  .vehicle-card {
+    @apply touch-btn rounded-xl p-4 text-center bg-card border border-steel-blue/30 hover:border-steel-blue;
+  }
+  .vehicle-card-active {
+    @apply border-2 border-brick-red bg-card shadow-lg;
+  }
+  .btn-cobrar {
+    @apply touch-btn bg-primary text-primary-foreground font-bold text-xl rounded-xl px-8 py-4 hover:opacity-90;
+  }
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4;
+  }
+  .modal-content {
+    @apply bg-popover rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-auto p-6;
+  }
+  .input-touch {
+    @apply touch-btn w-full rounded-lg border border-steel-blue/40 bg-white px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-steel-blue;
+  }
+  .toast-success {
+    @apply fixed bottom-6 right-6 bg-accent text-accent-foreground px-6 py-3 rounded-xl shadow-xl z-50;
+  }
+  .toast-error {
+    @apply fixed bottom-6 right-6 bg-destructive text-destructive-foreground px-6 py-3 rounded-xl shadow-xl z-50;
   }
 }
