@@ -10,11 +10,26 @@ export default function CashClose() {
   const [shift, setShift] = useState("Matutino");
   const [observations, setObservations] = useState("");
   const [countedTotal, setCountedTotal] = useState("0");
+  const [bills, setBills] = useState<Record<string, number>>({});
+  const [coins, setCoins] = useState<Record<string, number>>({});
   const [expenses, setExpenses] = useState<{ description: string; amount: string; category: string }[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [dayStats, setDayStats] = useState({ cashNIO: 0, cashUSD: 0, card: 0, transfer: 0 });
+
+  const calculateTotal = (billsObj: Record<string, number>, coinsObj: Record<string, number>) => {
+    let total = 0;
+    // Bills
+    [1000, 500, 200, 100, 50, 20, 10].forEach(denom => {
+      total += (billsObj[`bill_${denom}`] || 0) * denom;
+    });
+    // Coins
+    [5, 1, 0.5, 0.25, 0.10, 0.05].forEach(denom => {
+      total += (coinsObj[`coin_${denom}`] || 0) * denom;
+    });
+    setCountedTotal(total.toFixed(2));
+  };
 
   useEffect(() => {
     loadHistory();
@@ -31,12 +46,12 @@ export default function CashClose() {
   };
 
   const loadDayStats = async () => {
-    const today = new Date(); today.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
     const { data: payments } = await supabase
       .from("payments")
       .select("*")
       .gte("created_at", today.toISOString());
-    
+
     if (!payments) return;
     let cashNIO = 0, cashUSD = 0, card = 0, transfer = 0;
     payments.forEach((p: any) => {
@@ -71,6 +86,8 @@ export default function CashClose() {
       expected_total: expected,
       counted_total: counted,
       difference,
+      bills_count: bills,
+      coins_count: coins,
       observations,
     }).select().single();
 
@@ -90,6 +107,9 @@ export default function CashClose() {
       loadHistory();
       setExpenses([]);
       setObservations("");
+      setBills({});
+      setCoins({});
+      setCountedTotal("0");
     }
     setSaving(false);
   };
@@ -162,13 +182,72 @@ export default function CashClose() {
             {expenses.length === 0 && <p className="text-sm text-muted-foreground">Sin egresos registrados</p>}
           </div>
 
-          {/* Counted */}
+          {/* Counted - Bill/Coin Counter */}
           <div className="pos-card p-4 space-y-3">
             <h3 className="font-bold text-foreground"><i className="fa-solid fa-calculator mr-2 text-secondary" />Conteo físico</h3>
+
+            {/* Bills */}
             <div>
-              <label className="text-xs font-semibold text-foreground">Total contado (C$)</label>
-              <input type="number" value={countedTotal} onChange={(e) => setCountedTotal(e.target.value)} className="input-touch text-xl font-bold text-center" />
+              <p className="text-xs font-semibold text-muted-foreground mb-2">Billetes (C$)</p>
+              <div className="grid grid-cols-3 gap-2">
+                {[1000, 500, 200, 100, 50, 20, 10].map(denom => {
+                  const key = `bill_${denom}`;
+                  const count = (bills as any)[key] || 0;
+                  return (
+                    <div key={denom} className="flex items-center gap-1 bg-background border border-border rounded p-1">
+                      <span className="text-xs text-secondary w-12">{denom}</span>
+                      <input
+                        type="number"
+                        value={count}
+                        onChange={(e) => {
+                          const newBills = { ...bills, [key]: parseInt(e.target.value) || 0 };
+                          setBills(newBills);
+                          calculateTotal(newBills, coins);
+                        }}
+                        className="w-full px-1 py-0.5 bg-background border-0 text-xs text-right focus:outline-none focus:ring-1 focus:ring-brick-red/50 rounded"
+                        min={0}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+
+            {/* Coins */}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-2">Monedas (C$)</p>
+              <div className="grid grid-cols-3 gap-2">
+                {[5, 1, 0.5, 0.25, 0.10, 0.05].map(denom => {
+                  const key = `coin_${denom}`;
+                  const count = (coins as any)[key] || 0;
+                  return (
+                    <div key={denom} className="flex items-center gap-1 bg-background border border-border rounded p-1">
+                      <span className="text-xs text-secondary w-12">{denom}</span>
+                      <input
+                        type="number"
+                        value={count}
+                        onChange={(e) => {
+                          const newCoins = { ...coins, [key]: parseInt(e.target.value) || 0 };
+                          setCoins(newCoins);
+                          calculateTotal(bills, newCoins);
+                        }}
+                        className="w-full px-1 py-0.5 bg-background border-0 text-xs text-right focus:outline-none focus:ring-1 focus:ring-brick-red/50 rounded"
+                        min={0}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Total calculated */}
+            <div className="pt-3 border-t border-border">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-foreground">Total contado:</span>
+                <span className="text-2xl font-bold text-primary">C${counted.toFixed(2)}</span>
+              </div>
+            </div>
+
             <textarea value={observations} onChange={(e) => setObservations(e.target.value)} className="input-touch" rows={2} placeholder="Observaciones..." />
           </div>
         </div>

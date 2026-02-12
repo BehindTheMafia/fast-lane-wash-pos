@@ -1,34 +1,51 @@
 import { useState } from "react";
 import { useAllServices } from "@/hooks/useServices";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+
+// Map vehicle type names to IDs
+const vehicleTypeMap: Record<string, number> = {
+  moto: 1,
+  sedan: 2,
+  suv: 3,
+  pickup: 4,
+  microbus: 5
+};
 
 const vehicleTypes = ["moto", "sedan", "suv", "pickup", "microbus"];
 const vehicleLabels: Record<string, string> = { moto: "Moto", sedan: "Sedán", suv: "SUV", pickup: "Pick up", microbus: "Microbús" };
 
 export default function Services() {
   const { data: services, isLoading, refetch } = useAllServices();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const [editing, setEditing] = useState<any>(null);
-  const [form, setForm] = useState({ name: "", description: "", includes: "", prices: {} as Record<string, string> });
+  const [form, setForm] = useState({ name: "", description: "", prices: {} as Record<string, string> });
   const [toast, setToast] = useState<string | null>(null);
 
   const startEdit = (svc: any) => {
     const prices: Record<string, string> = {};
-    svc.service_prices?.forEach((p: any) => { prices[p.vehicle_type] = String(p.price); });
+    svc.service_prices?.forEach((p: any) => {
+      // Find vehicle type name by ID
+      const vehicleTypeName = Object.keys(vehicleTypeMap).find(key => vehicleTypeMap[key] === p.vehicle_type_id);
+      if (vehicleTypeName) {
+        prices[vehicleTypeName] = String(p.price);
+      }
+    });
     setEditing(svc);
-    setForm({ name: svc.name, description: svc.description || "", includes: (svc.includes || []).join(", "), prices });
+    setForm({ name: svc.name, description: svc.description || "", prices });
   };
 
   const startNew = () => {
     setEditing("new");
     const prices: Record<string, string> = {};
     vehicleTypes.forEach((v) => { prices[v] = "0"; });
-    setForm({ name: "", description: "", includes: "", prices });
+    setForm({ name: "", description: "", prices });
   };
 
   const handleSave = async () => {
     if (!form.name.trim()) return;
-    const includes = form.includes.split(",").map((s) => s.trim()).filter(Boolean);
-    
+
     // Validate prices
     for (const v of vehicleTypes) {
       const p = parseFloat(form.prices[v] || "0");
@@ -36,18 +53,22 @@ export default function Services() {
     }
 
     if (editing === "new") {
-      const { data: svc, error } = await supabase.from("services").insert({ name: form.name, description: form.description, includes }).select().single();
+      const { data: svc, error } = await supabase.from("services").insert({ name: form.name, description: form.description } as any).select().single();
       if (!error && svc) {
         for (const v of vehicleTypes) {
-          await supabase.from("service_prices").insert({ service_id: svc.id, vehicle_type: v as any, price: parseFloat(form.prices[v] || "0") });
+          await supabase.from("service_prices").insert({
+            service_id: svc.id,
+            vehicle_type_id: vehicleTypeMap[v],
+            price: parseFloat(form.prices[v] || "0")
+          } as any);
         }
       }
     } else {
-      await supabase.from("services").update({ name: form.name, description: form.description, includes }).eq("id", editing.id);
+      await supabase.from("services").update({ name: form.name, description: form.description } as any).eq("id", editing.id);
       for (const v of vehicleTypes) {
         await supabase.from("service_prices").upsert(
-          { service_id: editing.id, vehicle_type: v as any, price: parseFloat(form.prices[v] || "0") },
-          { onConflict: "service_id,vehicle_type" }
+          { service_id: editing.id, vehicle_type_id: vehicleTypeMap[v], price: parseFloat(form.prices[v] || "0") } as any,
+          { onConflict: "service_id,vehicle_type_id" }
         );
       }
     }
@@ -58,7 +79,7 @@ export default function Services() {
   };
 
   const toggleActive = async (svc: any) => {
-    await supabase.from("services").update({ active: !svc.active }).eq("id", svc.id);
+    await supabase.from("services").update({ is_active: !svc.is_active } as any).eq("id", svc.id);
     refetch();
   };
 
@@ -83,7 +104,6 @@ export default function Services() {
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input-touch" placeholder="Nombre del servicio" />
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="input-touch" placeholder="Descripción" />
           </div>
-          <input value={form.includes} onChange={(e) => setForm({ ...form, includes: e.target.value })} className="input-touch" placeholder="Incluye (separado por comas)" />
           <div className="grid grid-cols-5 gap-2">
             {vehicleTypes.map((v) => (
               <div key={v}>
@@ -102,35 +122,39 @@ export default function Services() {
       {/* Services list */}
       <div className="space-y-4">
         {services?.map((svc: any) => (
-          <div key={svc.id} className={`pos-card p-4 ${!svc.active ? "opacity-50" : ""}`}>
+          <div key={svc.id} className={`pos-card p-4 ${!svc.is_active ? "opacity-50" : ""}`}>
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="font-bold text-foreground">{svc.name}</h3>
                 <p className="text-sm text-secondary">{svc.description}</p>
-                {svc.includes?.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {svc.includes.map((inc: string, i: number) => (
-                      <span key={i} className="text-xs px-2 py-1 rounded-full bg-muted text-muted-foreground">
-                        <i className="fa-solid fa-check mr-1 text-secondary" />{inc}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
               <div className="flex gap-2">
                 <button onClick={() => startEdit(svc)} className="touch-btn p-2 text-secondary hover:text-foreground"><i className="fa-solid fa-pen" /></button>
-                <button onClick={() => toggleActive(svc)} className="touch-btn p-2 text-secondary hover:text-foreground">
-                  <i className={`fa-solid ${svc.active ? "fa-toggle-on text-accent" : "fa-toggle-off"}`} />
-                </button>
+                {isAdmin ? (
+                  <button
+                    onClick={() => toggleActive(svc)}
+                    className="touch-btn p-2 text-secondary hover:text-foreground"
+                    title={svc.is_active ? "Desactivar servicio" : "Activar servicio"}
+                  >
+                    <i className={`fa-solid ${svc.is_active ? "fa-toggle-on text-accent" : "fa-toggle-off"}`} />
+                  </button>
+                ) : (
+                  <div className="p-2 opacity-50" title="Solo administradores pueden activar/desactivar">
+                    <i className={`fa-solid ${svc.is_active ? "fa-toggle-on text-accent" : "fa-toggle-off"}`} />
+                  </div>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-5 gap-2 mt-3">
-              {svc.service_prices?.sort((a: any, b: any) => vehicleTypes.indexOf(a.vehicle_type) - vehicleTypes.indexOf(b.vehicle_type)).map((p: any) => (
-                <div key={p.id} className="text-center p-2 rounded-lg bg-muted/50">
-                  <p className="text-xs text-secondary">{vehicleLabels[p.vehicle_type]}</p>
-                  <p className="font-bold text-foreground">C${Number(p.price).toFixed(0)}</p>
-                </div>
-              ))}
+              {svc.service_prices?.sort((a: any, b: any) => a.vehicle_type_id - b.vehicle_type_id).map((p: any) => {
+                const vehicleTypeName = Object.keys(vehicleTypeMap).find(key => vehicleTypeMap[key] === p.vehicle_type_id);
+                return (
+                  <div key={p.id} className="text-center p-2 rounded-lg bg-muted/50">
+                    <p className="text-xs text-secondary">{vehicleTypeName ? vehicleLabels[vehicleTypeName] : 'N/A'}</p>
+                    <p className="font-bold text-foreground">C${Number(p.price).toFixed(0)}</p>
+                  </div>
+                );
+              })}
             </div>
           </div>
         ))}

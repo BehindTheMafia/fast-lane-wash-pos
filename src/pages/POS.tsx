@@ -7,25 +7,26 @@ import PaymentModal from "@/components/pos/PaymentModal";
 import CustomerModal from "@/components/pos/CustomerModal";
 import TicketPrint from "@/components/pos/TicketPrint";
 
+// Vehicle type mapping: key -> vehicle_type_id in DB
 const vehicleTypes = [
-  { key: "moto", label: "Moto", icon: "fa-motorcycle" },
-  { key: "sedan", label: "Sedán", icon: "fa-car" },
-  { key: "suv", label: "SUV", icon: "fa-car-side" },
-  { key: "pickup", label: "Pick up", icon: "fa-truck-pickup" },
-  { key: "microbus", label: "Microbús", icon: "fa-van-shuttle" },
+  { key: "moto", id: 1, label: "Moto", icon: "fa-motorcycle" },
+  { key: "sedan", id: 2, label: "Sedán", icon: "fa-car" },
+  { key: "suv", id: 3, label: "SUV", icon: "fa-car-side" },
+  { key: "pickup", id: 4, label: "Pick up", icon: "fa-truck-pickup" },
+  { key: "microbus", id: 5, label: "Microbús", icon: "fa-van-shuttle" },
 ] as const;
 
 interface TicketItem {
-  serviceId: string;
+  serviceId: any;
   serviceName: string;
-  vehicleType: string;
+  vehicleTypeId: number;
   vehicleLabel: string;
   price: number;
   discount: number;
 }
 
 interface Customer {
-  id: string;
+  id: any;
   name: string;
   plate: string;
   phone: string;
@@ -33,12 +34,12 @@ interface Customer {
 }
 
 export default function POS() {
-  const { data: services, isLoading: loadingServices } = useServices();
+  const { data: services } = useServices();
   const { data: settings } = useBusinessSettings();
   const { user } = useAuth();
 
-  const [selectedVehicle, setSelectedVehicle] = useState<string>("");
-  const [selectedService, setSelectedService] = useState<string>("");
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number>(0);
+  const [selectedServiceId, setSelectedServiceId] = useState<number>(0);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [ticketItems, setTicketItems] = useState<TicketItem[]>([]);
   const [showPayment, setShowPayment] = useState(false);
@@ -52,25 +53,23 @@ export default function POS() {
 
   // Load general customer on mount
   useEffect(() => {
-    supabase.from("customers").select("*").eq("is_general", true).maybeSingle().then(({ data }) => {
-      if (data) setCustomer(data as Customer);
+    supabase.from("customers").select("id, name, plate, phone, is_general").eq("is_general", true).maybeSingle().then(({ data }) => {
+      if (data) setCustomer(data as any as Customer);
     });
   }, []);
 
-  // Load recent tickets
+  // Load recent tickets on demand
   const loadRecent = useCallback(async () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const { data } = await supabase
       .from("tickets")
-      .select("*, customers(name), services(name)")
+      .select("id, ticket_number, total, status, created_at, vehicle_types(name)")
       .gte("created_at", today.toISOString())
       .order("created_at", { ascending: false })
-      .limit(20);
+      .limit(10);
     if (data) setRecentTickets(data);
   }, []);
-
-  useEffect(() => { loadRecent(); }, [loadRecent]);
 
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
@@ -78,20 +77,20 @@ export default function POS() {
   };
 
   const addToTicket = () => {
-    if (!selectedService || !selectedVehicle) return;
-    const svc = services?.find((s: any) => s.id === selectedService);
+    if (!selectedServiceId || !selectedVehicleId) return;
+    const svc = services?.find((s: any) => s.id === selectedServiceId);
     if (!svc) return;
-    const priceEntry = svc.service_prices?.find((p: any) => p.vehicle_type === selectedVehicle);
+    const priceEntry = (svc as any).service_prices?.find((p: any) => p.vehicle_type_id === selectedVehicleId);
     if (!priceEntry) return;
-    const vt = vehicleTypes.find((v) => v.key === selectedVehicle);
+    const vt = vehicleTypes.find((v) => v.id === selectedVehicleId);
 
     setTicketItems((prev) => [
       ...prev,
       {
         serviceId: svc.id,
-        serviceName: svc.name,
-        vehicleType: selectedVehicle,
-        vehicleLabel: vt?.label || selectedVehicle,
+        serviceName: svc.name || "",
+        vehicleTypeId: selectedVehicleId,
+        vehicleLabel: vt?.label || "",
         price: Number(priceEntry.price),
         discount: 0,
       },
@@ -109,45 +108,85 @@ export default function POS() {
 
   const newTicket = () => {
     setTicketItems([]);
-    setSelectedService("");
-    setSelectedVehicle("");
+    setSelectedServiceId(0);
+    setSelectedVehicleId(0);
     supabase.from("customers").select("*").eq("is_general", true).maybeSingle().then(({ data }) => {
-      if (data) setCustomer(data as Customer);
+      if (data) setCustomer(data as any as Customer);
     });
   };
 
   const handlePaymentComplete = async (paymentData: any) => {
     try {
-      const item = ticketItems[0];
-      if (!item || !user) return;
+      if (ticketItems.length === 0 || !user) return;
 
+      const firstItem = ticketItems[0];
+
+      // Generate ticket number
+      const ticketNumber = `T-${Date.now().toString(36).toUpperCase()}`;
+
+      // Create the ticket
       const { data: ticket, error: ticketErr } = await supabase
         .from("tickets")
         .insert({
-          cashier_id: user.id,
-          customer_id: customer?.id || null,
-          vehicle_type: item.vehicleType as any,
-          service_id: item.serviceId,
-          subtotal,
-          discount: totalDiscount,
+          ticket_number: ticketNumber,
+          user_id: user.id,
+          vehicle_type_id: firstItem.vehicleTypeId,
+          vehicle_plate: customer?.plate || "",
           total,
           status: "paid",
-          plate: customer?.plate || "",
-        })
+        } as any)
         .select()
         .single();
 
       if (ticketErr) throw ticketErr;
 
-      await supabase.from("payments").insert({
-        ticket_id: ticket.id,
-        amount: total,
-        currency: paymentData.currency,
-        payment_method: paymentData.method,
-        amount_received: paymentData.received,
-        change_amount: paymentData.change,
-        exchange_rate: exchangeRate,
-      });
+      // Create ticket_items for each service
+      for (const item of ticketItems) {
+        await (supabase as any).from("ticket_items").insert({
+          ticket_id: (ticket as any).id,
+          service_id: item.serviceId,
+          price: item.price,
+        });
+      }
+
+      // Create payment record(s)
+      if (paymentData.method === "mixed" && paymentData.mixedPayment) {
+        const { cashAmount, cardAmount } = paymentData.mixedPayment;
+
+        if (cashAmount > 0) {
+          await supabase.from("payments").insert({
+            ticket_id: (ticket as any).id,
+            amount: cashAmount,
+            currency: paymentData.currency,
+            payment_method: "cash",
+            amount_received: cashAmount,
+            change_amount: 0,
+            exchange_rate: exchangeRate,
+          } as any);
+        }
+
+        if (cardAmount > 0) {
+          await supabase.from("payments").insert({
+            ticket_id: (ticket as any).id,
+            amount: cardAmount,
+            currency: paymentData.currency,
+            payment_method: "card",
+            amount_received: cardAmount,
+            change_amount: 0,
+            exchange_rate: exchangeRate,
+          } as any);
+        }
+      } else {
+        await supabase.from("payments").insert({
+          ticket_id: (ticket as any).id,
+          amount: total,
+          currency: paymentData.currency,
+          payment_method: paymentData.method,
+          amount_received: paymentData.received,
+          change_amount: paymentData.change,
+          exchange_rate: exchangeRate,
+        } as any);
+      }
 
       setLastTicket({ ...ticket, customer, items: ticketItems, payment: paymentData, settings });
       setShowPayment(false);
@@ -159,67 +198,58 @@ export default function POS() {
     }
   };
 
-  if (loadingServices) {
-    return <div className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
-  }
-
   return (
     <div className="flex h-full">
       {/* Left: Recent */}
       <div className="hidden xl:flex flex-col w-72 border-r border-border bg-card/50 overflow-auto">
-        <div className="p-4 border-b border-border">
-          <h3 className="font-bold text-foreground flex items-center gap-2">
-            <i className="fa-solid fa-clock-rotate-left text-secondary" />
-            Actividad del día
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <h3 className="font-bold text-foreground text-sm">
+            <i className="fa-solid fa-clock-rotate-left mr-2 text-secondary" />Recientes
           </h3>
+          <button onClick={loadRecent} className="touch-btn text-xs text-accent hover:underline">Cargar</button>
         </div>
-        <div className="flex-1 overflow-auto p-3 space-y-2">
+        <div className="flex-1 overflow-auto">
+          {recentTickets.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground text-xs">
+              <i className="fa-solid fa-clock text-2xl mb-2 opacity-30" />
+              <p>Click "Cargar" para ver tickets</p>
+            </div>
+          )}
           {recentTickets.map((t: any) => (
-            <div key={t.id} className="pos-card p-3 text-xs">
-              <div className="flex justify-between items-start">
-                <span className="font-semibold text-foreground">#{t.ticket_number}</span>
-                <span className={`px-2 py-0.5 rounded-full text-xs ${t.status === 'paid' ? 'bg-accent/10 text-accent' : 'bg-destructive/10 text-destructive'}`}>
-                  {t.status === 'paid' ? 'Pagado' : 'Pendiente'}
+            <div key={t.id} className="px-4 py-3 border-b border-border/50 hover:bg-muted/30 transition-colors">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-xs text-foreground">{t.ticket_number}</p>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${t.status === "paid" ? "bg-accent/20 text-accent" : "bg-muted text-muted-foreground"}`}>
+                  {t.status === "paid" ? "Pagado" : t.status}
                 </span>
               </div>
-              <p className="text-muted-foreground mt-1">{(t as any).customers?.name || 'Cliente'}</p>
-              <p className="text-secondary">{(t as any).services?.name}</p>
-              <p className="font-bold text-foreground mt-1">C${Number(t.total).toFixed(2)}</p>
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-xs text-secondary">{(t.vehicle_types as any)?.name || ""}</p>
+                <p className="font-bold text-sm text-primary">C${Number(t.total).toFixed(0)}</p>
+              </div>
             </div>
           ))}
-          {recentTickets.length === 0 && (
-            <p className="text-center text-muted-foreground text-sm py-8">Sin actividad hoy</p>
-          )}
         </div>
       </div>
 
-      {/* Center: Services */}
+      {/* Center: Vehicle + Service selection */}
       <div className="flex-1 flex flex-col overflow-auto">
-        <div className="p-4 border-b border-border flex items-center justify-between gap-4 flex-wrap">
-          <h2 className="font-bold text-lg text-foreground">
-            <i className="fa-solid fa-cash-register mr-2 text-secondary" />Punto de Venta
-          </h2>
-          <button onClick={newTicket} className="touch-btn bg-accent text-accent-foreground px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2">
-            <i className="fa-solid fa-plus" />Nuevo Ticket
-          </button>
-        </div>
-
-        {/* Vehicle type filter */}
+        {/* Vehicle types */}
         <div className="p-4 border-b border-border">
           <p className="text-sm font-semibold text-foreground mb-3">
             <i className="fa-solid fa-car mr-2 text-secondary" />Tipo de vehículo
           </p>
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-5 gap-3">
             {vehicleTypes.map((vt) => (
               <button
-                key={vt.key}
-                onClick={() => setSelectedVehicle(vt.key)}
-                className={`vehicle-card ${selectedVehicle === vt.key ? "vehicle-card-active" : ""}`}
+                key={vt.id}
+                onClick={() => setSelectedVehicleId(vt.id)}
+                className={`vehicle-card h-24 transition-all duration-200 hover:scale-105 active:scale-95 ${selectedVehicleId === vt.id ? "vehicle-card-active ring-2 ring-primary" : ""}`}
               >
-                <i className={`fa-solid ${vt.icon} text-2xl ${selectedVehicle === vt.key ? "text-brick-red" : "text-secondary"} mb-1`} />
-                <p className="text-xs font-semibold text-foreground">{vt.label}</p>
-                {selectedVehicle === vt.key && (
-                  <i className="fa-solid fa-circle-check text-brick-red text-sm mt-1" />
+                <i className={`fa-solid ${vt.icon} text-3xl ${selectedVehicleId === vt.id ? "text-brick-red" : "text-secondary"} mb-2`} />
+                <p className="text-sm font-semibold text-foreground">{vt.label}</p>
+                {selectedVehicleId === vt.id && (
+                  <i className="fa-solid fa-circle-check text-brick-red text-base mt-1" />
                 )}
               </button>
             ))}
@@ -232,52 +262,48 @@ export default function POS() {
             <i className="fa-solid fa-list-check mr-2 text-secondary" />Servicios
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {services?.map((svc: any) => {
-              const priceEntry = selectedVehicle
-                ? svc.service_prices?.find((p: any) => p.vehicle_type === selectedVehicle)
-                : null;
-              const isSelected = selectedService === svc.id;
+            {!services ? (
+              <div className="col-span-full flex items-center justify-center py-12 text-muted-foreground">
+                <i className="fa-solid fa-spinner fa-spin text-2xl mr-3" />
+                <span>Cargando servicios...</span>
+              </div>
+            ) : !selectedVehicleId ? (
+              <div className="col-span-full flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <i className="fa-solid fa-hand-pointer text-4xl mb-3 opacity-30" />
+                <p>Selecciona un tipo de vehículo</p>
+              </div>
+            ) : (
+              services.map((svc: any) => {
+                const priceEntry = svc.service_prices?.find((p: any) => p.vehicle_type_id === selectedVehicleId);
+                if (!priceEntry) return null;
+                const isSelected = selectedServiceId === svc.id;
 
-              return (
-                <button
-                  key={svc.id}
-                  onClick={() => { setSelectedService(svc.id); }}
-                  className={`service-card text-left ${isSelected ? "service-card-active" : ""}`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h4 className="font-bold text-foreground">{svc.name}</h4>
-                      <p className="text-xs text-secondary mt-1">{svc.description}</p>
-                      {svc.includes && svc.includes.length > 0 && (
-                        <div className="mt-2 space-y-0.5">
-                          {svc.includes.map((inc: string, i: number) => (
-                            <p key={i} className="text-xs text-muted-foreground flex items-center gap-1">
-                              <i className="fa-solid fa-check text-secondary text-[10px]" />{inc}
-                            </p>
-                          ))}
-                        </div>
-                      )}
+                return (
+                  <button
+                    key={svc.id}
+                    onClick={() => setSelectedServiceId(svc.id)}
+                    className={`service-card text-left min-h-[120px] transition-all duration-200 hover:scale-[1.02] active:scale-95 hover:shadow-lg ${isSelected ? "service-card-active ring-2 ring-primary" : ""}`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h4 className="font-bold text-foreground">{svc.name}</h4>
+                        <p className="text-xs text-secondary mt-1">{svc.description}</p>
+                      </div>
+                      <div className="text-right ml-4">
+                        <p className="text-xl font-bold text-primary">C${Number(priceEntry.price).toFixed(0)}</p>
+                        <p className="text-xs text-secondary">~${(Number(priceEntry.price) / exchangeRate).toFixed(2)} USD</p>
+                        {isSelected && <i className="fa-solid fa-circle-check text-brick-red text-lg mt-2" />}
+                      </div>
                     </div>
-                    <div className="text-right ml-4">
-                      {priceEntry ? (
-                        <div>
-                          <p className="text-xl font-bold text-primary">C${Number(priceEntry.price).toFixed(0)}</p>
-                          <p className="text-xs text-secondary">~${(Number(priceEntry.price) / exchangeRate).toFixed(2)} USD</p>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">Selecciona vehículo</p>
-                      )}
-                      {isSelected && <i className="fa-solid fa-circle-check text-brick-red text-lg mt-2" />}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })
+            )}
           </div>
 
-          {selectedService && selectedVehicle && (
+          {selectedServiceId > 0 && selectedVehicleId > 0 && (
             <div className="mt-4 flex justify-center">
-              <button onClick={addToTicket} className="touch-btn bg-accent text-accent-foreground px-6 py-3 rounded-xl font-semibold flex items-center gap-2">
+              <button onClick={addToTicket} className="touch-btn bg-accent text-accent-foreground px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all duration-200 hover:scale-105 active:scale-95">
                 <i className="fa-solid fa-plus" />Agregar al ticket
               </button>
             </div>
@@ -303,9 +329,9 @@ export default function POS() {
             </div>
             <button
               onClick={() => setShowCustomer(true)}
-              className="touch-btn p-2 rounded-lg bg-accent/10 text-accent hover:bg-accent/20"
+              className="touch-btn px-4 py-3 rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-all duration-200 hover:scale-105 active:scale-95"
             >
-              <i className="fa-solid fa-user-pen" />
+              <i className="fa-solid fa-user-pen text-lg" />
             </button>
           </div>
         </div>
@@ -319,15 +345,34 @@ export default function POS() {
             </div>
           )}
           {ticketItems.map((item, idx) => (
-            <div key={idx} className="pos-card p-3 flex items-center gap-3 animate-scale-in">
-              <div className="flex-1">
-                <p className="font-semibold text-sm text-foreground">{item.serviceName}</p>
-                <p className="text-xs text-secondary">{item.vehicleLabel}</p>
+            <div key={idx} className="pos-card p-3 space-y-2 animate-scale-in">
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <p className="font-semibold text-sm text-foreground">{item.serviceName}</p>
+                  <p className="text-xs text-secondary">{item.vehicleLabel}</p>
+                </div>
+                <p className="font-bold text-foreground">C${item.price.toFixed(0)}</p>
+                <button onClick={() => removeItem(idx)} className="touch-btn p-1 text-destructive hover:bg-destructive/10 rounded">
+                  <i className="fa-solid fa-trash-can text-sm" />
+                </button>
               </div>
-              <p className="font-bold text-foreground">C${item.price.toFixed(0)}</p>
-              <button onClick={() => removeItem(idx)} className="touch-btn p-1 text-destructive hover:bg-destructive/10 rounded">
-                <i className="fa-solid fa-trash-can text-sm" />
-              </button>
+              {/* Discount input */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground flex-1">Descuento:</label>
+                <input
+                  type="number"
+                  value={item.discount || 0}
+                  onChange={(e) => {
+                    const newDiscount = Math.max(0, Math.min(item.price, parseFloat(e.target.value) || 0));
+                    setTicketItems(prev => prev.map((it, i) => i === idx ? { ...it, discount: newDiscount } : it));
+                  }}
+                  className="w-24 px-2 py-1 bg-background border border-border rounded text-xs text-right"
+                  min={0}
+                  max={item.price}
+                  step={1}
+                />
+                <span className="text-xs text-muted-foreground">C$</span>
+              </div>
             </div>
           ))}
         </div>
@@ -354,9 +399,9 @@ export default function POS() {
           <button
             onClick={() => ticketItems.length > 0 && setShowPayment(true)}
             disabled={ticketItems.length === 0}
-            className="btn-cobrar w-full flex items-center justify-center gap-3 disabled:opacity-50"
+            className="btn-cobrar w-full h-16 flex items-center justify-center gap-3 disabled:opacity-50 text-xl font-bold transition-all duration-200 hover:scale-[1.02] active:scale-95 disabled:hover:scale-100"
           >
-            <i className="fa-solid fa-money-bill-wave" />COBRAR
+            <i className="fa-solid fa-money-bill-wave text-2xl" />COBRAR
           </button>
         </div>
       </div>
@@ -372,8 +417,8 @@ export default function POS() {
       )}
       {showCustomer && (
         <CustomerModal
-          current={customer}
-          onSelect={(c) => { setCustomer(c); setShowCustomer(false); }}
+          current={customer as any}
+          onSelect={(c: any) => { setCustomer(c as Customer); setShowCustomer(false); }}
           onClose={() => setShowCustomer(false)}
         />
       )}

@@ -31,63 +31,95 @@ const Login = () => {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="min-h-screen bg-gradient-to-br from-brick-red/10 via-background to-secondary/10 flex items-center justify-center p-4">
       <div className="w-full max-w-md animate-fade-in">
-        <div className="pos-card p-8">
+        <div className="bg-card border border-border rounded-2xl shadow-2xl p-8">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-accent mb-4">
-              <i className="fa-solid fa-car-side text-3xl text-accent-foreground" />
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-br from-brick-red to-secondary mb-4 shadow-lg">
+              <i className="fa-solid fa-car-wash text-3xl text-white" />
             </div>
-            <h1 className="text-2xl font-bold text-foreground">EL RAPIDO AUTOLAVADO</h1>
-            <p className="text-secondary mt-1">Sistema POS</p>
+            <h1 className="text-3xl font-bold text-foreground mb-1">EL RAPIDO</h1>
+            <h2 className="text-xl font-semibold text-brick-red mb-2">AUTOLAVADO</h2>
+            <p className="text-sm text-muted-foreground">Sistema de Punto de Venta</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-semibold text-foreground mb-1">
-                <i className="fa-solid fa-envelope mr-2 text-secondary" />Correo
+              <label className="block text-sm font-semibold text-foreground mb-2">
+                <i className="fa-solid fa-envelope mr-2 text-secondary" />
+                Correo Electrónico
               </label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="input-touch"
+                className="w-full px-4 py-3 bg-background border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brick-red/50 transition-all"
                 placeholder="correo@ejemplo.com"
                 required
               />
             </div>
+
             <div>
-              <label className="block text-sm font-semibold text-foreground mb-1">
-                <i className="fa-solid fa-lock mr-2 text-secondary" />Contraseña
+              <label className="block text-sm font-semibold text-foreground mb-2">
+                <i className="fa-solid fa-lock mr-2 text-secondary" />
+                Contraseña
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="input-touch"
+                className="w-full px-4 py-3 bg-background border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brick-red/50 transition-all"
                 placeholder="••••••••"
                 required
               />
             </div>
 
             {error && (
-              <div className="bg-destructive/10 text-destructive p-3 rounded-lg text-sm flex items-center gap-2">
-                <i className="fa-solid fa-circle-exclamation" />{error}
+              <div className="bg-destructive/10 border border-destructive/30 text-destructive p-3 rounded-xl text-sm flex items-center gap-2 animate-shake">
+                <i className="fa-solid fa-circle-exclamation" />
+                <span>{error}</span>
               </div>
             )}
 
             <button
               type="submit"
               disabled={submitting}
-              className="btn-cobrar w-full flex items-center justify-center gap-2"
+              className="w-full bg-brick-red hover:bg-brick-red/90 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
             >
               {submitting ? (
-                <i className="fa-solid fa-spinner fa-spin" />
+                <>
+                  <i className="fa-solid fa-spinner fa-spin" />
+                  Ingresando...
+                </>
               ) : (
-                <><i className="fa-solid fa-right-to-bracket" /> Ingresar</>
+                <>
+                  <i className="fa-solid fa-right-to-bracket" />
+                  Ingresar al Sistema
+                </>
               )}
             </button>
           </form>
+
+          <div className="mt-6 pt-6 border-t border-border">
+            <div className="text-center space-y-2">
+              <a
+                href="/create-admin"
+                className="text-sm text-secondary hover:text-brick-red transition-colors inline-flex items-center gap-2"
+              >
+                <i className="fa-solid fa-user-shield" />
+                Crear Usuario Administrador
+              </a>
+              <div className="text-xs text-muted-foreground">
+                <a href="/db-validation" className="hover:text-secondary transition-colors">
+                  Validar Base de Datos
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 text-center text-xs text-muted-foreground">
+          <p>© 2026 EL RAPIDO AUTOLAVADO - Sistema POS v1.0</p>
         </div>
       </div>
     </div>

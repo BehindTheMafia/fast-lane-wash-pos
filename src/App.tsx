@@ -15,6 +15,8 @@ import Memberships from "@/pages/Memberships";
 import Services from "@/pages/Services";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
+import DBValidation from "@/pages/DBValidation";
+import CreateAdmin from "@/pages/CreateAdmin";
 
 const queryClient = new QueryClient();
 
@@ -57,6 +59,8 @@ const App = () => (
             <Route path="/memberships" element={<ProtectedRoute><AdminRoute><Memberships /></AdminRoute></ProtectedRoute>} />
             <Route path="/services" element={<ProtectedRoute><AdminRoute><Services /></AdminRoute></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><AdminRoute><Settings /></AdminRoute></ProtectedRoute>} />
+            <Route path="/db-validation" element={<DBValidation />} />
+            <Route path="/create-admin" element={<CreateAdmin />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>

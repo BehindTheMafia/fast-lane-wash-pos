@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
-type AppRole = "admin" | "cajero";
+type AppRole = "admin" | "cajero" | "operator" | "manager";
 
 interface Profile {
   id: string;
@@ -36,9 +36,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data } = await supabase
       .from("profiles")
       .select("*")
-      .eq("user_id", userId)
+      .eq("id", userId) // Changed from user_id to id
       .maybeSingle();
-    if (data) setProfile(data as Profile);
+
+    if (data) {
+      // Map operator/manager roles to cajero for compatibility
+      const role = data.role as string;
+      const mappedRole = (role === "operator" || role === "manager") ? "cajero" : (role as AppRole);
+      setProfile({ ...data, role: mappedRole } as Profile);
+    }
   };
 
   useEffect(() => {
@@ -47,7 +53,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
-          setTimeout(() => fetchProfile(session.user.id), 100);
+          // Add small delay to allow trigger to create profile if needed
+          setTimeout(() => fetchProfile(session.user.id), 500);
         } else {
           setProfile(null);
         }
@@ -71,12 +78,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, fullName: string, role: AppRole) => {
+    // Map cajero to operator for database compatibility
+    const dbRole = role === "cajero" ? "operator" : role;
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo: window.location.origin,
-        data: { full_name: fullName, role },
+        data: { full_name: fullName, role: dbRole },
       },
     });
     return { error };
