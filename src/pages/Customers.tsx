@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import CustomerFormModal from "@/components/customers/CustomerFormModal";
 
 interface Customer {
   id: string;
@@ -15,8 +16,9 @@ export default function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<Customer | null>(null);
-  const [form, setForm] = useState({ name: "", phone: "", plate: "", email: "" });
+  const [showModal, setShowModal] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const load = async () => {
@@ -30,23 +32,39 @@ export default function Customers() {
 
   useEffect(() => { load(); }, [search]);
 
-  const handleSave = async () => {
-    if (!form.name.trim()) return;
-    if (editing) {
-      await supabase.from("customers").update(form).eq("id", editing.id);
-    } else {
-      await supabase.from("customers").insert(form);
-    }
-    setEditing(null);
-    setForm({ name: "", phone: "", plate: "", email: "" });
-    setToast(editing ? "Cliente actualizado" : "Cliente creado");
+  const handleNew = () => {
+    setEditingCustomer(null);
+    setShowModal(true);
+  };
+
+  const handleEdit = (customer: Customer) => {
+    setEditingCustomer(customer);
+    setShowModal(true);
+  };
+
+  const handleSave = () => {
+    setToast(editingCustomer ? "Cliente actualizado" : "Cliente creado");
     setTimeout(() => setToast(null), 3000);
     load();
   };
 
-  const startEdit = (c: Customer) => {
-    setEditing(c);
-    setForm({ name: c.name, phone: c.phone, plate: c.plate, email: c.email });
+  const handleDeleteConfirm = async () => {
+    if (!deletingCustomer) return;
+
+    const { error } = await supabase
+      .from("customers")
+      .delete()
+      .eq("id", deletingCustomer.id);
+
+    if (error) {
+      setToast("Error al eliminar cliente");
+    } else {
+      setToast("Cliente eliminado");
+      load();
+    }
+
+    setTimeout(() => setToast(null), 3000);
+    setDeletingCustomer(null);
   };
 
   return (
@@ -56,28 +74,28 @@ export default function Customers() {
       </h2>
 
       <div className="flex flex-wrap gap-4">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} className="input-touch max-w-sm" placeholder="Buscar por nombre, placa, teléfono..." />
-        <button onClick={() => { setEditing(null); setForm({ name: "", phone: "", plate: "", email: "" }); }} className="touch-btn bg-accent text-accent-foreground px-4 py-2 rounded-xl font-semibold flex items-center gap-2">
+        <div className="flex gap-2 max-w-sm flex-1">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && load()}
+            className="input-touch flex-1"
+            placeholder="Buscar por nombre o teléfono..."
+          />
+          <button
+            onClick={load}
+            className="touch-btn bg-secondary/10 text-secondary px-4 py-2 rounded-xl font-semibold flex items-center gap-2 hover:bg-secondary/20"
+          >
+            <i className="fa-solid fa-magnifying-glass" />Buscar
+          </button>
+        </div>
+        <button
+          onClick={handleNew}
+          className="touch-btn bg-accent text-accent-foreground px-4 py-2 rounded-xl font-semibold flex items-center gap-2"
+        >
           <i className="fa-solid fa-user-plus" />Nuevo
         </button>
       </div>
-
-      {/* Form */}
-      {(editing !== null || form.name !== "") && (
-        <div className="pos-card p-4 space-y-3">
-          <h3 className="font-bold text-foreground">{editing ? "Editar cliente" : "Nuevo cliente"}</h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input-touch" placeholder="Nombre" />
-            <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="input-touch" placeholder="Teléfono" />
-            <input value={form.plate} onChange={(e) => setForm({ ...form, plate: e.target.value })} className="input-touch" placeholder="Placa" />
-            <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="input-touch" placeholder="Correo" />
-          </div>
-          <div className="flex gap-2">
-            <button onClick={handleSave} className="btn-cobrar px-6 py-2 text-sm"><i className="fa-solid fa-floppy-disk mr-2" />Guardar</button>
-            <button onClick={() => { setEditing(null); setForm({ name: "", phone: "", plate: "", email: "" }); }} className="touch-btn px-4 py-2 border border-border rounded-xl text-foreground text-sm">Cancelar</button>
-          </div>
-        </div>
-      )}
 
       {/* List */}
       {loading ? (
@@ -91,21 +109,36 @@ export default function Customers() {
                 <th className="text-left p-3 text-secondary font-semibold">Placa</th>
                 <th className="text-left p-3 text-secondary font-semibold">Teléfono</th>
                 <th className="text-left p-3 text-secondary font-semibold">Correo</th>
-                <th className="p-3"></th>
+                <th className="p-3 text-secondary font-semibold">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {customers.map((c) => (
                 <tr key={c.id} className="border-b border-border last:border-0 hover:bg-muted/30">
-                  <td className="p-3 text-foreground font-medium">{c.name} {c.is_general && <span className="text-xs text-secondary">(General)</span>}</td>
+                  <td className="p-3 text-foreground font-medium">
+                    {c.name} {c.is_general && <span className="text-xs text-secondary">(General)</span>}
+                  </td>
                   <td className="p-3 text-muted-foreground">{c.plate}</td>
                   <td className="p-3 text-muted-foreground">{c.phone}</td>
                   <td className="p-3 text-muted-foreground">{c.email}</td>
                   <td className="p-3">
                     {!c.is_general && (
-                      <button onClick={() => startEdit(c)} className="touch-btn p-2 text-secondary hover:text-foreground">
-                        <i className="fa-solid fa-pen" />
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleEdit(c)}
+                          className="touch-btn p-2 text-secondary hover:text-foreground"
+                          title="Editar"
+                        >
+                          <i className="fa-solid fa-pen" />
+                        </button>
+                        <button
+                          onClick={() => setDeletingCustomer(c)}
+                          className="touch-btn p-2 text-destructive hover:text-red-600"
+                          title="Eliminar"
+                        >
+                          <i className="fa-solid fa-trash-can" />
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -115,6 +148,53 @@ export default function Customers() {
           {customers.length === 0 && <p className="text-center py-8 text-muted-foreground">Sin clientes</p>}
         </div>
       )}
+
+      {/* Customer Form Modal */}
+      {showModal && (
+        <CustomerFormModal
+          customer={editingCustomer}
+          onClose={() => setShowModal(false)}
+          onSave={handleSave}
+        />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deletingCustomer && (
+        <div className="modal-overlay" onClick={() => setDeletingCustomer(null)}>
+          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-foreground">
+                <i className="fa-solid fa-triangle-exclamation mr-2 text-destructive" />
+                Confirmar eliminación
+              </h2>
+              <button onClick={() => setDeletingCustomer(null)} className="touch-btn p-2 text-muted-foreground">
+                <i className="fa-solid fa-xmark text-xl" />
+              </button>
+            </div>
+            <p className="text-foreground mb-6">
+              ¿Estás seguro de que deseas eliminar al cliente <strong>{deletingCustomer.name}</strong>?
+              Esta acción no se puede deshacer.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDeletingCustomer(null)}
+                className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                className="flex-1 py-3 rounded-xl bg-destructive text-white font-semibold hover:bg-red-600 transition-colors"
+              >
+                <i className="fa-solid fa-trash-can mr-2" />
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
       {toast && <div className="toast-success"><i className="fa-solid fa-circle-check mr-2" />{toast}</div>}
     </div>
   );

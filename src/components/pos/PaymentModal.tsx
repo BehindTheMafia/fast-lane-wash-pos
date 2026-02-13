@@ -101,8 +101,8 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
           </div>
         </div>
 
-        {/* Mixed Payment Toggle */}
-        <div className="mb-4 flex items-center justify-between p-3 bg-accent/5 rounded-xl border border-accent/20">
+        {/* Mixed Payment Toggle - DISABLED */}
+        {/* <div className="mb-4 flex items-center justify-between p-3 bg-accent/5 rounded-xl border border-accent/20">
           <div className="flex items-center gap-2">
             <i className="fa-solid fa-shuffle text-accent" />
             <span className="text-sm font-semibold text-foreground">Pago Mixto (Efectivo + Tarjeta)</span>
@@ -113,7 +113,7 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
           >
             <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${mixedMode ? 'translate-x-6' : 'translate-x-0.5'}`} />
           </button>
-        </div>
+        </div> */}
 
         {mixedMode ? (
           /* Mixed Payment Mode */
@@ -171,27 +171,20 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
         ) : (
           /* Single Payment Mode */
           <>
-            {/* Method */}
+            {/* Method - Only Cash */}
             <div className="mb-4">
               <p className="text-sm font-semibold text-foreground mb-2">
                 <i className="fa-solid fa-credit-card mr-2 text-secondary" />Método de pago
               </p>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { key: "cash", label: "Efectivo", icon: "fa-money-bills" },
-                  { key: "card", label: "Tarjeta", icon: "fa-credit-card" },
-                  { key: "transfer", label: "Transferencia", icon: "fa-mobile-screen" },
-                ].map((m) => (
-                  <button
-                    key={m.key}
-                    onClick={() => setMethod(m.key)}
-                    className={`vehicle-card ${method === m.key ? "vehicle-card-active" : ""}`}
-                  >
-                    <i className={`fa-solid ${m.icon} text-lg ${method === m.key ? "text-brick-red" : "text-secondary"}`} />
-                    <p className="text-xs font-semibold mt-1">{m.label}</p>
-                    {method === m.key && <i className="fa-solid fa-circle-check text-brick-red text-sm mt-1" />}
-                  </button>
-                ))}
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  onClick={() => setMethod("cash")}
+                  className="vehicle-card vehicle-card-active"
+                >
+                  <i className="fa-solid fa-money-bills text-lg text-brick-red" />
+                  <p className="text-xs font-semibold mt-1">Efectivo</p>
+                  <i className="fa-solid fa-circle-check text-brick-red text-sm mt-1" />
+                </button>
               </div>
             </div>
 

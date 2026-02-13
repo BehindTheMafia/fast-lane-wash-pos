@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { validatePlate, validateEmail, sanitizePlate } from "@/utils/validation";
 
 interface Customer {
   id: string;
   name: string;
   plate: string;
   phone: string;
+  email?: string;
   is_general: boolean;
 }
 
@@ -22,6 +24,9 @@ export default function CustomerModal({ current, onSelect, onClose }: Props) {
   const [newName, setNewName] = useState("");
   const [newPlate, setNewPlate] = useState("");
   const [newPhone, setNewPhone] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [errors, setErrors] = useState<{ plate?: string; email?: string }>({});
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     const q = search.trim();
@@ -42,14 +47,47 @@ export default function CustomerModal({ current, onSelect, onClose }: Props) {
   }, [search]);
 
   const handleCreate = async () => {
-    if (!newName.trim()) return;
+    if (!newName.trim()) {
+      setToast("El nombre es requerido");
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+
+    // Validate plate
+    const plateValidation = validatePlate(newPlate);
+    if (!plateValidation.isValid) {
+      setErrors({ ...errors, plate: plateValidation.error });
+      setToast(plateValidation.error || "Error en la placa");
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+
+    // Validate email
+    const emailValidation = validateEmail(newEmail);
+    if (!emailValidation.isValid) {
+      setErrors({ ...errors, email: emailValidation.error });
+      setToast(emailValidation.error || "Error en el correo");
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+
+    setErrors({});
+
     const { data, error } = await supabase
       .from("customers")
-      .insert({ name: newName.trim(), plate: newPlate.trim(), phone: newPhone.trim() })
+      .insert({
+        name: newName.trim(),
+        plate: newPlate.trim(),
+        phone: newPhone.trim(),
+        email: newEmail.trim()
+      })
       .select()
       .single();
     if (!error && data) {
       onSelect(data as Customer);
+    } else if (error) {
+      setToast("Error al crear cliente");
+      setTimeout(() => setToast(null), 3000);
     }
   };
 
@@ -65,13 +103,26 @@ export default function CustomerModal({ current, onSelect, onClose }: Props) {
 
         {!creating ? (
           <>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="input-touch mb-4"
-              placeholder="Buscar por nombre, placa o teléfono..."
-            />
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    // Search is already reactive via useEffect
+                  }
+                }}
+                className="input-touch flex-1"
+                placeholder="Buscar por nombre, placa o teléfono..."
+              />
+              <button
+                onClick={() => setSearch(search)}
+                className="touch-btn bg-secondary/10 text-secondary px-4 py-2 rounded-xl font-semibold flex items-center gap-2 hover:bg-secondary/20"
+              >
+                <i className="fa-solid fa-magnifying-glass" />
+              </button>
+            </div>
             <div className="space-y-2 max-h-60 overflow-auto mb-4">
               {results.map((c) => (
                 <button
@@ -94,11 +145,70 @@ export default function CustomerModal({ current, onSelect, onClose }: Props) {
           </>
         ) : (
           <div className="space-y-3">
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} className="input-touch" placeholder="Nombre completo" />
-            <input value={newPlate} onChange={(e) => setNewPlate(e.target.value)} className="input-touch" placeholder="Placa del vehículo" />
-            <input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} className="input-touch" placeholder="Teléfono" />
+            <div>
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="input-touch"
+                placeholder="Nombre completo *"
+              />
+            </div>
+            <div>
+              <input
+                value={newPlate}
+                onChange={(e) => {
+                  const sanitized = sanitizePlate(e.target.value);
+                  setNewPlate(sanitized);
+                  if (sanitized) {
+                    const validation = validatePlate(sanitized);
+                    setErrors({ ...errors, plate: validation.error });
+                  } else {
+                    setErrors({ ...errors, plate: undefined });
+                  }
+                }}
+                className={`input-touch ${errors.plate ? 'border-red-500' : ''}`}
+                placeholder="Placa (solo letras y números)"
+              />
+              {errors.plate && <p className="text-xs text-red-500 mt-1">{errors.plate}</p>}
+            </div>
+            <div>
+              <input
+                value={newPhone}
+                onChange={(e) => setNewPhone(e.target.value)}
+                className="input-touch"
+                placeholder="Teléfono"
+              />
+            </div>
+            <div>
+              <input
+                value={newEmail}
+                onChange={(e) => {
+                  setNewEmail(e.target.value);
+                  if (e.target.value.trim()) {
+                    const validation = validateEmail(e.target.value);
+                    setErrors({ ...errors, email: validation.error });
+                  } else {
+                    setErrors({ ...errors, email: undefined });
+                  }
+                }}
+                className={`input-touch ${errors.email ? 'border-red-500' : ''}`}
+                placeholder="Correo electrónico"
+                type="email"
+              />
+              {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
+            </div>
             <div className="flex gap-2">
-              <button onClick={() => setCreating(false)} className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold">
+              <button
+                onClick={() => {
+                  setCreating(false);
+                  setErrors({});
+                  setNewName("");
+                  setNewPlate("");
+                  setNewPhone("");
+                  setNewEmail("");
+                }}
+                className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+              >
                 Cancelar
               </button>
               <button onClick={handleCreate} className="btn-cobrar flex-1 flex items-center justify-center gap-2">
@@ -108,6 +218,7 @@ export default function CustomerModal({ current, onSelect, onClose }: Props) {
           </div>
         )}
       </div>
+      {toast && <div className="toast-error fixed bottom-4 right-4 z-50"><i className="fa-solid fa-circle-exclamation mr-2" />{toast}</div>}
     </div>
   );
 }

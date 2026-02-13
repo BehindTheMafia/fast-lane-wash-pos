@@ -22,7 +22,7 @@ interface TicketItem {
   vehicleTypeId: number;
   vehicleLabel: string;
   price: number;
-  discount: number;
+  discountPercent: number; // Discount as percentage (0-100)
 }
 
 interface Customer {
@@ -92,7 +92,7 @@ export default function POS() {
         vehicleTypeId: selectedVehicleId,
         vehicleLabel: vt?.label || "",
         price: Number(priceEntry.price),
-        discount: 0,
+        discountPercent: 0,
       },
     ]);
     showToast("Servicio agregado");
@@ -103,7 +103,7 @@ export default function POS() {
   };
 
   const subtotal = ticketItems.reduce((s, i) => s + i.price, 0);
-  const totalDiscount = ticketItems.reduce((s, i) => s + i.discount, 0);
+  const totalDiscount = ticketItems.reduce((s, i) => s + (i.price * i.discountPercent / 100), 0);
   const total = subtotal - totalDiscount;
 
   const newTicket = () => {
@@ -361,17 +361,17 @@ export default function POS() {
                 <label className="text-xs text-muted-foreground flex-1">Descuento:</label>
                 <input
                   type="number"
-                  value={item.discount || 0}
+                  value={item.discountPercent || 0}
                   onChange={(e) => {
-                    const newDiscount = Math.max(0, Math.min(item.price, parseFloat(e.target.value) || 0));
-                    setTicketItems(prev => prev.map((it, i) => i === idx ? { ...it, discount: newDiscount } : it));
+                    const newDiscountPercent = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                    setTicketItems(prev => prev.map((it, i) => i === idx ? { ...it, discountPercent: newDiscountPercent } : it));
                   }}
                   className="w-24 px-2 py-1 bg-background border border-border rounded text-xs text-right"
                   min={0}
-                  max={item.price}
+                  max={100}
                   step={1}
                 />
-                <span className="text-xs text-muted-foreground">C$</span>
+                <span className="text-xs text-muted-foreground">%</span>
               </div>
             </div>
           ))}
