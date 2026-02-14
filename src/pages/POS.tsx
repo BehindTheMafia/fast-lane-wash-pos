@@ -6,6 +6,8 @@ import { supabase } from "@/integrations/supabase/client";
 import PaymentModal from "@/components/pos/PaymentModal";
 import CustomerModal from "@/components/pos/CustomerModal";
 import TicketPrint from "@/components/pos/TicketPrint";
+import MembershipSelector from "@/components/pos/MembershipSelector";
+import { useMemberships } from "@/hooks/useMemberships";
 
 // Vehicle type mapping: key -> vehicle_type_id in DB
 const vehicleTypes = [
@@ -48,6 +50,10 @@ export default function POS() {
   const [lastTicket, setLastTicket] = useState<any>(null);
   const [recentTickets, setRecentTickets] = useState<any[]>([]);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const [selectedMembershipId, setSelectedMembershipId] = useState<number | null>(null);
+  const [selectedMembership, setSelectedMembership] = useState<any>(null);
+
+  const { recordWash } = useMemberships(customer?.id?.toString());
 
   const exchangeRate = settings?.exchange_rate || 36.5;
 
@@ -110,6 +116,8 @@ export default function POS() {
     setTicketItems([]);
     setSelectedServiceId(0);
     setSelectedVehicleId(0);
+    setSelectedMembershipId(null);
+    setSelectedMembership(null);
     supabase.from("customers").select("*").eq("is_general", true).maybeSingle().then(({ data }) => {
       if (data) setCustomer(data as any as Customer);
     });
@@ -188,11 +196,26 @@ export default function POS() {
         } as any);
       }
 
+      // Record membership wash if applicable
+      if (selectedMembershipId && ticketItems.length > 0) {
+        try {
+          await recordWash({
+            membershipId: selectedMembershipId,
+            ticketId: (ticket as any).id,
+            serviceId: ticketItems[0].serviceId,
+            isBonus: false,
+          });
+        } catch (err) {
+          console.error('Error recording membership wash:', err);
+        }
+      }
+
       setLastTicket({ ...ticket, customer, items: ticketItems, payment: paymentData, settings });
       setShowPayment(false);
       setShowPrint(true);
       showToast("Venta registrada correctamente");
       loadRecent();
+      newTicket();
     } catch (err: any) {
       showToast(err.message || "Error al registrar venta", "error");
     }
@@ -335,6 +358,42 @@ export default function POS() {
             </button>
           </div>
         </div>
+
+        {/* Membership Selector */}
+        {customer && !customer.is_general && (
+          <div className="px-4 py-3 border-b border-border">
+            <MembershipSelector
+              customerId={customer.id?.toString()}
+              selectedServiceId={selectedServiceId}
+              selectedVehicleTypeId={selectedVehicleId}
+              selectedMembership={selectedMembership}
+              onMembershipSelect={(membership) => {
+                setSelectedMembership(membership);
+                setSelectedMembershipId(membership?.id || null);
+                // When membership is selected, set price to C$0 (already paid upfront)
+                // Customer paid for 8 washes when buying membership
+                if (membership) {
+                  setTicketItems(prev => prev.map(item => ({
+                    ...item,
+                    price: 0, // Free - already paid in membership package
+                    discountPercent: 0
+                  })));
+                } else {
+                  // Restore original prices when membership is deselected
+                  setTicketItems(prev => prev.map(item => {
+                    const svc = services?.find((s: any) => s.id === item.serviceId);
+                    const priceEntry = svc?.service_prices?.find((p: any) => p.vehicle_type_id === item.vehicleTypeId);
+                    return {
+                      ...item,
+                      price: priceEntry ? Number(priceEntry.price) : item.price,
+                      discountPercent: 0
+                    };
+                  }));
+                }
+              }}
+            />
+          </div>
+        )}
 
         {/* Items */}
         <div className="flex-1 overflow-auto p-4 space-y-2">
