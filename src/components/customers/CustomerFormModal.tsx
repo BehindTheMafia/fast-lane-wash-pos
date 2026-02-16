@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { validatePlate, validateEmail, sanitizePlate } from "@/utils/validation";
 
 interface Customer {
-    id: string;
+    id: number;
     name: string;
     phone: string;
     plate: string;

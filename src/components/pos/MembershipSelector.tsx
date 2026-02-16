@@ -32,7 +32,8 @@ export default function MembershipSelector({
     const selectedService = services?.find((s: any) => s.id === selectedServiceId);
 
     // Check if selected service is eligible (by ID or Name)
-    const isEligible = selectedServiceId ? isServiceEligible(selectedServiceId, selectedService?.name) : false;
+    // NOTE: For memberships, we don't need a manually selected service since the membership includes its own service
+    const isEligible = selectedServiceId ? isServiceEligible(selectedServiceId, selectedService?.name) : true;
 
     // Check if selected vehicle type matches membership vehicle type
     const vehicleTypeMatches = selectedMembership && selectedVehicleTypeId
@@ -77,7 +78,8 @@ export default function MembershipSelector({
                         const isSelected = selectedMembership?.id === membership.id;
                         const washesRemaining = membership.total_washes_allowed - membership.washes_used;
                         const vehicleMatches = !selectedVehicleTypeId || membership.vehicle_type_id === selectedVehicleTypeId;
-                        const canUse = isEligible && vehicleMatches;
+                        // Memberships can always be used - they include their own service
+                        const canUse = vehicleMatches;
 
                         return (
                             <button
@@ -103,11 +105,6 @@ export default function MembershipSelector({
                                                 Membresía solo para {membership.vehicle_types?.name}
                                             </p>
                                         )}
-                                        {!isEligible && vehicleMatches && (
-                                            <p className="text-xs text-muted-foreground mt-1">
-                                                Servicio no elegible
-                                            </p>
-                                        )}
                                     </div>
                                     {isSelected && (
                                         <i className="fa-solid fa-circle-check text-primary text-lg" />
@@ -127,13 +124,6 @@ export default function MembershipSelector({
                                         {days_remaining}d
                                     </span>
                                 </div>
-
-                                {!isEligible && (
-                                    <p className="text-xs text-destructive mt-2">
-                                        <i className="fa-solid fa-exclamation-triangle mr-1" />
-                                        Servicio no aplica para esta membresía
-                                    </p>
-                                )}
                             </button>
                         );
                     })}

@@ -12,6 +12,7 @@ export interface Membership {
     expires_at: string | null;
     created_at: string;
     active: boolean;
+    service_id: number;
     customers?: {
         name: string;
         phone: string | null;
@@ -25,6 +26,11 @@ export interface Membership {
     };
     vehicle_types?: {
         name: string;
+    };
+    services?: {
+        id: number;
+        name: string;
+        description: string | null;
     };
 }
 
@@ -56,6 +62,41 @@ export function useMemberships(customerId?: string) {
             const { data, error } = await query.order('created_at', { ascending: false });
 
             if (error) throw error;
+
+            console.log('[useMemberships] Raw data from DB:', data);
+
+            // Fetch services separately and join manually
+            if (data && data.length > 0) {
+                const serviceIds = [...new Set((data as any[]).map((m: any) => m.service_id).filter(Boolean))];
+
+                console.log('[useMemberships] Service IDs found:', serviceIds);
+
+                if (serviceIds.length > 0) {
+                    const { data: servicesData, error: servicesError } = await supabase
+                        .from('services')
+                        .select('id, name, description')
+                        .in('id', serviceIds);
+
+                    if (servicesError) {
+                        console.error('[useMemberships] Error fetching services:', servicesError);
+                    } else {
+                        console.log('[useMemberships] Services data:', servicesData);
+                    }
+
+                    // Manually join services to memberships
+                    const membershipsWithServices = (data as any[]).map((membership: any) => ({
+                        ...membership,
+                        services: servicesData?.find((s: any) => s.id === membership.service_id) || null
+                    }));
+
+                    console.log('[useMemberships] Loaded memberships with services:', membershipsWithServices);
+                    return membershipsWithServices as any as Membership[];
+                } else {
+                    console.warn('[useMemberships] No service_id found in memberships! Returning memberships without services.');
+                }
+            }
+
+            console.log('[useMemberships] Loaded memberships (no services):', data);
             return data as any as Membership[];
         },
         enabled: true,
@@ -212,7 +253,7 @@ export function useMemberships(customerId?: string) {
             customerId: number;
             planId: number;
             vehicleTypeId: number;
-            serviceId: string; // UUID
+            serviceId: number;  // Now required, not optional
         }) => {
             const { error } = await supabase
                 .from('customer_memberships')
@@ -220,7 +261,7 @@ export function useMemberships(customerId?: string) {
                     customer_id: customerId,
                     plan_id: planId,
                     vehicle_type_id: vehicleTypeId,
-                    service_id: serviceId,
+                    service_id: serviceId,  // Include service_id in insert
                 });
 
             if (error) throw error;

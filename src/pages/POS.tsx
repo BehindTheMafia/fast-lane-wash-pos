@@ -289,9 +289,9 @@ export default function POS() {
           </p>
           <div className="grid grid-cols-5 gap-3">
             {vehicleTypes.map((vt) => {
-              // Disable vehicle type if customer has membership and it's not in the list of membership vehicle types
-              const isDisabled = hasActiveMembership && !customer?.is_general && activeMembershipVehicleTypeIds.length > 0 && !activeMembershipVehicleTypeIds.includes(vt.id);
-              const isRestricted = hasActiveMembership && !customer?.is_general;
+              // Only restrict vehicle types if a membership is SELECTED
+              const isMembershipRestricted = selectedMembership && selectedMembership.vehicle_type_id !== vt.id;
+              const isDisabled = isMembershipRestricted;
 
               return (
                 <button
@@ -305,7 +305,7 @@ export default function POS() {
                   {selectedVehicleId === vt.id && (
                     <i className="fa-solid fa-circle-check text-brick-red text-base mt-1" />
                   )}
-                  {isDisabled && isRestricted && (
+                  {isDisabled && isMembershipRestricted && (
                     <p className="text-xs text-destructive mt-1">
                       <i className="fa-solid fa-lock" />
                     </p>
@@ -321,61 +321,79 @@ export default function POS() {
           <p className="text-sm font-semibold text-foreground mb-3">
             <i className="fa-solid fa-list-check mr-2 text-secondary" />Servicios
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {!services ? (
-              <div className="col-span-full flex items-center justify-center py-12 text-muted-foreground">
-                <i className="fa-solid fa-spinner fa-spin text-2xl mr-3" />
-                <span>Cargando servicios...</span>
-              </div>
-            ) : !selectedVehicleId ? (
-              <div className="col-span-full flex flex-col items-center justify-center py-12 text-muted-foreground">
-                <i className="fa-solid fa-hand-pointer text-4xl mb-3 opacity-30" />
-                <p>Selecciona un tipo de vehículo</p>
-              </div>
-            ) : (
-              services.map((svc: any) => {
-                const priceEntry = svc.service_prices?.find((p: any) => p.vehicle_type_id === selectedVehicleId);
-                if (!priceEntry) return null;
-                const isSelected = selectedServiceId === svc.id;
 
-                // Debug: log service IDs to verify
-                const eligible = isServiceEligible(svc.id, svc.name);
-                console.log('Service:', svc.name, 'ID:', svc.id, 'Is eligible:', eligible);
+          {/* Show message when membership is selected */}
+          {selectedMembership ? (
+            <div className="pos-card p-6 text-center">
+              <i className="fa-solid fa-id-card text-4xl text-primary mb-3" />
+              <p className="text-lg font-semibold text-foreground mb-2">Membresía Activa</p>
+              <p className="text-sm text-secondary">
+                El servicio de tu membresía ya está agregado al ticket
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">
+                {selectedMembership.services?.name} - {selectedMembership.vehicle_types?.name}
+              </p>
+              <p className="text-lg font-bold text-accent mt-3">
+                Total: C$0.00
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {!services ? (
+                <div className="col-span-full flex items-center justify-center py-12 text-muted-foreground">
+                  <i className="fa-solid fa-spinner fa-spin text-2xl mr-3" />
+                  <span>Cargando servicios...</span>
+                </div>
+              ) : !selectedVehicleId ? (
+                <div className="col-span-full flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <i className="fa-solid fa-hand-pointer text-4xl mb-3 opacity-30" />
+                  <p>Selecciona un tipo de vehículo</p>
+                </div>
+              ) : (
+                services.map((svc: any) => {
+                  const priceEntry = svc.service_prices?.find((p: any) => p.vehicle_type_id === selectedVehicleId);
+                  if (!priceEntry) return null;
+                  const isSelected = selectedServiceId === svc.id;
 
-                // Only block services if customer has membership AND service is not eligible
-                const isServiceNotEligible = hasActiveMembership && !customer?.is_general && !eligible;
+                  // Debug: log service IDs to verify
+                  const eligible = isServiceEligible(svc.id, svc.name);
+                  console.log('Service:', svc.name, 'ID:', svc.id, 'Is eligible:', eligible);
 
-                return (
-                  <button
-                    key={svc.id}
-                    onClick={() => !isServiceNotEligible && setSelectedServiceId(svc.id)}
-                    disabled={isServiceNotEligible}
-                    className={`service-card text-left min-h-[120px] transition-all duration-200 ${!isServiceNotEligible ? 'hover:scale-[1.02] active:scale-95 hover:shadow-lg' : 'opacity-40 cursor-not-allowed'} ${isSelected ? "service-card-active ring-2 ring-primary" : ""}`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <h4 className="font-bold text-foreground">{svc.name}</h4>
-                        <p className="text-xs text-secondary mt-1">{svc.description}</p>
-                        {isServiceNotEligible && (
-                          <p className="text-xs text-destructive mt-2 flex items-center">
-                            <i className="fa-solid fa-lock mr-1" />
-                            Solo para membresías: Lavado Breve o Nítido
-                          </p>
-                        )}
+                  // Only block services if customer has membership AND service is not eligible
+                  const isServiceNotEligible = hasActiveMembership && !customer?.is_general && !eligible;
+
+                  return (
+                    <button
+                      key={svc.id}
+                      onClick={() => !isServiceNotEligible && setSelectedServiceId(svc.id)}
+                      disabled={isServiceNotEligible}
+                      className={`service-card text-left min-h-[120px] transition-all duration-200 ${!isServiceNotEligible ? 'hover:scale-[1.02] active:scale-95 hover:shadow-lg' : 'opacity-40 cursor-not-allowed'} ${isSelected ? "service-card-active ring-2 ring-primary" : ""}`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h4 className="font-bold text-foreground">{svc.name}</h4>
+                          <p className="text-xs text-secondary mt-1">{svc.description}</p>
+                          {isServiceNotEligible && (
+                            <p className="text-xs text-destructive mt-2 flex items-center">
+                              <i className="fa-solid fa-lock mr-1" />
+                              Solo para membresías: Lavado Breve o Nítido
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-right ml-4">
+                          <p className="text-xl font-bold text-primary">C${Number(priceEntry.price).toFixed(0)}</p>
+                          <p className="text-xs text-secondary">~${(Number(priceEntry.price) / exchangeRate).toFixed(2)} USD</p>
+                          {isSelected && <i className="fa-solid fa-circle-check text-brick-red text-lg mt-2" />}
+                        </div>
                       </div>
-                      <div className="text-right ml-4">
-                        <p className="text-xl font-bold text-primary">C${Number(priceEntry.price).toFixed(0)}</p>
-                        <p className="text-xs text-secondary">~${(Number(priceEntry.price) / exchangeRate).toFixed(2)} USD</p>
-                        {isSelected && <i className="fa-solid fa-circle-check text-brick-red text-lg mt-2" />}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })
-            )}
-          </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
 
-          {selectedServiceId > 0 && selectedVehicleId > 0 && (
+          {selectedServiceId > 0 && selectedVehicleId > 0 && !selectedMembership && (
             <div className="mt-4 flex justify-center">
               <button onClick={addToTicket} className="touch-btn bg-accent text-accent-foreground px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all duration-200 hover:scale-105 active:scale-95">
                 <i className="fa-solid fa-plus" />Agregar al ticket
@@ -419,27 +437,45 @@ export default function POS() {
               selectedVehicleTypeId={selectedVehicleId}
               selectedMembership={selectedMembership}
               onMembershipSelect={(membership) => {
+                console.log('[POS] Membership selected:', membership);
                 setSelectedMembership(membership);
                 setSelectedMembershipId(membership?.id || null);
-                // When membership is selected, set price to C$0 (already paid upfront)
-                // Customer paid for 8 washes when buying membership
+
                 if (membership) {
-                  setTicketItems(prev => prev.map(item => ({
-                    ...item,
-                    price: 0, // Free - already paid in membership package
-                    discountPercent: 0
-                  })));
+                  console.log('[POS] Membership services:', membership.services);
+                  console.log('[POS] Membership vehicle_type_id:', membership.vehicle_type_id);
+
+                  // Auto-select vehicle type from membership
+                  if (membership.vehicle_type_id) {
+                    setSelectedVehicleId(membership.vehicle_type_id);
+                    console.log('[POS] Auto-selected vehicle:', membership.vehicle_type_id);
+                  }
+
+                  // Auto-add membership service to ticket with C$0 price
+                  const membershipService = membership.services;
+                  if (membershipService && membership.vehicle_type_id) {
+                    const vt = vehicleTypes.find((v) => v.id === membership.vehicle_type_id);
+                    const washesRemaining = membership.total_washes_allowed - membership.washes_used;
+
+                    // Clear existing items and add membership service
+                    setTicketItems([{
+                      serviceId: membershipService.id,
+                      serviceName: `${membershipService.name} (Membresía - ${washesRemaining} lavados restantes)`,
+                      vehicleTypeId: membership.vehicle_type_id,
+                      vehicleLabel: vt?.label || "",
+                      price: 0, // Free - already paid in membership
+                      discountPercent: 0,
+                    }]);
+
+                    console.log('[POS] Added membership service to ticket');
+                    showToast("Servicio de membresía agregado - C$0.00");
+                  } else {
+                    console.error('[POS] Cannot add service - membershipService:', membershipService, 'vehicle_type_id:', membership.vehicle_type_id);
+                  }
                 } else {
-                  // Restore original prices when membership is deselected
-                  setTicketItems(prev => prev.map(item => {
-                    const svc = services?.find((s: any) => s.id === item.serviceId);
-                    const priceEntry = svc?.service_prices?.find((p: any) => p.vehicle_type_id === item.vehicleTypeId);
-                    return {
-                      ...item,
-                      price: priceEntry ? Number(priceEntry.price) : item.price,
-                      discountPercent: 0
-                    };
-                  }));
+                  // When deselecting membership, clear ticket items
+                  setTicketItems([]);
+                  console.log('[POS] Membership deselected, cleared ticket');
                 }
               }}
             />

@@ -26,7 +26,7 @@ export default function Memberships() {
   const [showPayment, setShowPayment] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
-  const [selectedService, setSelectedService] = useState<string>('a1111111-1111-1111-1111-111111111111'); // Default to Lavado Breve
+  const [selectedService, setSelectedService] = useState<number>(1); // Default to Lavado Breve
   const [selectedVehicleType, setSelectedVehicleType] = useState<number>(2);
   const [membershipPrice, setMembershipPrice] = useState(0);
   const [filter, setFilter] = useState<FilterType>('active');
@@ -53,13 +53,12 @@ export default function Memberships() {
     const [{ data: p }, { data: c }, { data: s }] = await Promise.all([
       supabase.from("membership_plans").select("*").eq("is_active", true),
       supabase.from("customers").select("id, name").eq("is_general", false).order("name"),
-      (supabase as any).from("services").select("id, name, service_prices(price, vehicle_type_id)"),
+      supabase.from("services").select("id, name, service_prices(price, vehicle_type_id)").eq("is_active", true),
     ]);
 
-    // Filter services manually to avoid 400 Bad Request with .in() query on UUIDs
+    // Filter to only show the two eligible services for memberships
     const eligibleServices = s?.filter((svc: any) =>
-      svc.id === 'a1111111-1111-1111-1111-111111111111' ||
-      svc.id === 'a2222222-2222-2222-2222-222222222222'
+      svc.id === 1 || svc.id === 2  // Lavado Breve (1) and Lavado Nítido (2)
     );
 
     console.log("Loaded plans:", p);
@@ -96,6 +95,27 @@ export default function Memberships() {
         return;
       }
 
+      // Validate all required fields
+      if (!selectedCustomer) {
+        showToast("Por favor selecciona un cliente");
+        return;
+      }
+
+      if (!selectedService) {
+        showToast("Por favor selecciona un servicio");
+        return;
+      }
+
+      if (!selectedVehicleType) {
+        showToast("Por favor selecciona un tipo de vehículo");
+        return;
+      }
+
+      if (membershipPrice <= 0) {
+        showToast("El precio de la membresía no es válido");
+        return;
+      }
+
       console.log("Available plans:", plans);
 
       // Use the first available plan (Combo 8 Lavados)
@@ -107,7 +127,13 @@ export default function Memberships() {
         return;
       }
 
-      console.log("Using plan ID:", planToUse);
+      console.log("Creating membership with:", {
+        customer: selectedCustomer,
+        plan: planToUse,
+        service: selectedService,
+        vehicleType: selectedVehicleType,
+        price: membershipPrice
+      });
 
       // Generate ticket number
       const ticketNumber = `M-${Date.now().toString(36).toUpperCase()}`;
@@ -126,10 +152,15 @@ export default function Memberships() {
         .select()
         .single();
 
-      if (ticketErr) throw ticketErr;
+      if (ticketErr) {
+        console.error("Error creating ticket:", ticketErr);
+        throw ticketErr;
+      }
+
+      console.log("Ticket created:", ticket);
 
       // Create payment record
-      await supabase.from("payments").insert({
+      const { error: paymentErr } = await supabase.from("payments").insert({
         ticket_id: (ticket as any).id,
         amount: membershipPrice,
         currency: paymentData.currency,
@@ -139,19 +170,28 @@ export default function Memberships() {
         exchange_rate: exchangeRate,
       } as any);
 
+      if (paymentErr) {
+        console.error("Error creating payment:", paymentErr);
+        throw paymentErr;
+      }
+
+      console.log("Payment created");
+
       // Create membership
       await createMembership({
         customerId: Number(selectedCustomer),
         planId: Number(planToUse),
         vehicleTypeId: selectedVehicleType,
-        serviceId: selectedService, // Add selected service
+        serviceId: selectedService,
       });
+
+      console.log("Membership created successfully");
 
       setShowPayment(false);
       setShowAssign(false);
       setSelectedCustomer("");
       setCustomerSearch("");
-      setSelectedService('a1111111-1111-1111-1111-111111111111'); // Reset to Lavado Breve
+      setSelectedService(1); // Reset to Lavado Breve
       setSelectedVehicleType(2);
       showToast("Membresía vendida y asignada correctamente");
     } catch (error: any) {
@@ -338,7 +378,7 @@ export default function Memberships() {
               </div>
               <div>
                 <label className="text-sm font-semibold text-foreground block mb-1">Servicio</label>
-                <select value={selectedService} onChange={(e) => setSelectedService(e.target.value)} className="input-touch">
+                <select value={selectedService} onChange={(e) => setSelectedService(Number(e.target.value))} className="input-touch">
                   {services.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
@@ -375,7 +415,7 @@ export default function Memberships() {
 
               <button
                 onClick={handleProceedToPayment}
-                disabled={!selectedCustomer || membershipPrice <= 0}
+                disabled={!selectedCustomer || !selectedService || !selectedVehicleType || membershipPrice <= 0}
                 className="btn-cobrar w-full disabled:opacity-50"
               >
                 <i className="fa-solid fa-money-bill-wave mr-2" />

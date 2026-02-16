@@ -3,13 +3,17 @@ import { supabase } from "@/integrations/supabase/client";
 import CustomerFormModal from "@/components/customers/CustomerFormModal";
 
 interface Customer {
-  id: string;
+  id: number;
   name: string;
   phone: string;
   plate: string;
   email: string;
   is_general: boolean;
   created_at: string;
+  loyalty_visits?: number;
+  loyalty_last_visit?: string;
+  loyalty_free_washes_earned?: number;
+  loyalty_free_washes_used?: number;
 }
 
 export default function Customers() {
@@ -109,40 +113,72 @@ export default function Customers() {
                 <th className="text-left p-3 text-secondary font-semibold">Placa</th>
                 <th className="text-left p-3 text-secondary font-semibold">Teléfono</th>
                 <th className="text-left p-3 text-secondary font-semibold">Correo</th>
+                <th className="text-center p-3 text-secondary font-semibold">Programa de Lealtad</th>
                 <th className="p-3 text-secondary font-semibold">Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {customers.map((c) => (
-                <tr key={c.id} className="border-b border-border last:border-0 hover:bg-muted/30">
-                  <td className="p-3 text-foreground font-medium">
-                    {c.name} {c.is_general && <span className="text-xs text-secondary">(General)</span>}
-                  </td>
-                  <td className="p-3 text-muted-foreground">{c.plate}</td>
-                  <td className="p-3 text-muted-foreground">{c.phone}</td>
-                  <td className="p-3 text-muted-foreground">{c.email}</td>
-                  <td className="p-3">
-                    {!c.is_general && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleEdit(c)}
-                          className="touch-btn p-2 text-secondary hover:text-foreground"
-                          title="Editar"
-                        >
-                          <i className="fa-solid fa-pen" />
-                        </button>
-                        <button
-                          onClick={() => setDeletingCustomer(c)}
-                          className="touch-btn p-2 text-destructive hover:text-red-600"
-                          title="Eliminar"
-                        >
-                          <i className="fa-solid fa-trash-can" />
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {customers.map((c) => {
+                const visits = c.loyalty_visits || 0;
+                const freeWashesAvailable = (c.loyalty_free_washes_earned || 0) - (c.loyalty_free_washes_used || 0);
+                const progressToNextFree = visits % 9;
+                const progressPercent = (progressToNextFree / 9) * 100;
+
+                return (
+                  <tr key={c.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    <td className="p-3 text-foreground font-medium">
+                      {c.name} {c.is_general && <span className="text-xs text-secondary">(General)</span>}
+                    </td>
+                    <td className="p-3 text-muted-foreground">{c.plate}</td>
+                    <td className="p-3 text-muted-foreground">{c.phone}</td>
+                    <td className="p-3 text-muted-foreground">{c.email}</td>
+                    <td className="p-3">
+                      {!c.is_general && (
+                        <div className="flex flex-col items-center gap-1">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="font-semibold text-primary">{visits} visitas</span>
+                            {freeWashesAvailable > 0 && (
+                              <span className="px-2 py-0.5 rounded-full bg-accent/20 text-accent font-bold">
+                                <i className="fa-solid fa-gift mr-1" />
+                                {freeWashesAvailable} gratis
+                              </span>
+                            )}
+                          </div>
+                          <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-primary to-accent transition-all duration-300"
+                              style={{ width: `${progressPercent}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {9 - progressToNextFree} lavados para pasteado gratis
+                          </span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-3">
+                      {!c.is_general && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleEdit(c)}
+                            className="touch-btn p-2 text-secondary hover:text-foreground"
+                            title="Editar"
+                          >
+                            <i className="fa-solid fa-pen" />
+                          </button>
+                          <button
+                            onClick={() => setDeletingCustomer(c)}
+                            className="touch-btn p-2 text-destructive hover:text-red-600"
+                            title="Eliminar"
+                          >
+                            <i className="fa-solid fa-trash-can" />
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {customers.length === 0 && <p className="text-center py-8 text-muted-foreground">Sin clientes</p>}
