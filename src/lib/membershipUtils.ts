@@ -2,8 +2,8 @@
 
 // Service IDs for eligible services (Lavado Rápido – Breve and Lavado Rápido – Nítido)
 export const ELIGIBLE_SERVICE_IDS = {
-    LAVADO_BREVE: 1,
-    LAVADO_NITIDO: 2,
+    LAVADO_BREVE: 'a1111111-1111-1111-1111-111111111111',
+    LAVADO_NITIDO: 'a2222222-2222-2222-2222-222222222222',
 };
 
 /**
@@ -19,14 +19,28 @@ export const calculateMembershipPrice = (
     return basePrice * (1 - discountPercent / 100);
 };
 
+export const ELIGIBLE_SERVICE_NAMES = [
+    "Lavado Rápido – Breve",
+    "Lavado Rápido – Nítido"
+];
+
 /**
  * Check if a service is eligible for membership discount
- * @param serviceId - Service ID (string or number)
+ * @param serviceId - Service ID (UUID string or number)
+ * @param serviceName - Optional service name for fallback check
  * @returns true if service is eligible
  */
-export const isServiceEligible = (serviceId: string | number): boolean => {
-    const numericId = typeof serviceId === 'string' ? parseInt(serviceId) : serviceId;
-    return Object.values(ELIGIBLE_SERVICE_IDS).includes(numericId);
+export const isServiceEligible = (serviceId: string | number, serviceName?: string): boolean => {
+    const serviceIdStr = typeof serviceId === 'number' ? serviceId.toString() : serviceId;
+
+    // Check by ID (case insensitive)
+    const validIds = Object.values(ELIGIBLE_SERVICE_IDS).map(id => id.toString().toLowerCase());
+    if (validIds.includes(serviceIdStr.toLowerCase())) return true;
+
+    // Check by Name (fallback)
+    if (serviceName && ELIGIBLE_SERVICE_NAMES.includes(serviceName)) return true;
+
+    return false;
 };
 
 /**

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useServices } from "@/hooks/useServices";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useAuth } from "@/hooks/useAuth";
@@ -8,6 +8,7 @@ import CustomerModal from "@/components/pos/CustomerModal";
 import TicketPrint from "@/components/pos/TicketPrint";
 import MembershipSelector from "@/components/pos/MembershipSelector";
 import { useMemberships } from "@/hooks/useMemberships";
+import { isServiceEligible } from "@/lib/membershipUtils";
 
 // Vehicle type mapping: key -> vehicle_type_id in DB
 const vehicleTypes = [
@@ -53,7 +54,23 @@ export default function POS() {
   const [selectedMembershipId, setSelectedMembershipId] = useState<number | null>(null);
   const [selectedMembership, setSelectedMembership] = useState<any>(null);
 
-  const { recordWash } = useMemberships(customer?.id?.toString());
+  const { memberships, recordWash, getMembershipWithStatus } = useMemberships(customer?.id?.toString());
+
+  // Filter active memberships with remaining washes
+  const activeMemberships = memberships?.filter((m) => {
+    const { status } = getMembershipWithStatus(m);
+    return status !== 'expired' && m.washes_used < m.total_washes_allowed && m.active;
+  }) || [];
+
+  // Check if customer has active memberships that restrict vehicle/service selection
+  const hasActiveMembership = activeMemberships.length > 0;
+
+  // Get all vehicle types that have active memberships
+  // distinct vehicle types from all active memberships
+  const activeMembershipVehicleTypeIds = useMemo(() => {
+    if (!activeMemberships.length) return [];
+    return Array.from(new Set(activeMemberships.map(m => m.vehicle_type_id).filter(Boolean)));
+  }, [activeMemberships]);
 
   const exchangeRate = settings?.exchange_rate || 36.5;
 
@@ -122,6 +139,14 @@ export default function POS() {
       if (data) setCustomer(data as any as Customer);
     });
   };
+
+  // Auto-select vehicle type when customer with a SINGLE membership is selected
+  // Don't auto-select if multiple memberships with different vehicle types
+  useEffect(() => {
+    if (hasActiveMembership && activeMembershipVehicleTypeIds.length === 1 && !selectedVehicleId) {
+      setSelectedVehicleId(activeMembershipVehicleTypeIds[0]);
+    }
+  }, [hasActiveMembership, activeMembershipVehicleTypeIds.length]);
 
   const handlePaymentComplete = async (paymentData: any) => {
     try {
@@ -263,19 +288,31 @@ export default function POS() {
             <i className="fa-solid fa-car mr-2 text-secondary" />Tipo de vehículo
           </p>
           <div className="grid grid-cols-5 gap-3">
-            {vehicleTypes.map((vt) => (
-              <button
-                key={vt.id}
-                onClick={() => setSelectedVehicleId(vt.id)}
-                className={`vehicle-card h-24 transition-all duration-200 hover:scale-105 active:scale-95 ${selectedVehicleId === vt.id ? "vehicle-card-active ring-2 ring-primary" : ""}`}
-              >
-                <i className={`fa-solid ${vt.icon} text-3xl ${selectedVehicleId === vt.id ? "text-brick-red" : "text-secondary"} mb-2`} />
-                <p className="text-sm font-semibold text-foreground">{vt.label}</p>
-                {selectedVehicleId === vt.id && (
-                  <i className="fa-solid fa-circle-check text-brick-red text-base mt-1" />
-                )}
-              </button>
-            ))}
+            {vehicleTypes.map((vt) => {
+              // Disable vehicle type if customer has membership and it's not in the list of membership vehicle types
+              const isDisabled = hasActiveMembership && !customer?.is_general && activeMembershipVehicleTypeIds.length > 0 && !activeMembershipVehicleTypeIds.includes(vt.id);
+              const isRestricted = hasActiveMembership && !customer?.is_general;
+
+              return (
+                <button
+                  key={vt.id}
+                  onClick={() => !isDisabled && setSelectedVehicleId(vt.id)}
+                  disabled={isDisabled}
+                  className={`vehicle-card h-24 transition-all duration-200 ${!isDisabled ? 'hover:scale-105 active:scale-95' : 'opacity-40 cursor-not-allowed'} ${selectedVehicleId === vt.id ? "vehicle-card-active ring-2 ring-primary" : ""}`}
+                >
+                  <i className={`fa-solid ${vt.icon} text-3xl ${selectedVehicleId === vt.id ? "text-brick-red" : "text-secondary"} mb-2`} />
+                  <p className="text-sm font-semibold text-foreground">{vt.label}</p>
+                  {selectedVehicleId === vt.id && (
+                    <i className="fa-solid fa-circle-check text-brick-red text-base mt-1" />
+                  )}
+                  {isDisabled && isRestricted && (
+                    <p className="text-xs text-destructive mt-1">
+                      <i className="fa-solid fa-lock" />
+                    </p>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -301,16 +338,30 @@ export default function POS() {
                 if (!priceEntry) return null;
                 const isSelected = selectedServiceId === svc.id;
 
+                // Debug: log service IDs to verify
+                const eligible = isServiceEligible(svc.id, svc.name);
+                console.log('Service:', svc.name, 'ID:', svc.id, 'Is eligible:', eligible);
+
+                // Only block services if customer has membership AND service is not eligible
+                const isServiceNotEligible = hasActiveMembership && !customer?.is_general && !eligible;
+
                 return (
                   <button
                     key={svc.id}
-                    onClick={() => setSelectedServiceId(svc.id)}
-                    className={`service-card text-left min-h-[120px] transition-all duration-200 hover:scale-[1.02] active:scale-95 hover:shadow-lg ${isSelected ? "service-card-active ring-2 ring-primary" : ""}`}
+                    onClick={() => !isServiceNotEligible && setSelectedServiceId(svc.id)}
+                    disabled={isServiceNotEligible}
+                    className={`service-card text-left min-h-[120px] transition-all duration-200 ${!isServiceNotEligible ? 'hover:scale-[1.02] active:scale-95 hover:shadow-lg' : 'opacity-40 cursor-not-allowed'} ${isSelected ? "service-card-active ring-2 ring-primary" : ""}`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <h4 className="font-bold text-foreground">{svc.name}</h4>
                         <p className="text-xs text-secondary mt-1">{svc.description}</p>
+                        {isServiceNotEligible && (
+                          <p className="text-xs text-destructive mt-2 flex items-center">
+                            <i className="fa-solid fa-lock mr-1" />
+                            Solo para membresías: Lavado Breve o Nítido
+                          </p>
+                        )}
                       </div>
                       <div className="text-right ml-4">
                         <p className="text-xl font-bold text-primary">C${Number(priceEntry.price).toFixed(0)}</p>

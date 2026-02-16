@@ -32,7 +32,7 @@ export default function Dashboard() {
       // Fetch ticket_items with services for today's tickets
       const { data: ticketItems } = await (supabase as any)
         .from("ticket_items")
-        .select("*, services(name), tickets!inner(created_at, status)")
+        .select("*, services(name), tickets(created_at, status)")
         .gte("tickets.created_at", today.toISOString())
         .eq("tickets.status", "paid");
 

@@ -44,8 +44,8 @@ export function useMemberships(customerId?: string) {
                 .from('customer_memberships')
                 .select(`
           *,
-          customers!inner(name, phone, plate),
-          membership_plans!inner(name, discount_percent, wash_count, duration_days),
+          customers(name, phone, plate),
+          membership_plans(name, discount_percent, wash_count, duration_days),
           vehicle_types(name)
         `);
 
@@ -58,7 +58,7 @@ export function useMemberships(customerId?: string) {
             if (error) throw error;
             return data as any as Membership[];
         },
-        enabled: !!customerId || customerId === undefined,
+        enabled: true,
     });
 
     // Get membership with status details
@@ -207,10 +207,12 @@ export function useMemberships(customerId?: string) {
             customerId,
             planId,
             vehicleTypeId,
+            serviceId,
         }: {
             customerId: number;
             planId: number;
             vehicleTypeId: number;
+            serviceId: string; // UUID
         }) => {
             const { error } = await supabase
                 .from('customer_memberships')
@@ -218,6 +220,7 @@ export function useMemberships(customerId?: string) {
                     customer_id: customerId,
                     plan_id: planId,
                     vehicle_type_id: vehicleTypeId,
+                    service_id: serviceId,
                 });
 
             if (error) throw error;

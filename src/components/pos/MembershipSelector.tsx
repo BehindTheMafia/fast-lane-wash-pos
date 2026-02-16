@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useMemberships, type Membership } from "@/hooks/useMemberships";
+import { useServices } from "@/hooks/useServices";
 import { isServiceEligible, getDaysRemaining } from "@/lib/membershipUtils";
 
 interface MembershipSelectorProps {
@@ -18,6 +19,7 @@ export default function MembershipSelector({
     selectedMembership,
 }: MembershipSelectorProps) {
     const { memberships, isLoading, getMembershipWithStatus } = useMemberships(customerId || undefined);
+    const { data: services } = useServices();
     const [showSelector, setShowSelector] = useState(false);
 
     // Filter active, non-expired memberships with remaining washes
@@ -26,8 +28,11 @@ export default function MembershipSelector({
         return status !== 'expired' && m.washes_used < m.total_washes_allowed && m.active;
     }) || [];
 
-    // Check if selected service is eligible
-    const isEligible = selectedServiceId ? isServiceEligible(selectedServiceId) : false;
+    // Find selected service to extract name for validation
+    const selectedService = services?.find((s: any) => s.id === selectedServiceId);
+
+    // Check if selected service is eligible (by ID or Name)
+    const isEligible = selectedServiceId ? isServiceEligible(selectedServiceId, selectedService?.name) : false;
 
     // Check if selected vehicle type matches membership vehicle type
     const vehicleTypeMatches = selectedMembership && selectedVehicleTypeId

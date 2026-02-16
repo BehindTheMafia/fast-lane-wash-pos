@@ -203,7 +203,15 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
                   min={0}
                   step={0.01}
                 />
-                {receivedNum > 0 && (
+                {receivedNum > 0 && receivedNum < totalInCurrency && (
+                  <div className="mt-2 p-3 bg-destructive/10 rounded-lg text-center">
+                    <p className="text-sm text-destructive font-semibold">
+                      <i className="fa-solid fa-triangle-exclamation mr-2" />
+                      Monto insuficiente. Falta {currency === "NIO" ? "C$" : "$"}{(totalInCurrency - receivedNum).toFixed(2)}
+                    </p>
+                  </div>
+                )}
+                {receivedNum > 0 && receivedNum >= totalInCurrency && (
                   <div className="mt-2 pos-card p-3 text-center">
                     <p className="text-sm text-secondary">Vuelto</p>
                     <p className={`text-2xl font-bold ${change > 0 ? "text-accent" : "text-foreground"}`}>
