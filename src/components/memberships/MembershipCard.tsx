@@ -29,12 +29,6 @@ export default function MembershipCard({ membership, onRenew }: MembershipCardPr
                             {membership.vehicle_types.name}
                         </p>
                     )}
-                    {membership.services && (
-                        <p className="text-xs text-accent mt-0.5">
-                            <i className="fa-solid fa-spray-can mr-1" />
-                            {membership.services.name}
-                        </p>
-                    )}
                 </div>
                 <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(status)}`}>
                     {getStatusLabel(status)}
