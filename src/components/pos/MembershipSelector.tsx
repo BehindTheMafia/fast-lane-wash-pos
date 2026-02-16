@@ -26,8 +26,15 @@ export default function MembershipSelector({
         return status !== 'expired' && m.washes_used < m.total_washes_allowed && m.active;
     }) || [];
 
-    // Check if selected service is eligible
-    const isEligible = selectedServiceId ? isServiceEligible(selectedServiceId) : false;
+    // Check if selected service matches membership's service exactly
+    const serviceMatches = selectedMembership && selectedServiceId
+        ? selectedMembership.service_id === Number(selectedServiceId)
+        : true;
+
+    // Service is eligible only if it matches the membership's service
+    const isEligible = selectedServiceId && selectedMembership
+        ? selectedMembership.service_id === Number(selectedServiceId)
+        : false;
 
     // Check if selected vehicle type matches membership vehicle type
     const vehicleTypeMatches = selectedMembership && selectedVehicleTypeId
@@ -72,7 +79,8 @@ export default function MembershipSelector({
                         const isSelected = selectedMembership?.id === membership.id;
                         const washesRemaining = membership.total_washes_allowed - membership.washes_used;
                         const vehicleMatches = !selectedVehicleTypeId || membership.vehicle_type_id === selectedVehicleTypeId;
-                        const canUse = isEligible && vehicleMatches;
+                        const serviceMatchesThis = !selectedServiceId || membership.service_id === Number(selectedServiceId);
+                        const canUse = serviceMatchesThis && vehicleMatches;
 
                         return (
                             <button
@@ -98,9 +106,10 @@ export default function MembershipSelector({
                                                 Membresía solo para {membership.vehicle_types?.name}
                                             </p>
                                         )}
-                                        {!isEligible && vehicleMatches && (
-                                            <p className="text-xs text-muted-foreground mt-1">
-                                                Servicio no elegible
+                                        {!serviceMatchesThis && vehicleMatches && (
+                                            <p className="text-xs text-destructive mt-1 flex items-center">
+                                                <i className="fa-solid fa-triangle-exclamation mr-1" />
+                                                Membresía solo para {membership.services?.name || "servicio específico"}
                                             </p>
                                         )}
                                     </div>
@@ -123,12 +132,7 @@ export default function MembershipSelector({
                                     </span>
                                 </div>
 
-                                {!isEligible && (
-                                    <p className="text-xs text-destructive mt-2">
-                                        <i className="fa-solid fa-exclamation-triangle mr-1" />
-                                        Servicio no aplica para esta membresía
-                                    </p>
-                                )}
+
                             </button>
                         );
                     })}

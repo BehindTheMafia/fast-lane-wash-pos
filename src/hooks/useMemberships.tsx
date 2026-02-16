@@ -9,6 +9,7 @@ export interface Membership {
     total_washes_allowed: number;
     bonus_washes_earned: number;
     vehicle_type_id: number | null;
+    service_id: number | null;
     expires_at: string | null;
     created_at: string;
     active: boolean;
@@ -24,6 +25,10 @@ export interface Membership {
         duration_days: number;
     };
     vehicle_types?: {
+        name: string;
+    };
+    services?: {
+        id: number;
         name: string;
     };
 }
@@ -46,7 +51,8 @@ export function useMemberships(customerId?: string) {
           *,
           customers!inner(name, phone, plate),
           membership_plans!inner(name, discount_percent, wash_count, duration_days),
-          vehicle_types(name)
+          vehicle_types(name),
+          services(id, name)
         `);
 
             if (customerId) {
@@ -207,10 +213,12 @@ export function useMemberships(customerId?: string) {
             customerId,
             planId,
             vehicleTypeId,
+            serviceId,
         }: {
             customerId: number;
             planId: number;
             vehicleTypeId: number;
+            serviceId: number;
         }) => {
             const { error } = await supabase
                 .from('customer_memberships')
@@ -218,6 +226,7 @@ export function useMemberships(customerId?: string) {
                     customer_id: customerId,
                     plan_id: planId,
                     vehicle_type_id: vehicleTypeId,
+                    service_id: serviceId,
                 });
 
             if (error) throw error;

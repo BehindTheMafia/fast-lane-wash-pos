@@ -137,6 +137,7 @@ export default function Memberships() {
         customerId: Number(selectedCustomer),
         planId: Number(planToUse),
         vehicleTypeId: selectedVehicleType,
+        serviceId: selectedService,
       });
 
       setShowPayment(false);

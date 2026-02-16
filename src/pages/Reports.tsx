@@ -18,14 +18,21 @@ export default function Reports() {
     const from = new Date(dateFrom); from.setHours(0, 0, 0, 0);
     const to = new Date(dateTo); to.setHours(23, 59, 59, 999);
 
-    // Fetch tickets with vehicle type and payments (no profiles join - no FK)
-    const { data: rawTickets } = await supabase
+    // Fetch tickets with vehicle type and payments
+    const { data: rawTickets, error: ticketsError } = await supabase
       .from("tickets")
       .select("*, vehicle_types(name), payments(*)")
       .gte("created_at", from.toISOString())
       .lte("created_at", to.toISOString())
       .eq("status", "paid")
       .order("created_at", { ascending: false });
+
+    if (ticketsError) {
+      console.error("Error loading tickets:", ticketsError);
+      setTickets([]);
+      setLoading(false);
+      return;
+    }
 
     if (!rawTickets || rawTickets.length === 0) {
       setTickets([]);
@@ -40,6 +47,28 @@ export default function Reports() {
       .select("*, services(name)")
       .in("ticket_id", ticketIds);
 
+    // Fetch membership washes to identify membership usage
+    const { data: membershipWashes } = await supabase
+      .from("membership_washes")
+      .select("ticket_id, membership_id")
+      .in("ticket_id", ticketIds);
+
+    // Create map of ticket_id -> has membership usage
+    const membershipWashMap: Record<string, boolean> = {};
+    (membershipWashes || []).forEach((mw: any) => {
+      if (mw.ticket_id) {
+        membershipWashMap[mw.ticket_id] = true;
+      }
+    });
+
+    // Fetch customers for tickets that have customer_id
+    const customerIds = [...new Set(rawTickets.map((t: any) => t.customer_id).filter(Boolean))];
+    const { data: customers } = customerIds.length > 0
+      ? await supabase.from("customers").select("id, name").in("id", customerIds)
+      : { data: [] };
+    const customerMap: Record<string, string> = {};
+    (customers || []).forEach((c: any) => { customerMap[c.id] = c.name || ""; });
+
     // Fetch profiles for cashier names
     const userIds = [...new Set(rawTickets.map((t: any) => t.user_id).filter(Boolean))];
     const { data: profiles } = userIds.length > 0
@@ -48,11 +77,14 @@ export default function Reports() {
     const profileMap: Record<string, string> = {};
     (profiles || []).forEach((p: any) => { profileMap[p.id] = p.full_name || ""; });
 
-    // Merge items + profile into tickets
+    // Merge items, profile, customer, and membership info into tickets
     const enriched = rawTickets.map((t: any) => ({
       ...t,
       ticket_items: (allItems || []).filter((ti: any) => ti.ticket_id === t.id),
       cashier_name: profileMap[t.user_id] || "—",
+      customer_name: t.customer_id ? (customerMap[t.customer_id] || "—") : "—",
+      is_membership_usage: membershipWashMap[t.id] || false,
+      is_membership_sale: t.ticket_number?.startsWith("M-") || false,
     }));
 
     setTickets(enriched);
@@ -63,6 +95,15 @@ export default function Reports() {
 
   const rate = settings?.exchange_rate || 36.5;
   const totalNIO = tickets.reduce((s, t) => s + Number(t.total), 0);
+
+  // Membership-specific metrics
+  const membershipSalesTotal = tickets
+    .filter((t: any) => t.is_membership_sale)
+    .reduce((s, t) => s + Number(t.total), 0);
+  const membershipUsageCount = tickets.filter((t: any) => t.is_membership_usage).length;
+  const regularSalesTotal = tickets
+    .filter((t: any) => !t.is_membership_sale && !t.is_membership_usage)
+    .reduce((s, t) => s + Number(t.total), 0);
 
   // Summary aggregations
   const byService: Record<string, { count: number; total: number }> = {};
@@ -126,19 +167,26 @@ export default function Reports() {
       ) : (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="pos-card p-6 text-center">
               <p className="text-sm text-secondary">Total ventas</p>
               <p className="text-2xl font-bold text-foreground">C${totalNIO.toFixed(2)}</p>
               <p className="text-sm text-muted-foreground">~${(totalNIO / rate).toFixed(2)} USD</p>
             </div>
             <div className="pos-card p-6 text-center">
-              <p className="text-sm text-secondary">Tickets</p>
-              <p className="text-2xl font-bold text-foreground">{tickets.length}</p>
+              <p className="text-sm text-secondary">Ventas Membresías</p>
+              <p className="text-2xl font-bold text-primary">C${membershipSalesTotal.toFixed(2)}</p>
+              <p className="text-sm text-muted-foreground">{tickets.filter((t: any) => t.is_membership_sale).length} tickets</p>
             </div>
             <div className="pos-card p-6 text-center">
-              <p className="text-sm text-secondary">Promedio</p>
-              <p className="text-2xl font-bold text-foreground">C${tickets.length ? (totalNIO / tickets.length).toFixed(0) : "0"}</p>
+              <p className="text-sm text-secondary">Usos Membresías</p>
+              <p className="text-2xl font-bold text-accent">{membershipUsageCount}</p>
+              <p className="text-sm text-muted-foreground">lavados redimidos</p>
+            </div>
+            <div className="pos-card p-6 text-center">
+              <p className="text-sm text-secondary">Ventas Regulares</p>
+              <p className="text-2xl font-bold text-foreground">C${regularSalesTotal.toFixed(0)}</p>
+              <p className="text-sm text-muted-foreground">{tickets.filter((t: any) => !t.is_membership_sale && !t.is_membership_usage).length} tickets</p>
             </div>
           </div>
 
@@ -193,6 +241,7 @@ export default function Reports() {
                     <th className="text-left px-4 py-3 font-semibold text-secondary whitespace-nowrap">Servicio</th>
                     <th className="text-left px-4 py-3 font-semibold text-secondary whitespace-nowrap">Vehículo</th>
                     <th className="text-left px-4 py-3 font-semibold text-secondary whitespace-nowrap">Placa</th>
+                    <th className="text-left px-4 py-3 font-semibold text-secondary whitespace-nowrap">Cliente</th>
                     <th className="text-left px-4 py-3 font-semibold text-secondary whitespace-nowrap">Método</th>
                     <th className="text-left px-4 py-3 font-semibold text-secondary whitespace-nowrap">Registró</th>
                     <th className="text-right px-4 py-3 font-semibold text-secondary whitespace-nowrap">Total</th>
@@ -201,7 +250,7 @@ export default function Reports() {
                 <tbody>
                   {tickets.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                      <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
                         <i className="fa-solid fa-inbox text-3xl mb-2 opacity-30 block" />
                         No hay tickets en el rango seleccionado
                       </td>
@@ -212,15 +261,31 @@ export default function Reports() {
                     const vehicleName = (t.vehicle_types as any)?.name || "—";
                     const paymentMethods = t.payments?.map((p: any) => methodLabels[p.payment_method] || p.payment_method).join(", ") || "—";
                     const cashierName = t.cashier_name || "—";
+                    const customerName = t.customer_name || "—";
 
                     return (
                       <tr key={t.id} className={`border-b border-border/50 hover:bg-muted/30 transition-colors ${idx % 2 === 0 ? "" : "bg-muted/10"}`}>
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{t.ticket_number}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs text-muted-foreground">{t.ticket_number}</span>
+                            {t.is_membership_sale && (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-primary/20 text-primary font-semibold" title="Venta de Membresía">
+                                <i className="fa-solid fa-id-card mr-1" />Memb.
+                              </span>
+                            )}
+                            {t.is_membership_usage && (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-accent/20 text-accent font-semibold" title="Uso de Membresía">
+                                <i className="fa-solid fa-check-circle mr-1" />Uso
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-foreground whitespace-nowrap">{formatDate(t.created_at)}</td>
                         <td className="px-4 py-3 text-foreground whitespace-nowrap">{formatTime(t.created_at)}</td>
                         <td className="px-4 py-3 text-foreground">{serviceNames}</td>
                         <td className="px-4 py-3 text-foreground">{vehicleName}</td>
                         <td className="px-4 py-3 text-foreground font-mono">{t.vehicle_plate || "—"}</td>
+                        <td className="px-4 py-3 text-foreground">{customerName}</td>
                         <td className="px-4 py-3">
                           <span className="px-2 py-1 rounded-full text-xs bg-accent/20 text-accent whitespace-nowrap">{paymentMethods}</span>
                         </td>
@@ -233,7 +298,7 @@ export default function Reports() {
                 {tickets.length > 0 && (
                   <tfoot>
                     <tr className="bg-muted/50 border-t-2 border-border">
-                      <td colSpan={8} className="px-4 py-3 font-bold text-foreground text-right">TOTAL:</td>
+                      <td colSpan={9} className="px-4 py-3 font-bold text-foreground text-right">TOTAL:</td>
                       <td className="px-4 py-3 text-right font-bold text-primary text-lg">C${totalNIO.toFixed(2)}</td>
                     </tr>
                   </tfoot>

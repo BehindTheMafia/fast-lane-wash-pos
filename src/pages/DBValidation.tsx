@@ -214,8 +214,8 @@ export default function DBValidation() {
                                 <div
                                     key={idx}
                                     className={`bg-card border rounded-xl p-4 ${result.status === 'success'
-                                            ? 'border-green-500/30 bg-green-500/5'
-                                            : 'border-red-500/30 bg-red-500/5'
+                                        ? 'border-green-500/30 bg-green-500/5'
+                                        : 'border-red-500/30 bg-red-500/5'
                                         }`}
                                 >
                                     <div className="flex items-start justify-between">
