@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
+import TicketPrint from "@/components/pos/TicketPrint";
 
 const methodLabels: Record<string, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia", mixed: "Mixto" };
 
@@ -12,6 +13,15 @@ export default function Reports() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split("T")[0]);
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [editingTicket, setEditingTicket] = useState<any>(null);
+  const [deletingTicket, setDeletingTicket] = useState<any>(null);
+  const [reprintTicket, setReprintTicket] = useState<any>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const loadReport = async () => {
     setLoading(true);
@@ -64,10 +74,10 @@ export default function Reports() {
     // Fetch customers for tickets that have customer_id
     const customerIds = [...new Set(rawTickets.map((t: any) => t.customer_id).filter(Boolean))];
     const { data: customers } = customerIds.length > 0
-      ? await supabase.from("customers").select("id, name").in("id", customerIds)
+      ? await supabase.from("customers").select("id, name, plate, phone").in("id", customerIds)
       : { data: [] };
-    const customerMap: Record<string, string> = {};
-    (customers || []).forEach((c: any) => { customerMap[c.id] = c.name || ""; });
+    const customerMap: Record<string, any> = {};
+    (customers || []).forEach((c: any) => { customerMap[c.id] = c; });
 
     // Fetch profiles for cashier names
     const userIds = [...new Set(rawTickets.map((t: any) => t.user_id).filter(Boolean))];
@@ -82,7 +92,8 @@ export default function Reports() {
       ...t,
       ticket_items: (allItems || []).filter((ti: any) => ti.ticket_id === t.id),
       cashier_name: profileMap[t.user_id] || "—",
-      customer_name: t.customer_id ? (customerMap[t.customer_id] || "—") : "—",
+      customer_data: t.customer_id ? customerMap[t.customer_id] : null,
+      customer_name: t.customer_id ? (customerMap[t.customer_id]?.name || "—") : "—",
       is_membership_usage: membershipWashMap[t.id] || false,
       is_membership_sale: t.ticket_number?.startsWith("M-") || false,
     }));
@@ -92,6 +103,89 @@ export default function Reports() {
   };
 
   useEffect(() => { loadReport(); }, []);
+
+  const handleDeleteConfirm = async () => {
+    if (!deletingTicket) return;
+
+    try {
+      // Delete ticket (cascade will handle ticket_items and payments)
+      const { error } = await supabase
+        .from("tickets")
+        .delete()
+        .eq("id", deletingTicket.id);
+
+      if (error) throw error;
+
+      showToast("Ticket eliminado correctamente");
+      setDeletingTicket(null);
+      loadReport();
+    } catch (err: any) {
+      showToast("Error al eliminar ticket: " + err.message);
+    }
+  };
+
+  const handleEditSave = async () => {
+    if (!editingTicket) return;
+
+    try {
+      // Update ticket
+      const { error } = await supabase
+        .from("tickets")
+        .update({
+          vehicle_plate: editingTicket.vehicle_plate,
+          total: editingTicket.total,
+        })
+        .eq("id", editingTicket.id);
+
+      if (error) throw error;
+
+      showToast("Ticket actualizado correctamente");
+      setEditingTicket(null);
+      loadReport();
+    } catch (err: any) {
+      showToast("Error al actualizar ticket: " + err.message);
+    }
+  };
+
+  const handleReprint = (ticket: any) => {
+    console.log('Reprint ticket data:', ticket);
+
+    // Calculate subtotal from items
+    const itemsArray = ticket.ticket_items?.map((ti: any) => ({
+      serviceName: ti.services?.name || "Servicio",
+      vehicleLabel: ticket.vehicle_types?.name || "",
+      price: Number(ti.price),
+      discountPercent: 0,
+    })) || [];
+
+    const subtotal = itemsArray.reduce((sum, item) => sum + item.price, 0);
+    const discount = 0; // No discount info in historical tickets
+
+    // Prepare ticket data for printing
+    const reprintData = {
+      ...ticket,
+      customer: ticket.customer_data || {
+        name: "Cliente General",
+        plate: ticket.vehicle_plate,
+        phone: "",
+        is_general: true
+      },
+      items: itemsArray,
+      subtotal: subtotal,
+      discount: discount,
+      total: Number(ticket.total),
+      payment: {
+        method: ticket.payments?.[0]?.payment_method || "cash",
+        currency: ticket.payments?.[0]?.currency || "NIO",
+        received: Number(ticket.payments?.[0]?.amount_received || ticket.total),
+        change: Number(ticket.payments?.[0]?.change_amount || 0),
+      },
+      settings,
+    };
+
+    console.log('Prepared reprint data:', reprintData);
+    setReprintTicket(reprintData);
+  };
 
   const rate = settings?.exchange_rate || 36.5;
   const totalNIO = tickets.reduce((s, t) => s + Number(t.total), 0);
@@ -245,12 +339,13 @@ export default function Reports() {
                     <th className="text-left px-4 py-3 font-semibold text-secondary whitespace-nowrap">Método</th>
                     <th className="text-left px-4 py-3 font-semibold text-secondary whitespace-nowrap">Registró</th>
                     <th className="text-right px-4 py-3 font-semibold text-secondary whitespace-nowrap">Total</th>
+                    <th className="text-center px-4 py-3 font-semibold text-secondary whitespace-nowrap">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {tickets.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                      <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                         <i className="fa-solid fa-inbox text-3xl mb-2 opacity-30 block" />
                         No hay tickets en el rango seleccionado
                       </td>
@@ -291,6 +386,31 @@ export default function Reports() {
                         </td>
                         <td className="px-4 py-3 text-foreground">{cashierName}</td>
                         <td className="px-4 py-3 text-right font-bold text-primary whitespace-nowrap">C${Number(t.total).toFixed(0)}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleReprint(t)}
+                              className="touch-btn p-2 text-accent hover:bg-accent/10 rounded"
+                              title="Reimprimir"
+                            >
+                              <i className="fa-solid fa-print" />
+                            </button>
+                            <button
+                              onClick={() => setEditingTicket({ ...t })}
+                              className="touch-btn p-2 text-secondary hover:bg-secondary/10 rounded"
+                              title="Editar"
+                            >
+                              <i className="fa-solid fa-pen" />
+                            </button>
+                            <button
+                              onClick={() => setDeletingTicket(t)}
+                              className="touch-btn p-2 text-destructive hover:bg-destructive/10 rounded"
+                              title="Eliminar"
+                            >
+                              <i className="fa-solid fa-trash-can" />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -300,6 +420,7 @@ export default function Reports() {
                     <tr className="bg-muted/50 border-t-2 border-border">
                       <td colSpan={9} className="px-4 py-3 font-bold text-foreground text-right">TOTAL:</td>
                       <td className="px-4 py-3 text-right font-bold text-primary text-lg">C${totalNIO.toFixed(2)}</td>
+                      <td></td>
                     </tr>
                   </tfoot>
                 )}
@@ -308,6 +429,108 @@ export default function Reports() {
           </div>
         </>
       )}
+
+      {/* Edit Modal */}
+      {editingTicket && (
+        <div className="modal-overlay" onClick={() => setEditingTicket(null)}>
+          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-foreground">
+                <i className="fa-solid fa-pen mr-2 text-secondary" />
+                Editar Ticket
+              </h2>
+              <button onClick={() => setEditingTicket(null)} className="touch-btn p-2 text-muted-foreground">
+                <i className="fa-solid fa-xmark text-xl" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1">Placa del vehículo</label>
+                <input
+                  type="text"
+                  value={editingTicket.vehicle_plate || ""}
+                  onChange={(e) => setEditingTicket({ ...editingTicket, vehicle_plate: e.target.value })}
+                  className="input-touch w-full"
+                  placeholder="Ej: ABC-123"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1">Total (C$)</label>
+                <input
+                  type="number"
+                  value={editingTicket.total || 0}
+                  onChange={(e) => setEditingTicket({ ...editingTicket, total: parseFloat(e.target.value) || 0 })}
+                  className="input-touch w-full"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6">
+              <button
+                onClick={() => setEditingTicket(null)}
+                className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleEditSave}
+                className="flex-1 py-3 rounded-xl bg-accent text-accent-foreground font-semibold hover:bg-accent/90 transition-colors"
+              >
+                <i className="fa-solid fa-save mr-2" />
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deletingTicket && (
+        <div className="modal-overlay" onClick={() => setDeletingTicket(null)}>
+          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-foreground">
+                <i className="fa-solid fa-triangle-exclamation mr-2 text-destructive" />
+                Confirmar eliminación
+              </h2>
+              <button onClick={() => setDeletingTicket(null)} className="touch-btn p-2 text-muted-foreground">
+                <i className="fa-solid fa-xmark text-xl" />
+              </button>
+            </div>
+            <p className="text-foreground mb-6">
+              ¿Estás seguro de que deseas eliminar el ticket <strong>{deletingTicket.ticket_number}</strong>?
+              Esta acción no se puede deshacer.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDeletingTicket(null)}
+                className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                className="flex-1 py-3 rounded-xl bg-destructive text-white font-semibold hover:bg-red-600 transition-colors"
+              >
+                <i className="fa-solid fa-trash-can mr-2" />
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reprint Modal */}
+      {reprintTicket && (
+        <TicketPrint
+          ticket={reprintTicket}
+          onClose={() => setReprintTicket(null)}
+        />
+      )}
+
+      {/* Toast */}
+      {toast && <div className="toast-success"><i className="fa-solid fa-circle-check mr-2" />{toast}</div>}
     </div>
   );
 }

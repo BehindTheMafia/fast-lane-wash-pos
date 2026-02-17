@@ -163,6 +163,7 @@ export default function POS() {
         .insert({
           ticket_number: ticketNumber,
           user_id: user.id,
+          customer_id: customer?.id || null, // Save customer ID
           vehicle_type_id: firstItem.vehicleTypeId,
           vehicle_plate: customer?.plate || "",
           total,
@@ -232,6 +233,32 @@ export default function POS() {
           });
         } catch (err) {
           console.error('Error recording membership wash:', err);
+        }
+      }
+
+      // Increment loyalty visit for non-general customers on regular purchases (not membership usage)
+      if (customer && !customer.is_general && !selectedMembershipId && ticketItems.length > 0) {
+        try {
+          const { data: loyaltyData, error: loyaltyError } = await (supabase.rpc as any)('increment_loyalty_visit', {
+            p_customer_id: customer.id,
+            p_ticket_id: (ticket as any).id,
+            p_service_id: ticketItems[0].serviceId
+          });
+
+          if (loyaltyError) {
+            console.error('Error incrementing loyalty visit:', loyaltyError);
+          } else if (loyaltyData) {
+            console.log('Loyalty visit recorded:', loyaltyData);
+
+            // Show congratulations message if customer earned a free wash
+            if (loyaltyData.earned_free_wash) {
+              setTimeout(() => {
+                showToast(`🎉 ¡Felicidades ${customer.name}! Has ganado un lavado Pasteado GRATIS. Total disponibles: ${loyaltyData.free_washes_available}`, "success");
+              }, 1000);
+            }
+          }
+        } catch (err) {
+          console.error('Error with loyalty program:', err);
         }
       }
 

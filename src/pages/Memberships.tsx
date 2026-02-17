@@ -138,14 +138,22 @@ export default function Memberships() {
       // Generate ticket number
       const ticketNumber = `M-${Date.now().toString(36).toUpperCase()}`;
 
+      // Get customer data for plate information
+      const { data: customerData } = await supabase
+        .from("customers")
+        .select("plate")
+        .eq("id", Number(selectedCustomer))
+        .single();
+
       // Create ticket for membership sale
       const { data: ticket, error: ticketErr } = await supabase
         .from("tickets")
         .insert({
           ticket_number: ticketNumber,
           user_id: user.id,
+          customer_id: Number(selectedCustomer),
           vehicle_type_id: selectedVehicleType,
-          vehicle_plate: "",
+          vehicle_plate: customerData?.plate || "",
           total: membershipPrice,
           status: "paid",
         } as any)
@@ -176,6 +184,20 @@ export default function Memberships() {
       }
 
       console.log("Payment created");
+
+      // Create ticket_item for the service (so it shows in reports)
+      const { error: ticketItemErr } = await supabase.from("ticket_items").insert({
+        ticket_id: (ticket as any).id,
+        service_id: selectedService,
+        price: membershipPrice,
+      } as any);
+
+      if (ticketItemErr) {
+        console.error("Error creating ticket item:", ticketItemErr);
+        throw ticketItemErr;
+      }
+
+      console.log("Ticket item created");
 
       // Create membership
       await createMembership({

@@ -18,7 +18,10 @@ export type Database = {
                     id: number
                     logo_url: string | null
                     phone: string | null
+                    printer_width_mm: number
                     receipt_footer: string | null
+                    ruc: string | null
+                    social_media: string | null
                     updated_at: string | null
                 }
                 Insert: {
@@ -29,7 +32,10 @@ export type Database = {
                     id?: number
                     logo_url?: string | null
                     phone?: string | null
+                    printer_width_mm?: number
                     receipt_footer?: string | null
+                    ruc?: string | null
+                    social_media?: string | null
                     updated_at?: string | null
                 }
                 Update: {
@@ -40,7 +46,10 @@ export type Database = {
                     id?: number
                     logo_url?: string | null
                     phone?: string | null
+                    printer_width_mm?: number
                     receipt_footer?: string | null
+                    ruc?: string | null
+                    social_media?: string | null
                     updated_at?: string | null
                 }
                 Relationships: []
