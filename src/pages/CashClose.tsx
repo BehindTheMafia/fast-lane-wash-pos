@@ -17,6 +17,7 @@ export default function CashClose() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [dayStats, setDayStats] = useState({ cashNIO: 0, cashUSD: 0, card: 0, transfer: 0 });
+  const [showConfirmation, setShowConfirmation] = useState(false);
 
   const calculateTotal = (billsObj: Record<string, number>, coinsObj: Record<string, number>) => {
     let total = 0;
@@ -264,7 +265,7 @@ export default function CashClose() {
                 <span className="font-bold text-lg">{difference >= 0 ? "+" : ""}C${difference.toFixed(2)}</span>
               </div>
             </div>
-            <button onClick={handleSave} disabled={saving} className="btn-cobrar w-full mt-4 flex items-center justify-center gap-2">
+            <button onClick={() => setShowConfirmation(true)} disabled={saving} className="btn-cobrar w-full mt-4 flex items-center justify-center gap-2">
               {saving ? <i className="fa-solid fa-spinner fa-spin" /> : <><i className="fa-solid fa-floppy-disk" />Guardar cierre</>}
             </button>
           </div>
@@ -293,6 +294,88 @@ export default function CashClose() {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      {showConfirmation && (
+        <div className="modal-overlay" onClick={() => setShowConfirmation(false)}>
+          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-foreground">
+                <i className="fa-solid fa-triangle-exclamation mr-2 text-amber-500" />
+                Confirmar Cierre de Caja
+              </h2>
+              <button onClick={() => setShowConfirmation(false)} className="touch-btn p-2 text-muted-foreground">
+                <i className="fa-solid fa-xmark text-xl" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+                <p className="text-sm text-foreground font-semibold mb-2">
+                  <i className="fa-solid fa-info-circle mr-2 text-amber-500" />
+                  Importante:
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Una vez guardado, el cierre de caja <strong>NO puede ser editado ni eliminado</strong>.
+                  Por favor verifica que toda la información sea correcta.
+                </p>
+              </div>
+
+              <div className="pos-card p-4 space-y-2 text-sm">
+                <h3 className="font-bold text-foreground mb-3">Resumen del cierre:</h3>
+                <div className="flex justify-between">
+                  <span className="text-secondary">Turno:</span>
+                  <span className="font-semibold">{shift}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-secondary">Saldo inicial:</span>
+                  <span className="font-semibold">C${parseFloat(initialBalance).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-secondary">Total esperado:</span>
+                  <span className="font-semibold">C${expected.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-secondary">Total contado:</span>
+                  <span className="font-semibold">C${counted.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between pt-2 border-t border-border">
+                  <span className="font-bold">Diferencia:</span>
+                  <span className={`font-bold ${difference >= 0 ? "text-accent" : "text-destructive"}`}>
+                    {difference >= 0 ? "+" : ""}C${difference.toFixed(2)}
+                  </span>
+                </div>
+                {totalExpenses > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-secondary">Egresos totales:</span>
+                    <span className="font-semibold">C${totalExpenses.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowConfirmation(false)}
+                  className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+                >
+                  <i className="fa-solid fa-arrow-left mr-2" />
+                  Revisar
+                </button>
+                <button
+                  onClick={() => {
+                    setShowConfirmation(false);
+                    handleSave();
+                  }}
+                  className="flex-1 py-3 rounded-xl bg-accent text-accent-foreground font-semibold hover:bg-accent/90 transition-colors"
+                >
+                  <i className="fa-solid fa-check mr-2" />
+                  Confirmar y Guardar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && <div className="toast-success"><i className="fa-solid fa-circle-check mr-2" />{toast}</div>}
     </div>

@@ -1,73 +1,173 @@
-# Welcome to your Lovable project
+# 🚗 Fast Lane Wash POS
 
-## Project info
+Sistema de Punto de Venta (POS) completo para autolavados, con gestión de membresías, programa de lealtad, reportes y cierre de caja.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## ✨ Características
 
-## How can I edit this code?
+- **POS Completo**: Registro de ventas con múltiples métodos de pago (efectivo, tarjeta, transferencia)
+- **Gestión de Membresías**: Venta, renovación y uso de paquetes de lavados
+- **Programa de Lealtad**: Sistema automático de recompensas (9 lavados = 1 gratis)
+- **Reportes Avanzados**: Visualización, edición y reimpresión de tickets
+- **Cierre de Caja**: Control de efectivo con conteo de billetes y monedas
+- **Multi-usuario**: Roles de admin y cajero con permisos diferenciados
+- **Gestión de Clientes**: Base de datos de clientes con historial
+- **Configuración Flexible**: Precios por tipo de vehículo, servicios personalizables
 
-There are several ways of editing your application.
+## 🛠️ Tecnologías
 
-**Use Lovable**
+- **Frontend**: React 18 + TypeScript + Vite
+- **Backend**: Supabase (PostgreSQL + Auth + Storage)
+- **Estilos**: Tailwind CSS + shadcn/ui
+- **Iconos**: Font Awesome
+- **Routing**: React Router v6
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## 🚀 Deployment
 
-Changes made via Lovable will be committed automatically to this repo.
+### Variables de Entorno Requeridas
 
-**Use your preferred IDE**
+```env
+VITE_SUPABASE_PROJECT_ID=tu_project_id
+VITE_SUPABASE_PUBLISHABLE_KEY=tu_publishable_key
+VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
+```
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Plataformas Soportadas
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+- ✅ Vercel (Recomendado)
+- ✅ Netlify
+- ✅ GitHub Pages
+- ✅ Cualquier hosting de archivos estáticos
 
-Follow these steps:
+### Comandos
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+```bash
+# Desarrollo
+npm run dev
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+# Build de producción
+npm run build:prod
 
-# Step 3: Install the necessary dependencies.
-npm i
+# Preview local
+npm run preview:prod
+```
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+## 📚 Documentación
+
+- `DEPLOYMENT_GUIDE.md` - Guía completa de deployment
+- `AUDITORIA_SEGURIDAD.md` - Reporte de seguridad
+- `MEJORAS_LEALTAD_CRUD.md` - Documentación del programa de lealtad
+- `MEJORAS_CIERRE_CAJA.md` - Documentación del cierre de caja
+
+## 🔒 Seguridad
+
+- ✅ Row Level Security (RLS) habilitado
+- ✅ Autenticación con Supabase Auth
+- ✅ Variables de entorno protegidas
+- ✅ Headers de seguridad configurados
+- ✅ Logger condicional (sin logs en producción)
+
+## 📋 Requisitos
+
+- Node.js 18+
+- npm o yarn
+- Cuenta de Supabase
+
+## 🎯 Instalación Local
+
+```bash
+# Clonar repositorio
+git clone https://github.com/BehindTheMafia/fast-lane-wash-pos.git
+cd fast-lane-wash-pos
+
+# Instalar dependencias
+npm install
+
+# Configurar variables de entorno
+cp .env.example .env
+# Editar .env con tus credenciales de Supabase
+
+# Iniciar desarrollo
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+## 🗄️ Base de Datos
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Migraciones Requeridas
 
-**Use GitHub Codespaces**
+1. `supabase/complete_migration.sql` - Esquema completo
+2. `supabase/fix_cascade_delete.sql` - Corrección de foreign keys
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Aplicar Migraciones
 
-## What technologies are used for this project?
+1. Ve a Supabase Dashboard → SQL Editor
+2. Copia y pega el contenido de cada archivo
+3. Ejecuta en orden
 
-This project is built with:
+## 👥 Roles de Usuario
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+- **Admin**: Acceso completo al sistema
+- **Cajero**: Acceso a POS, reportes y cierre de caja
 
-## How can I deploy this project?
+## 📱 Pantallas
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+- `/` - Dashboard con estadísticas
+- `/pos` - Punto de venta
+- `/customers` - Gestión de clientes
+- `/memberships` - Gestión de membresías
+- `/reports` - Reportes de ventas
+- `/cash-close` - Cierre de caja
+- `/services` - Configuración de servicios
+- `/settings` - Configuración del negocio
 
-## Can I connect a custom domain to my Lovable project?
+## 🔧 Configuración
 
-Yes, you can!
+### Servicios
+- Lavado Breve
+- Lavado Rápido
+- Lavado Nítido
+- Lavado Completo
+- Pasteado
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+### Tipos de Vehículo
+- Moto
+- Sedán
+- SUV
+- Pick up
+- Microbús
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+### Métodos de Pago
+- Efectivo (NIO/USD)
+- Tarjeta
+- Transferencia
+
+## 📊 Reportes
+
+- Ventas por período
+- Ventas por servicio
+- Ventas por vehículo
+- Ventas por método de pago
+- Historial de cierres de caja
+
+## 🎁 Programa de Lealtad
+
+- Cada 9 lavados regulares = 1 lavado Pasteado gratis
+- Contador automático por cliente
+- Notificación al ganar lavado gratis
+- Reinicio automático del contador
+
+## 📞 Soporte
+
+Para reportar problemas o solicitar características, abre un issue en GitHub.
+
+## 📄 Licencia
+
+Privado - Todos los derechos reservados
+
+## 🙏 Créditos
+
+Desarrollado para Fast Lane Wash
+
+---
+
+**Versión**: 1.0.0  
+**Última actualización**: 2026-02-17
