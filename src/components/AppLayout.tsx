@@ -13,9 +13,9 @@ const navItems: NavItem[] = [
   { label: "POS", icon: "fa-cash-register", path: "/pos" },
   { label: "Dashboard", icon: "fa-chart-pie", path: "/dashboard", adminOnly: true },
   { label: "Reportes", icon: "fa-file-lines", path: "/reports", adminOnly: true },
-  { label: "Cierre de Caja", icon: "fa-vault", path: "/cash-close", adminOnly: true },
-  { label: "Clientes", icon: "fa-users", path: "/customers", adminOnly: true },
-  { label: "Membresías", icon: "fa-id-card", path: "/memberships", adminOnly: true },
+  { label: "Cierre de Caja", icon: "fa-vault", path: "/cash-close" },
+  { label: "Clientes", icon: "fa-users", path: "/customers" },
+  { label: "Membresías", icon: "fa-id-card", path: "/memberships" },
   { label: "Servicios", icon: "fa-list-check", path: "/services", adminOnly: true },
   { label: "Configuración", icon: "fa-gear", path: "/settings", adminOnly: true },
 ];
@@ -59,11 +59,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <Link
                 key={item.path}
                 to={item.path}
-                className={`touch-btn flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
-                  active
+                className={`touch-btn flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${active
                     ? "bg-sidebar-accent text-sidebar-foreground"
                     : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                }`}
+                  }`}
               >
                 <i className={`fa-solid ${item.icon} w-5 text-center`} />
                 {item.label}
@@ -113,9 +112,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                     key={item.path}
                     to={item.path}
                     onClick={() => setSidebarOpen(false)}
-                    className={`touch-btn flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${
-                      active ? "bg-sidebar-accent text-sidebar-foreground" : "text-sidebar-foreground/70"
-                    }`}
+                    className={`touch-btn flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${active ? "bg-sidebar-accent text-sidebar-foreground" : "text-sidebar-foreground/70"
+                      }`}
                   >
                     <i className={`fa-solid ${item.icon} w-5 text-center`} />
                     {item.label}
