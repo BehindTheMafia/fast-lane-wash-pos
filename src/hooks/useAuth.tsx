@@ -34,11 +34,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("profiles")
       .select("*")
-      .eq("id", userId) // Changed from user_id to id
+      .eq("user_id", userId)
       .maybeSingle();
+
+    if (error) {
+      console.error("Error fetching profile:", error);
+    }
 
     if (data) {
       // Map operator/manager roles to cajero for compatibility
