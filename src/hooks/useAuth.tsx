@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
-type AppRole = "admin" | "cajero" | "operator" | "manager";
+type AppRole = "admin" | "cajero" | "owner" | "operator" | "manager";
 
 interface Profile {
   id: string;
@@ -22,6 +22,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   isAdmin: boolean;
   isCajero: boolean;
+  isOwner: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -43,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Map operator/manager roles to cajero for compatibility
       const role = data.role as string;
       const mappedRole = (role === "operator" || role === "manager") ? "cajero" : (role as AppRole);
-      setProfile({ ...data, role: mappedRole } as Profile);
+      setProfile({ ...data, role: mappedRole } as unknown as Profile);
     }
   };
 
@@ -79,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string, fullName: string, role: AppRole) => {
     // Map cajero to operator for database compatibility
-    const dbRole = role === "cajero" ? "operator" : role;
+    const dbRole = role === "cajero" ? "operator" : role === "owner" ? "owner" : role;
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -102,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user, session, profile, loading, signIn, signUp, signOut,
         isAdmin: profile?.role === "admin",
         isCajero: profile?.role === "cajero",
+        isOwner: profile?.role === "owner",
       }}
     >
       {children}

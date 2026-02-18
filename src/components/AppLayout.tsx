@@ -7,12 +7,13 @@ interface NavItem {
   icon: string;
   path: string;
   adminOnly?: boolean;
+  adminOrOwner?: boolean;
 }
 
 const navItems: NavItem[] = [
   { label: "POS", icon: "fa-cash-register", path: "/pos" },
-  { label: "Dashboard", icon: "fa-chart-pie", path: "/dashboard", adminOnly: true },
-  { label: "Reportes", icon: "fa-file-lines", path: "/reports", adminOnly: true },
+  { label: "Dashboard", icon: "fa-chart-pie", path: "/dashboard", adminOrOwner: true },
+  { label: "Reportes", icon: "fa-file-lines", path: "/reports", adminOrOwner: true },
   { label: "Cierre de Caja", icon: "fa-vault", path: "/cash-close" },
   { label: "Clientes", icon: "fa-users", path: "/customers" },
   { label: "Membresías", icon: "fa-id-card", path: "/memberships" },
@@ -22,6 +23,7 @@ const navItems: NavItem[] = [
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { profile, signOut, loading, user, isAdmin } = useAuth();
+  const isOwner = profile?.role === "owner";
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -35,7 +37,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  const visibleNav = navItems.filter((n) => !n.adminOnly || isAdmin);
+  const visibleNav = navItems.filter((n) => {
+    if (n.adminOnly) return isAdmin;
+    if (n.adminOrOwner) return isAdmin || isOwner;
+    return true;
+  });
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -60,8 +66,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 key={item.path}
                 to={item.path}
                 className={`touch-btn flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${active
-                    ? "bg-sidebar-accent text-sidebar-foreground"
-                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                  ? "bg-sidebar-accent text-sidebar-foreground"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                   }`}
               >
                 <i className={`fa-solid ${item.icon} w-5 text-center`} />
