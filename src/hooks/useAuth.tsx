@@ -50,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const mappedRole = (role === "operator" || role === "manager") ? "cajero" : (role as AppRole);
       setProfile({ ...data, role: mappedRole } as unknown as Profile);
     }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -59,19 +60,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null);
         if (session?.user) {
           // Add small delay to allow trigger to create profile if needed
+          // setLoading stays true until fetchProfile completes
           setTimeout(() => fetchProfile(session.user.id), 500);
         } else {
           setProfile(null);
+          setLoading(false);
         }
-        setLoading(false);
       }
     );
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) fetchProfile(session.user.id);
-      setLoading(false);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      } else {
+        setLoading(false);
+      }
     });
 
     return () => subscription.unsubscribe();
