@@ -8,6 +8,41 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     window.print();
   };
 
+  const handleWhatsApp = () => {
+    if (!ticket.customer?.phone) return;
+
+    // Normalize phone (remove non-digits, handle Nicaragua code if missing)
+    let phone = ticket.customer.phone.replace(/\D/g, "");
+    if (phone.length === 8) phone = "505" + phone;
+
+    const dateStr = new Date(ticket.created_at || Date.now()).toLocaleDateString("es-NI");
+    const timeStr = new Date(ticket.created_at || Date.now()).toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
+
+    // Format professional message
+    let message = `*${ticket.settings?.business_name || "EL RAPIDO AUTOLAVADO"}*\n`;
+    message += `🖨️ *TICKET:* ${ticket.ticket_number}\n`;
+    message += `📅 *Fecha:* ${dateStr} ${timeStr}\n`;
+    message += `👤 *Cliente:* ${ticket.customer?.name || "Cliente"}\n`;
+    if (ticket.customer?.plate) message += `🚗 *Placa:* ${ticket.customer.plate.toUpperCase()}\n`;
+    message += `──────────────────\n`;
+    message += `*SERVICIOS:*\n`;
+
+    ticket.items?.forEach((item: any) => {
+      message += `• ${item.serviceName}\n`;
+      message += `  _C$${item.price.toFixed(2)}_\n`;
+    });
+
+    message += `──────────────────\n`;
+    message += `*SUBTOTAL:* C$${Number(ticket.subtotal).toFixed(2)}\n`;
+    if (Number(ticket.discount) > 0) message += `*DESCUENTO:* -C$${Number(ticket.discount).toFixed(2)}\n`;
+    message += `💰 *TOTAL: C$${Number(ticket.total).toFixed(2)}*\n`;
+    message += `──────────────────\n`;
+    message += `_${ticket.settings?.receipt_footer || "¡Gracias por su visita!"}_`;
+
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(url, "_blank");
+  };
+
   const date = new Date(ticket.created_at || Date.now());
   const printerWidth = ticket.settings?.printer_width_mm || 80;
 
@@ -154,11 +189,18 @@ export default function TicketPrint({ ticket, onClose }: Props) {
           </div>
         </div>
 
-        <div className="flex gap-2 mt-4 print:hidden">
-          <button onClick={handlePrint} className="touch-btn flex-1 bg-accent text-accent-foreground py-3 rounded-xl font-semibold flex items-center justify-center gap-2">
-            <i className="fa-solid fa-print" />Imprimir
-          </button>
-          <button onClick={onClose} className="touch-btn flex-1 border border-border text-foreground py-3 rounded-xl font-semibold">
+        <div className="flex flex-col gap-2 mt-4 print:hidden">
+          <div className="flex gap-2">
+            <button onClick={handlePrint} className="touch-btn flex-1 bg-brick-red text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2">
+              <i className="fa-solid fa-print" />Imprimir
+            </button>
+            {!ticket.customer?.is_general && ticket.customer?.phone && (
+              <button onClick={handleWhatsApp} className="touch-btn flex-1 bg-[#25D366] text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2">
+                <i className="fa-brands fa-whatsapp text-xl" />WhatsApp
+              </button>
+            )}
+          </div>
+          <button onClick={onClose} className="touch-btn w-full border border-border text-foreground py-3 rounded-xl font-semibold">
             Cerrar
           </button>
         </div>
