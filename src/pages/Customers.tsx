@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import CustomerFormModal from "@/components/customers/CustomerFormModal";
 
 interface Customer {
@@ -17,6 +18,7 @@ interface Customer {
 }
 
 export default function Customers() {
+  const { isAdmin, isOwner, isOperator } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -24,6 +26,8 @@ export default function Customers() {
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  const canDelete = isAdmin || isOwner || isOperator;
 
   const load = async () => {
     setLoading(true);
@@ -166,13 +170,15 @@ export default function Customers() {
                           >
                             <i className="fa-solid fa-pen" />
                           </button>
-                          <button
-                            onClick={() => setDeletingCustomer(c)}
-                            className="touch-btn p-2 text-destructive hover:text-red-600"
-                            title="Eliminar"
-                          >
-                            <i className="fa-solid fa-trash-can" />
-                          </button>
+                          {canDelete && (
+                            <button
+                              onClick={() => setDeletingCustomer(c)}
+                              className="touch-btn p-2 text-destructive hover:text-red-600"
+                              title="Eliminar"
+                            >
+                              <i className="fa-solid fa-trash-can" />
+                            </button>
+                          )}
                         </div>
                       )}
                     </td>

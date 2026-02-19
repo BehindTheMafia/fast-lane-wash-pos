@@ -9,6 +9,7 @@ interface Profile {
   user_id: string;
   full_name: string;
   role: AppRole;
+  raw_role?: string;
   active: boolean;
 }
 
@@ -23,6 +24,7 @@ interface AuthContextType {
   isAdmin: boolean;
   isCajero: boolean;
   isOwner: boolean;
+  isOperator: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -45,10 +47,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (data) {
-      // Map operator/manager roles to cajero for compatibility
+      // Map operator/manager roles to cajero for compatibility in some parts
+      // but preserve the original for specific permissions
       const role = data.role as string;
       const mappedRole = (role === "operator" || role === "manager") ? "cajero" : (role as AppRole);
-      setProfile({ ...data, role: mappedRole } as unknown as Profile);
+      setProfile({ ...data, role: mappedRole, raw_role: role } as unknown as Profile);
     }
     setLoading(false);
   };
@@ -113,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAdmin: profile?.role === "admin",
         isCajero: profile?.role === "cajero",
         isOwner: profile?.role === "owner",
+        isOperator: profile?.role === "operator" || (profile as any)?.raw_role === "operator",
       }}
     >
       {children}
