@@ -17,6 +17,7 @@ const navItems: NavItem[] = [
   { label: "Cierre de Caja", icon: "fa-vault", path: "/cash-close" },
   { label: "Clientes", icon: "fa-users", path: "/customers" },
   { label: "Membresías", icon: "fa-id-card", path: "/memberships" },
+  { label: "Recordatorios", icon: "fa-bell", path: "/reminders" },
   { label: "Servicios", icon: "fa-list-check", path: "/services", adminOnly: true },
   { label: "Configuración", icon: "fa-gear", path: "/settings", adminOnly: true },
 ];

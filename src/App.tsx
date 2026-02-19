@@ -13,6 +13,7 @@ import CashClose from "@/pages/CashClose";
 import Customers from "@/pages/Customers";
 import Memberships from "@/pages/Memberships";
 import Services from "@/pages/Services";
+import Reminders from "@/pages/Reminders";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
 import DBValidation from "@/pages/DBValidation";
@@ -64,6 +65,7 @@ const App = () => (
             <Route path="/cash-close" element={<ProtectedRoute><CashClose /></ProtectedRoute>} />
             <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />
             <Route path="/memberships" element={<ProtectedRoute><Memberships /></ProtectedRoute>} />
+            <Route path="/reminders" element={<ProtectedRoute><Reminders /></ProtectedRoute>} />
             <Route path="/services" element={<ProtectedRoute><AdminRoute><Services /></AdminRoute></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><AdminRoute><Settings /></AdminRoute></ProtectedRoute>} />
             <Route path="/db-validation" element={<DBValidation />} />

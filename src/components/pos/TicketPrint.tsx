@@ -8,40 +8,79 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     window.print();
   };
 
-  const handleWhatsApp = () => {
-    if (!ticket.customer?.phone) return;
+ const handleWhatsApp = () => {
+  const rawPhone = ticket.customer?.phone;
+  if (!rawPhone) return;
 
-    // Normalize phone (remove non-digits, handle Nicaragua code if missing)
-    let phone = ticket.customer.phone.replace(/\D/g, "");
-    if (phone.length === 8) phone = "505" + phone;
+  // 1) Normalizar teléfono (Nicaragua: 8 dígitos -> +505)
+  let phone = String(rawPhone).replace(/\D/g, "");
+  if (phone.length === 8) phone = "505" + phone;
 
-    const dateStr = new Date(ticket.created_at || Date.now()).toLocaleDateString("es-NI");
-    const timeStr = new Date(ticket.created_at || Date.now()).toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
-
-    // Format professional message
-    let message = `*${ticket.settings?.business_name || "EL RAPIDO AUTOLAVADO"}*\n`;
-    message += `🖨️ *TICKET:* ${ticket.ticket_number}\n`;
-    message += `📅 *Fecha:* ${dateStr} ${timeStr}\n`;
-    message += `👤 *Cliente:* ${ticket.customer?.name || "Cliente"}\n`;
-    if (ticket.customer?.plate) message += `🚗 *Placa:* ${ticket.customer.plate.toUpperCase()}\n`;
-    message += `──────────────────\n`;
-    message += `*SERVICIOS:*\n`;
-
-    ticket.items?.forEach((item: any) => {
-      message += `• ${item.serviceName}\n`;
-      message += `  _C$${item.price.toFixed(2)}_\n`;
-    });
-
-    message += `──────────────────\n`;
-    message += `*SUBTOTAL:* C$${Number(ticket.subtotal).toFixed(2)}\n`;
-    if (Number(ticket.discount) > 0) message += `*DESCUENTO:* -C$${Number(ticket.discount).toFixed(2)}\n`;
-    message += `💰 *TOTAL: C$${Number(ticket.total).toFixed(2)}*\n`;
-    message += `──────────────────\n`;
-    message += `_${ticket.settings?.receipt_footer || "¡Gracias por su visita!"}_`;
-
-    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
+  // 2) Helpers numéricos (evita NaN)
+  const toNumber = (v: any) => {
+    const n = typeof v === "string" ? v.replace(/,/g, "").trim() : v;
+    const out = Number(n);
+    return Number.isFinite(out) ? out : 0;
   };
+
+  const items = Array.isArray(ticket.items) ? ticket.items : [];
+
+  const computedSubtotal = items.reduce((sum: number, item: any) => {
+    const price = toNumber(item?.price);
+    const qty = toNumber(item?.qty ?? 1);
+    return sum + price * qty;
+  }, 0);
+
+  const subtotal = toNumber(ticket.subtotal) || computedSubtotal;
+  const discount = toNumber(ticket.discount);
+  const total = toNumber(ticket.total) || Math.max(0, subtotal - discount);
+
+  // 3) Fecha/hora
+  const dt = new Date(ticket.created_at || Date.now());
+  const dateStr = dt.toLocaleDateString("es-NI");
+  const timeStr = dt.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
+
+  // 4) Texto (emojis OK) + separador "seguro"
+  const businessName = ticket.settings?.business_name || "EL RAPIDO AUTOLAVADO";
+  const ticketNum = ticket.ticket_number || "----";
+  const clientName = ticket.customer?.name || "Cliente";
+  const plate = ticket.customer?.plate ? String(ticket.customer.plate).toUpperCase() : "";
+
+  const line = "------------------------------"; // evita ───── (a veces rompe)
+
+  let message = `✨ *${businessName}* ✨\n`;
+  message += `🧾 *TICKET:* ${ticketNum}\n`;
+  message += `📅 *Fecha:* ${dateStr} ${timeStr}\n`;
+  message += `👤 *Cliente:* ${clientName}\n`;
+  if (plate) message += `🚗 *Placa:* ${plate}\n`;
+  message += `${line}\n`;
+  message += `🧼 *SERVICIOS:*\n`;
+
+  items.forEach((item: any) => {
+    const name = item?.serviceName ?? "Servicio";
+    const price = toNumber(item?.price);
+    const qty = toNumber(item?.qty ?? 1);
+
+    // Bullets seguros (evita "•⁠  ⁠" con caracteres invisibles)
+    message += `🔹 ${name}${qty > 1 ? ` (x${qty})` : ""}\n`;
+    message += `   💰 C$${(price * qty).toFixed(2)}\n`;
+  });
+
+  message += `${line}\n`;
+  message += `📦 *SUBTOTAL:* C$${subtotal.toFixed(2)}\n`;
+  if (discount > 0) message += `🏷️ *DESCUENTO:* -C$${discount.toFixed(2)}\n`;
+  message += `💵 *TOTAL:* C$${total.toFixed(2)}\n`;
+  message += `${line}\n`;
+  message += `🙏 _${ticket.settings?.receipt_footer || "¡Gracias por su visita!"}_`;
+
+  // 5) Usar endpoint según dispositivo (más estable)
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const base = isMobile ? "https://api.whatsapp.com/send" : "https://web.whatsapp.com/send";
+
+  const url = `${base}?phone=${phone}&text=${encodeURIComponent(message)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+};
+
 
   const date = new Date(ticket.created_at || Date.now());
   const printerWidth = ticket.settings?.printer_width_mm || 80;
