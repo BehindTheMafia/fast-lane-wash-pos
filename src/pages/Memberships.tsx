@@ -15,6 +15,7 @@ const vehicleTypes = [
   { id: 3, label: "SUV", icon: "fa-car-side" },
   { id: 4, label: "Pick up", icon: "fa-truck-pickup" },
   { id: 5, label: "Microbús", icon: "fa-van-shuttle" },
+  { id: 6, label: "Taxi", icon: "fa-taxi" },
 ];
 
 export default function Memberships() {
@@ -406,7 +407,7 @@ export default function Memberships() {
               </div>
               <div>
                 <label className="text-sm font-semibold text-foreground block mb-2">Tipo de vehículo</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                   {vehicleTypes.map((vt) => (
                     <button
                       key={vt.id}

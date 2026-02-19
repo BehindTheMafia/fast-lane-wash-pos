@@ -9,11 +9,12 @@ const vehicleTypeMap: Record<string, number> = {
   sedan: 2,
   suv: 3,
   pickup: 4,
-  microbus: 5
+  microbus: 5,
+  taxi: 6
 };
 
-const vehicleTypes = ["moto", "sedan", "suv", "pickup", "microbus"];
-const vehicleLabels: Record<string, string> = { moto: "Moto", sedan: "Sedán", suv: "SUV", pickup: "Pick up", microbus: "Microbús" };
+const vehicleTypes = ["moto", "sedan", "suv", "pickup", "microbus", "taxi"];
+const vehicleLabels: Record<string, string> = { moto: "Moto", sedan: "Sedán", suv: "SUV", pickup: "Pick up", microbus: "Microbús", taxi: "Taxi" };
 
 export default function Services() {
   const { data: services, isLoading, refetch } = useAllServices();
@@ -104,7 +105,7 @@ export default function Services() {
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input-touch" placeholder="Nombre del servicio" />
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="input-touch" placeholder="Descripción" />
           </div>
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
             {vehicleTypes.map((v) => (
               <div key={v}>
                 <label className="text-xs font-semibold text-secondary">{vehicleLabels[v]}</label>
@@ -145,7 +146,7 @@ export default function Services() {
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-5 gap-2 mt-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
               {svc.service_prices?.sort((a: any, b: any) => a.vehicle_type_id - b.vehicle_type_id).map((p: any) => {
                 const vehicleTypeName = Object.keys(vehicleTypeMap).find(key => vehicleTypeMap[key] === p.vehicle_type_id);
                 return (

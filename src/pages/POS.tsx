@@ -17,6 +17,7 @@ const vehicleTypes = [
   { key: "suv", id: 3, label: "SUV", icon: "fa-car-side" },
   { key: "pickup", id: 4, label: "Pick up", icon: "fa-truck-pickup" },
   { key: "microbus", id: 5, label: "Microbús", icon: "fa-van-shuttle" },
+  { key: "taxi", id: 6, label: "Taxi", icon: "fa-taxi" },
 ] as const;
 
 interface TicketItem {
@@ -314,7 +315,7 @@ export default function POS() {
           <p className="text-sm font-semibold text-foreground mb-3">
             <i className="fa-solid fa-car mr-2 text-secondary" />Tipo de vehículo
           </p>
-          <div className="grid grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             {vehicleTypes.map((vt) => {
               // Only restrict vehicle types if a membership is SELECTED
               const isMembershipRestricted = selectedMembership && selectedMembership.vehicle_type_id !== vt.id;

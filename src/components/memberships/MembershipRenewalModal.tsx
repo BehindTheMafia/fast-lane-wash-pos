@@ -18,6 +18,7 @@ const vehicleTypes = [
     { id: 3, label: "SUV", icon: "fa-car-side" },
     { id: 4, label: "Pick up", icon: "fa-truck-pickup" },
     { id: 5, label: "Microbús", icon: "fa-van-shuttle" },
+    { id: 6, label: "Taxi", icon: "fa-taxi" },
 ];
 
 export default function MembershipRenewalModal({
@@ -64,14 +65,14 @@ export default function MembershipRenewalModal({
                         <label className="text-sm font-semibold text-foreground block mb-2">
                             Tipo de vehículo
                         </label>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                             {vehicleTypes.map((vt) => (
                                 <button
                                     key={vt.id}
                                     onClick={() => setSelectedVehicleType(vt.id)}
                                     className={`p-3 rounded-lg border-2 transition-all ${selectedVehicleType === vt.id
-                                            ? 'border-primary bg-primary/10'
-                                            : 'border-border hover:border-primary/50'
+                                        ? 'border-primary bg-primary/10'
+                                        : 'border-border hover:border-primary/50'
                                         }`}
                                 >
                                     <i className={`fa-solid ${vt.icon} text-2xl ${selectedVehicleType === vt.id ? 'text-primary' : 'text-secondary'
