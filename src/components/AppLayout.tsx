@@ -8,11 +8,12 @@ interface NavItem {
   path: string;
   adminOnly?: boolean;
   adminOrOwner?: boolean;
+  adminOrOwnerOrCajero?: boolean;
 }
 
 const navItems: NavItem[] = [
   { label: "POS", icon: "fa-cash-register", path: "/pos" },
-  { label: "Dashboard", icon: "fa-chart-pie", path: "/dashboard", adminOrOwner: true },
+  { label: "Dashboard", icon: "fa-chart-pie", path: "/dashboard", adminOrOwnerOrCajero: true },
   { label: "Reportes", icon: "fa-file-lines", path: "/reports", adminOrOwner: true },
   { label: "Cierre de Caja", icon: "fa-vault", path: "/cash-close" },
   { label: "Clientes", icon: "fa-users", path: "/customers" },
@@ -41,6 +42,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const visibleNav = navItems.filter((n) => {
     if (n.adminOnly) return isAdmin;
     if (n.adminOrOwner) return isAdmin || isOwner;
+    if (n.adminOrOwnerOrCajero) return isAdmin || isOwner || profile?.role === "cajero";
     return true;
   });
 

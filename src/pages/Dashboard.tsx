@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 
 interface Stats {
   totalSalesNIO: number;
@@ -13,62 +15,88 @@ interface Stats {
 
 export default function Dashboard() {
   const { data: settings } = useBusinessSettings();
+  const { profile, isAdmin, isOwner } = useAuth();
+  const canDelete = isAdmin || isOwner || profile?.role === "cajero";
+
   const [stats, setStats] = useState<Stats>({ totalSalesNIO: 0, totalSalesUSD: 0, ticketCount: 0, topServices: [], topVehicles: [], recentTickets: [] });
   const [loading, setLoading] = useState(true);
 
+  const loadStats = async () => {
+    setLoading(true);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Fetch tickets with vehicle_types and payments
+    const { data: tickets } = await supabase
+      .from("tickets")
+      .select("*, vehicle_types(name), payments(*)")
+      .gte("created_at", today.toISOString())
+      .eq("status", "paid")
+      .order("created_at", { ascending: false });
+
+    // Fetch ticket_items with services for today's tickets
+    const { data: ticketItems } = await (supabase as any)
+      .from("ticket_items")
+      .select("*, services(name), tickets(created_at, status)")
+      .gte("tickets.created_at", today.toISOString())
+      .eq("tickets.status", "paid");
+
+    if (!tickets) { setLoading(false); return; }
+
+    const rate = settings?.exchange_rate || 36.5;
+    let totalNIO = 0;
+    const svcCount: Record<string, number> = {};
+    const vehCount: Record<string, number> = {};
+
+    tickets.forEach((t: any) => {
+      totalNIO += Number(t.total);
+
+      // By vehicle
+      const vn = (t.vehicle_types as any)?.name || "N/A";
+      vehCount[vn] = (vehCount[vn] || 0) + 1;
+    });
+
+    // By service from ticket_items
+    ticketItems?.forEach((ti: any) => {
+      const svcName = ti.services?.name || "Otro";
+      svcCount[svcName] = (svcCount[svcName] || 0) + 1;
+    });
+
+    setStats({
+      totalSalesNIO: totalNIO,
+      totalSalesUSD: +(totalNIO / rate).toFixed(2),
+      ticketCount: tickets.length,
+      topServices: Object.entries(svcCount).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+      topVehicles: Object.entries(vehCount).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
+      recentTickets: tickets.slice(0, 10),
+    });
+    setLoading(false);
+  };
+
   useEffect(() => {
-    const loadStats = async () => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      // Fetch tickets with vehicle_types and payments
-      const { data: tickets } = await supabase
-        .from("tickets")
-        .select("*, vehicle_types(name), payments(*)")
-        .gte("created_at", today.toISOString())
-        .eq("status", "paid")
-        .order("created_at", { ascending: false });
-
-      // Fetch ticket_items with services for today's tickets
-      const { data: ticketItems } = await (supabase as any)
-        .from("ticket_items")
-        .select("*, services(name), tickets(created_at, status)")
-        .gte("tickets.created_at", today.toISOString())
-        .eq("tickets.status", "paid");
-
-      if (!tickets) { setLoading(false); return; }
-
-      const rate = settings?.exchange_rate || 36.5;
-      let totalNIO = 0;
-      const svcCount: Record<string, number> = {};
-      const vehCount: Record<string, number> = {};
-
-      tickets.forEach((t: any) => {
-        totalNIO += Number(t.total);
-
-        // By vehicle
-        const vn = (t.vehicle_types as any)?.name || "N/A";
-        vehCount[vn] = (vehCount[vn] || 0) + 1;
-      });
-
-      // By service from ticket_items
-      ticketItems?.forEach((ti: any) => {
-        const svcName = ti.services?.name || "Otro";
-        svcCount[svcName] = (svcCount[svcName] || 0) + 1;
-      });
-
-      setStats({
-        totalSalesNIO: totalNIO,
-        totalSalesUSD: +(totalNIO / rate).toFixed(2),
-        ticketCount: tickets.length,
-        topServices: Object.entries(svcCount).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
-        topVehicles: Object.entries(vehCount).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
-        recentTickets: tickets.slice(0, 10),
-      });
-      setLoading(false);
-    };
     loadStats();
   }, [settings]);
+
+  const handleDeleteTicket = async (ticketId: number) => {
+    if (!window.confirm("¿Estás seguro de que deseas eliminar este ticket? Esta acción no se puede deshacer.")) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("tickets")
+        .delete()
+        .eq("id", ticketId);
+
+      if (error) throw error;
+
+      toast.success("Ticket eliminado correctamente");
+      loadStats(); // Refresh data
+    } catch (error: any) {
+      console.error("Error deleting ticket:", error);
+      toast.error("Error al eliminar el ticket: " + (error.message || "Permisos insuficientes"));
+    }
+  };
 
   if (loading) {
     return <div className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
@@ -151,6 +179,7 @@ export default function Dashboard() {
                 <th className="text-left px-4 py-3 font-semibold text-secondary">Vehículo</th>
                 <th className="text-left px-4 py-3 font-semibold text-secondary">Placa</th>
                 <th className="text-right px-4 py-3 font-semibold text-secondary">Total</th>
+                {canDelete && <th className="text-center px-4 py-3 font-semibold text-secondary">Acciones</th>}
               </tr>
             </thead>
             <tbody>
@@ -169,6 +198,17 @@ export default function Dashboard() {
                   <td className="px-4 py-3 text-foreground">{(t.vehicle_types as any)?.name || "—"}</td>
                   <td className="px-4 py-3 text-foreground font-mono">{t.vehicle_plate || "—"}</td>
                   <td className="px-4 py-3 text-right font-bold text-primary">C${Number(t.total).toFixed(0)}</td>
+                  {canDelete && (
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() => handleDeleteTicket(t.id)}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Eliminar ticket"
+                      >
+                        <i className="fa-solid fa-trash-can" />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

@@ -35,6 +35,13 @@ function AdminOrOwnerRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function AdminOrOwnerOrCajeroRoute({ children }: { children: React.ReactNode }) {
+  const { isAdmin, isOwner, isCajero, loading } = useAuth();
+  if (loading) return null;
+  if (!isAdmin && !isOwner && !isCajero) return <Navigate to="/pos" replace />;
+  return <>{children}</>;
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return null;
@@ -60,7 +67,7 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<RootRedirect />} />
             <Route path="/pos" element={<ProtectedRoute><POS /></ProtectedRoute>} />
-            <Route path="/dashboard" element={<ProtectedRoute><AdminOrOwnerRoute><Dashboard /></AdminOrOwnerRoute></ProtectedRoute>} />
+            <Route path="/dashboard" element={<ProtectedRoute><AdminOrOwnerOrCajeroRoute><Dashboard /></AdminOrOwnerOrCajeroRoute></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute><AdminOrOwnerRoute><Reports /></AdminOrOwnerRoute></ProtectedRoute>} />
             <Route path="/cash-close" element={<ProtectedRoute><CashClose /></ProtectedRoute>} />
             <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />
