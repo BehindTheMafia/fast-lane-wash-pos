@@ -65,10 +65,7 @@ export async function printTicketBluetooth(ticket: any) {
             .line(ticket.settings?.receipt_footer || "GRACIAS POR SU VISITA")
             .newline()
             .newline()
-            .newline()
-            .newline()
-            .newline()
-            // Removed cut() as many cheap printers don't support it and it might hang
+            .cut()
             .encode();
 
         // 3. Connect Bluetooth
