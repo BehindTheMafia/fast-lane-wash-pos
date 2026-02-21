@@ -1,85 +1,103 @@
+import { useState } from "react";
+import { printTicketBluetooth } from "@/utils/bluetoothPrinter";
+
 interface Props {
   ticket: any;
   onClose: () => void;
 }
 
 export default function TicketPrint({ ticket, onClose }: Props) {
+  const [isPrintingBT, setIsPrintingBT] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
+
   const handlePrint = () => {
     window.print();
   };
 
- const handleWhatsApp = () => {
-  const rawPhone = ticket.customer?.phone;
-  if (!rawPhone) return;
-
-  // 1) Normalizar teléfono (Nicaragua: 8 dígitos -> +505)
-  let phone = String(rawPhone).replace(/\D/g, "");
-  if (phone.length === 8) phone = "505" + phone;
-
-  // 2) Helpers numéricos (evita NaN)
-  const toNumber = (v: any) => {
-    const n = typeof v === "string" ? v.replace(/,/g, "").trim() : v;
-    const out = Number(n);
-    return Number.isFinite(out) ? out : 0;
+  const handlePrintBluetooth = async () => {
+    setIsPrintingBT(true);
+    setPrintError(null);
+    try {
+      await printTicketBluetooth(ticket);
+    } catch (error: any) {
+      setPrintError(error.message || "Error al conectar con la impresora");
+    } finally {
+      setIsPrintingBT(false);
+    }
   };
 
-  const items = Array.isArray(ticket.items) ? ticket.items : [];
+  const handleWhatsApp = () => {
+    const rawPhone = ticket.customer?.phone;
+    if (!rawPhone) return;
 
-  const computedSubtotal = items.reduce((sum: number, item: any) => {
-    const price = toNumber(item?.price);
-    const qty = toNumber(item?.qty ?? 1);
-    return sum + price * qty;
-  }, 0);
+    // 1) Normalizar teléfono (Nicaragua: 8 dígitos -> +505)
+    let phone = String(rawPhone).replace(/\D/g, "");
+    if (phone.length === 8) phone = "505" + phone;
 
-  const subtotal = toNumber(ticket.subtotal) || computedSubtotal;
-  const discount = toNumber(ticket.discount);
-  const total = toNumber(ticket.total) || Math.max(0, subtotal - discount);
+    // 2) Helpers numéricos (evita NaN)
+    const toNumber = (v: any) => {
+      const n = typeof v === "string" ? v.replace(/,/g, "").trim() : v;
+      const out = Number(n);
+      return Number.isFinite(out) ? out : 0;
+    };
 
-  // 3) Fecha/hora
-  const dt = new Date(ticket.created_at || Date.now());
-  const dateStr = dt.toLocaleDateString("es-NI");
-  const timeStr = dt.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
+    const items = Array.isArray(ticket.items) ? ticket.items : [];
 
-  // 4) Texto (emojis OK) + separador "seguro"
-  const businessName = ticket.settings?.business_name || "EL RAPIDO AUTOLAVADO";
-  const ticketNum = ticket.ticket_number || "----";
-  const clientName = ticket.customer?.name || "Cliente";
-  const plate = ticket.customer?.plate ? String(ticket.customer.plate).toUpperCase() : "";
+    const computedSubtotal = items.reduce((sum: number, item: any) => {
+      const price = toNumber(item?.price);
+      const qty = toNumber(item?.qty ?? 1);
+      return sum + price * qty;
+    }, 0);
 
-  const line = "------------------------------"; // evita ───── (a veces rompe)
+    const subtotal = toNumber(ticket.subtotal) || computedSubtotal;
+    const discount = toNumber(ticket.discount);
+    const total = toNumber(ticket.total) || Math.max(0, subtotal - discount);
 
-  let message = `✨ *${businessName}* ✨\n`;
-  message += `🧾 *TICKET:* ${ticketNum}\n`;
-  message += `📅 *Fecha:* ${dateStr} ${timeStr}\n`;
-  message += `👤 *Cliente:* ${clientName}\n`;
-  if (plate) message += `🚗 *Placa:* ${plate}\n`;
-  message += `${line}\n`;
-  message += `🧼 *SERVICIOS:*\n`;
+    // 3) Fecha/hora
+    const dt = new Date(ticket.created_at || Date.now());
+    const dateStr = dt.toLocaleDateString("es-NI");
+    const timeStr = dt.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
 
-  items.forEach((item: any) => {
-    const name = item?.serviceName ?? "Servicio";
-    const price = toNumber(item?.price);
-    const qty = toNumber(item?.qty ?? 1);
+    // 4) Texto (emojis OK) + separador "seguro"
+    const businessName = ticket.settings?.business_name || "EL RAPIDO AUTOLAVADO";
+    const ticketNum = ticket.ticket_number || "----";
+    const clientName = ticket.customer?.name || "Cliente";
+    const plate = ticket.customer?.plate ? String(ticket.customer.plate).toUpperCase() : "";
 
-    // Bullets seguros (evita "•⁠  ⁠" con caracteres invisibles)
-    message += `🔹 ${name}${qty > 1 ? ` (x${qty})` : ""}\n`;
-    message += `   💰 C$${(price * qty).toFixed(2)}\n`;
-  });
+    const line = "------------------------------"; // evita ───── (a veces rompe)
 
-  message += `${line}\n`;
-  message += `📦 *SUBTOTAL:* C$${subtotal.toFixed(2)}\n`;
-  if (discount > 0) message += `🏷️ *DESCUENTO:* -C$${discount.toFixed(2)}\n`;
-  message += `💵 *TOTAL:* C$${total.toFixed(2)}\n`;
-  message += `${line}\n`;
-  message += `🙏 _${ticket.settings?.receipt_footer || "¡Gracias por su visita!"}_`;
+    let message = `✨ *${businessName}* ✨\n`;
+    message += `🧾 *TICKET:* ${ticketNum}\n`;
+    message += `📅 *Fecha:* ${dateStr} ${timeStr}\n`;
+    message += `👤 *Cliente:* ${clientName}\n`;
+    if (plate) message += `🚗 *Placa:* ${plate}\n`;
+    message += `${line}\n`;
+    message += `🧼 *SERVICIOS:*\n`;
 
-  // 5) Usar endpoint según dispositivo (más estable)
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  const base = isMobile ? "https://api.whatsapp.com/send" : "https://web.whatsapp.com/send";
+    items.forEach((item: any) => {
+      const name = item?.serviceName ?? "Servicio";
+      const price = toNumber(item?.price);
+      const qty = toNumber(item?.qty ?? 1);
 
-  const url = `${base}?phone=${phone}&text=${encodeURIComponent(message)}`;
-  window.open(url, "_blank", "noopener,noreferrer");
-};
+      // Bullets seguros (evita "•⁠  ⁠" con caracteres invisibles)
+      message += `🔹 ${name}${qty > 1 ? ` (x${qty})` : ""}\n`;
+      message += `   💰 C$${(price * qty).toFixed(2)}\n`;
+    });
+
+    message += `${line}\n`;
+    message += `📦 *SUBTOTAL:* C$${subtotal.toFixed(2)}\n`;
+    if (discount > 0) message += `🏷️ *DESCUENTO:* -C$${discount.toFixed(2)}\n`;
+    message += `💵 *TOTAL:* C$${total.toFixed(2)}\n`;
+    message += `${line}\n`;
+    message += `🙏 _${ticket.settings?.receipt_footer || "¡Gracias por su visita!"}_`;
+
+    // 5) Usar endpoint según dispositivo (más estable)
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const base = isMobile ? "https://api.whatsapp.com/send" : "https://web.whatsapp.com/send";
+
+    const url = `${base}?phone=${phone}&text=${encodeURIComponent(message)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
 
   const date = new Date(ticket.created_at || Date.now());
@@ -231,8 +249,24 @@ export default function TicketPrint({ ticket, onClose }: Props) {
         <div className="flex flex-col gap-2 mt-4 print:hidden">
           <div className="flex gap-2">
             <button onClick={handlePrint} className="touch-btn flex-1 bg-brick-red text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2">
-              <i className="fa-solid fa-print" />Imprimir
+              <i className="fa-solid fa-print" />Browser
             </button>
+            <button
+              onClick={handlePrintBluetooth}
+              disabled={isPrintingBT}
+              className="touch-btn flex-1 bg-secondary text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <i className={`fa-solid ${isPrintingBT ? "fa-spinner fa-spin" : "fa-bluetooth"}`} />
+              {isPrintingBT ? "..." : "Ticket BT"}
+            </button>
+          </div>
+          {printError && (
+            <p className="text-[10px] text-destructive text-center font-semibold animate-shake">
+              <i className="fa-solid fa-circle-exclamation mr-1" />
+              {printError}
+            </p>
+          )}
+          <div className="flex gap-2">
             {!ticket.customer?.is_general && ticket.customer?.phone && (
               <button onClick={handleWhatsApp} className="touch-btn flex-1 bg-[#25D366] text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2">
                 <i className="fa-brands fa-whatsapp text-xl" />WhatsApp
