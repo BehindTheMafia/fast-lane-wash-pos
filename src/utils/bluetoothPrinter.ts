@@ -38,20 +38,22 @@ export async function printTicketBluetooth(ticket: any) {
         const hr = '-'.repeat(columns);
 
         // 2. Build Recipe
-        encoder.initialize();
+        // Start directly with alignment to avoid potential reset feed from initialize()
+        encoder.align('center');
 
-        // Logo Support
+        // 1. Logo (tightly coupled with header)
         if (ticket.settings?.logo_url) {
             try {
                 const img = await loadImage(ticket.settings.logo_url);
-                encoder.align('center').image(img, 160, 160, 'atkinson');
+                encoder.image(img, 160, 160, 'atkinson');
             } catch (e) {
                 console.warn("Could not load logo for printing", e);
             }
         }
 
+        // 2. Encabezado de Empresa
         encoder
-            .align('center')
+            .size('normal')
             .line(businessName.toUpperCase())
             .size('small')
             .line(ticket.settings?.address || "")
@@ -60,8 +62,9 @@ export async function printTicketBluetooth(ticket: any) {
         if (ticket.settings?.ruc) encoder.line(`RUC: ${ticket.settings.ruc}`);
         if (ticket.settings?.social_media) encoder.line(`Social: ${ticket.settings.social_media}`);
 
+        // 3. Información del Ticket
         encoder
-            .newline()
+            .size('normal')
             .align('left')
             .line(`TICKET #: ${ticketNum}`)
             .line(`FECHA: ${dateStr}`)
@@ -71,6 +74,7 @@ export async function printTicketBluetooth(ticket: any) {
             encoder.line(`PLACA: ${plate}`);
         }
 
+        // 4. Detalle de Servicios
         encoder
             .line(hr)
             .line('SERVICIOS');
@@ -81,13 +85,17 @@ export async function printTicketBluetooth(ticket: any) {
             const price = Number(item?.price || 0);
             const priceStr = ` C$${price.toFixed(2)}`;
             const nameWidth = Math.max(0, columns - priceStr.length);
-            encoder.line(`${name.substring(0, nameWidth).padEnd(nameWidth)}${priceStr}`);
+
+            encoder.size('normal').line(`${name.substring(0, nameWidth).padEnd(nameWidth)}${priceStr}`);
+
             if (item.vehicleLabel) {
-                encoder.line(` (${item.vehicleLabel})`);
+                encoder.size('small').line(` (${item.vehicleLabel})`);
             }
         });
 
+        // 5. Totales
         encoder
+            .size('normal')
             .line(hr)
             .align('right')
             .line(`SUBTOTAL: C$${Number(ticket.subtotal || 0).toFixed(2)}`);
@@ -97,13 +105,17 @@ export async function printTicketBluetooth(ticket: any) {
         }
 
         encoder
+            .bold(true)
             .line(`TOTAL: C$${Number(ticket.total || 0).toFixed(2)}`)
+            .bold(false)
             .newline();
 
-        // Payment Info
+        // 6. Información de Pago
         if (ticket.payment) {
             encoder
                 .line(hr)
+                .align('left')
+                .size('small')
                 .line(`PAGO (${ticket.payment.method}): ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.received.toFixed(2)}`);
             if (ticket.payment.change > 0) {
                 encoder.line(`VUELTO: ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.change.toFixed(2)}`);
@@ -111,13 +123,21 @@ export async function printTicketBluetooth(ticket: any) {
             encoder.newline();
         }
 
-        const result = encoder
+        // 7. Pie de Página (Footer) - ASEGURADO AL FINAL
+        encoder
+            .size('normal')
             .align('center')
-            .line(ticket.settings?.receipt_footer || "GRACIAS POR SU VISITA")
+            .line(hr)
+            .line(ticket.settings?.receipt_footer || "¡GRACIAS POR SU VISITA!")
+            .line("VUELVA PRONTO")
             .newline()
             .newline()
-            .cut()
-            .encode();
+            .newline()
+            .newline()
+            .newline()
+            .cut();
+
+        const result = encoder.encode();
 
         // 3. Connect Bluetooth
         console.log("Requesting Bluetooth Device...");
