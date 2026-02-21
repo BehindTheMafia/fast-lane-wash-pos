@@ -68,7 +68,7 @@ export default function Dashboard() {
       ticketCount: tickets.length,
       topServices: Object.entries(svcCount).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
       topVehicles: Object.entries(vehCount).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
-      recentTickets: tickets.slice(0, 10),
+      recentTickets: tickets,
     });
     setLoading(false);
   };
