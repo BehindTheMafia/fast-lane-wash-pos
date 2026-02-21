@@ -9,6 +9,7 @@ interface Props {
 export default function TicketPrint({ ticket, onClose }: Props) {
   const [isPrintingBT, setIsPrintingBT] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
+  const [isSuccess, setIsSuccess] = useState(false);
 
   const handlePrint = () => {
     window.print();
@@ -17,8 +18,11 @@ export default function TicketPrint({ ticket, onClose }: Props) {
   const handlePrintBluetooth = async () => {
     setIsPrintingBT(true);
     setPrintError(null);
+    setIsSuccess(false);
     try {
       await printTicketBluetooth(ticket);
+      setIsSuccess(true);
+      setTimeout(() => setIsSuccess(false), 3000);
     } catch (error: any) {
       setPrintError(error.message || "Error al conectar con la impresora");
     } finally {
@@ -254,10 +258,10 @@ export default function TicketPrint({ ticket, onClose }: Props) {
             <button
               onClick={handlePrintBluetooth}
               disabled={isPrintingBT}
-              className="touch-btn flex-1 bg-secondary text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+              className={`touch-btn flex-1 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50 ${isSuccess ? 'bg-green-600 text-white' : 'bg-secondary text-white'}`}
             >
-              <i className={`fa-solid ${isPrintingBT ? "fa-spinner fa-spin" : "fa-bluetooth"}`} />
-              {isPrintingBT ? "..." : "Ticket BT"}
+              <i className={`fa-solid ${isPrintingBT ? "fa-spinner fa-spin" : isSuccess ? "fa-check" : "fa-bluetooth"}`} />
+              {isPrintingBT ? "..." : isSuccess ? "¡Enviado!" : "Ticket BT"}
             </button>
           </div>
           {printError && (

@@ -75,6 +75,9 @@ export async function printTicketBluetooth(ticket: any) {
             .line(ticket.settings?.receipt_footer || "¡Gracias por su visita!")
             .newline()
             .newline()
+            .newline()
+            .newline()
+            .newline()
             .cut()
             .encode();
 
