@@ -1,4 +1,5 @@
 import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function printTicketBluetooth(ticket: any) {
     try {
@@ -26,22 +27,20 @@ export async function printTicketBluetooth(ticket: any) {
 
         const hr = '-'.repeat(columns);
 
-        // 2. Build Recipe
+        // 2. Build Recipe (SIMPLIFIED for compatibility)
         let result = encoder
             .initialize()
             .align('center')
             .line(businessName)
-            .size('small')
-            .line(ticket.settings?.address || "")
-            .line(`Tel: ${ticket.settings?.phone || ""}`)
+            // Removed size('small') and address/phone for simplicity in testing
             .newline()
             .align('left')
             .line(`TICKET #: ${ticketNum}`)
-            .line(`Fecha: ${dateStr}`)
-            .line(`Cliente: ${clientName}`);
+            .line(`FECHA: ${dateStr}`)
+            .line(`CLIENTE: ${clientName.toUpperCase()}`);
 
         if (plate) {
-            result = result.line(`Placa: ${plate}`);
+            result = result.line(`PLACA: ${plate}`);
         }
 
         result = result
@@ -52,45 +51,53 @@ export async function printTicketBluetooth(ticket: any) {
         items.forEach((item: any) => {
             const name = item?.serviceName ?? "Servicio";
             const price = Number(item?.price || 0);
-            // Dynamic padding based on columns
             const priceStr = ` C$${price.toFixed(2)}`;
-            const nameWidth = columns - priceStr.length;
+            const nameWidth = Math.max(0, columns - priceStr.length);
             result = result.line(`${name.substring(0, nameWidth).padEnd(nameWidth)}${priceStr}`);
         });
 
         result = result
             .line(hr)
             .align('right')
-            .line(`SUBTOTAL: C$${Number(ticket.subtotal || 0).toFixed(2)}`);
-
-        if (Number(ticket.discount || 0) > 0) {
-            result = result.line(`DESCUENTO: -C$${Number(ticket.discount).toFixed(2)}`);
-        }
-
-        result = result
-            .size('normal')
             .line(`TOTAL: C$${Number(ticket.total || 0).toFixed(2)}`)
             .newline()
             .align('center')
-            .line(ticket.settings?.receipt_footer || "¡Gracias por su visita!")
+            .line(ticket.settings?.receipt_footer || "GRACIAS POR SU VISITA")
             .newline()
             .newline()
             .newline()
             .newline()
             .newline()
-            .cut()
+            // Removed cut() as many cheap printers don't support it and it might hang
             .encode();
 
         // 3. Connect Bluetooth
         console.log("Requesting Bluetooth Device...");
         const device = await (navigator as any).bluetooth.requestDevice({
-            filters: [{ services: ['000018f0-0000-1000-8000-00805f9b34fb', '49535343-fe7d-41aa-8956-727e70a863f5'] }, { namePrefix: 'PR' }, { namePrefix: 'Printer' }],
-            optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb', '49535343-fe7d-41aa-8956-727e70a863f5']
+            filters: [
+                { services: ['000018f0-0000-1000-8000-00805f9b34fb'] },
+                { services: ['49535343-fe7d-41aa-8956-727e70a863f5'] },
+                { services: ['e7e11000-202d-4573-90d2-97914f177291'] },
+                { namePrefix: 'PR' },
+                { namePrefix: 'Printer' },
+                { namePrefix: 'ZJ' }
+            ],
+            optionalServices: [
+                '000018f0-0000-1000-8000-00805f9b34fb',
+                '49535343-fe7d-41aa-8956-727e70a863f5',
+                'e7e11000-202d-4573-90d2-97914f177291',
+                '0000180a-0000-1000-8000-00805f9b34fb', // Device Info Service
+                '0000ae01-0000-1000-8000-00805f9b34fb' // Common BLE Printer Service
+            ]
         }).catch(async () => {
-            // Fallback to any device that looks like a printer
             return await (navigator as any).bluetooth.requestDevice({
                 acceptAllDevices: true,
-                optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb', '49535343-fe7d-41aa-8956-727e70a863f5']
+                optionalServices: [
+                    '000018f0-0000-1000-8000-00805f9b34fb',
+                    '49535343-fe7d-41aa-8956-727e70a863f5',
+                    'e7e11000-202d-4573-90d2-97914f177291',
+                    '0000ae01-0000-1000-8000-00805f9b34fb'
+                ]
             });
         });
 
@@ -98,25 +105,37 @@ export async function printTicketBluetooth(ticket: any) {
         const server = await device.gatt.connect();
 
         console.log("Getting Primary Service...");
-        // Most thermal printers use a specific service for data
         const services = await server.getPrimaryServices();
         let characteristic;
 
         for (const service of services) {
-            const characteristics = await service.getCharacteristics();
-            characteristic = characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse);
-            if (characteristic) break;
+            console.log(`Checking service: ${service.uuid}`);
+            try {
+                const characteristics = await service.getCharacteristics();
+                characteristic = characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse);
+                if (characteristic) {
+                    console.log(`Found characteristic: ${characteristic.uuid} in service: ${service.uuid}`);
+                    break;
+                }
+            } catch (e) {
+                console.warn(`Error getting characteristics for ${service.uuid}`);
+            }
         }
 
         if (!characteristic) {
-            throw new Error("No se encontró una característica de escritura en la impresora.");
+            throw new Error("No se encontró una característica de escritura válida.");
         }
 
-        console.log("Sending data in chunks...");
-        const chunkSize = 512;
+        console.log("Sending data in chunks with delays...");
+        const chunkSize = 20; // Some printers have VERY small buffers
         for (let i = 0; i < result.length; i += chunkSize) {
             const chunk = result.slice(i, i + chunkSize);
-            await characteristic.writeValue(chunk);
+            if (characteristic.properties.writeWithoutResponse) {
+                await characteristic.writeValueWithoutResponse(chunk);
+            } else {
+                await characteristic.writeValueWithResponse(chunk);
+            }
+            await delay(50); // Small delay to prevent buffer overflow
         }
 
         console.log("Print successful!");
