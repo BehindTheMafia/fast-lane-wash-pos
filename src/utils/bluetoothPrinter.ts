@@ -2,9 +2,18 @@ import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
 
 export async function printTicketBluetooth(ticket: any) {
     try {
+        const getColumns = (mm: string | number) => {
+            const width = parseInt(String(mm));
+            if (width <= 58) return 32;
+            if (width <= 80) return 42;
+            return 48; // Default for larger
+        };
+
+        const columns = getColumns(ticket.settings?.printer_width_mm || '58');
+
         const encoder = new ReceiptPrinterEncoder({
             language: 'esc-pos',
-            width: parseInt(ticket.settings?.printer_width_mm || '58'),
+            width: columns,
         });
 
         // 1. Prepare Content
@@ -14,6 +23,8 @@ export async function printTicketBluetooth(ticket: any) {
         const dateStr = date.toLocaleDateString("es-NI") + " " + date.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
         const clientName = ticket.customer?.name || "Cliente General";
         const plate = ticket.customer?.plate ? String(ticket.customer.plate).toUpperCase() : "";
+
+        const hr = '-'.repeat(columns);
 
         // 2. Build Recipe
         let result = encoder
@@ -34,18 +45,21 @@ export async function printTicketBluetooth(ticket: any) {
         }
 
         result = result
-            .line('-'.repeat(32))
+            .line(hr)
             .line('SERVICIOS');
 
         const items = Array.isArray(ticket.items) ? ticket.items : [];
         items.forEach((item: any) => {
             const name = item?.serviceName ?? "Servicio";
             const price = Number(item?.price || 0);
-            result = result.line(`${name.substring(0, 20).padEnd(20)} C$${price.toFixed(2).padStart(8)}`);
+            // Dynamic padding based on columns
+            const priceStr = ` C$${price.toFixed(2)}`;
+            const nameWidth = columns - priceStr.length;
+            result = result.line(`${name.substring(0, nameWidth).padEnd(nameWidth)}${priceStr}`);
         });
 
         result = result
-            .line('-'.repeat(32))
+            .line(hr)
             .align('right')
             .line(`SUBTOTAL: C$${Number(ticket.subtotal || 0).toFixed(2)}`);
 
