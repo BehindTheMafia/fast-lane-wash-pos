@@ -1,6 +1,16 @@
 import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+async function loadImage(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = url;
+    });
+}
+
 export async function printTicketBluetooth(ticket: any) {
     try {
         const getColumns = (mm: string | number) => {
@@ -27,12 +37,30 @@ export async function printTicketBluetooth(ticket: any) {
 
         const hr = '-'.repeat(columns);
 
-        // 2. Build Recipe (SIMPLIFIED for compatibility)
-        let result = encoder
-            .initialize()
+        // 2. Build Recipe
+        encoder.initialize();
+
+        // Logo Support
+        if (ticket.settings?.logo_url) {
+            try {
+                const img = await loadImage(ticket.settings.logo_url);
+                encoder.align('center').image(img, 160, 160, 'atkinson');
+            } catch (e) {
+                console.warn("Could not load logo for printing", e);
+            }
+        }
+
+        encoder
             .align('center')
-            .line(businessName)
-            // Removed size('small') and address/phone for simplicity in testing
+            .line(businessName.toUpperCase())
+            .size('small')
+            .line(ticket.settings?.address || "")
+            .line(`Tel: ${ticket.settings?.phone || ""}`);
+
+        if (ticket.settings?.ruc) encoder.line(`RUC: ${ticket.settings.ruc}`);
+        if (ticket.settings?.social_media) encoder.line(`Social: ${ticket.settings.social_media}`);
+
+        encoder
             .newline()
             .align('left')
             .line(`TICKET #: ${ticketNum}`)
@@ -40,10 +68,10 @@ export async function printTicketBluetooth(ticket: any) {
             .line(`CLIENTE: ${clientName.toUpperCase()}`);
 
         if (plate) {
-            result = result.line(`PLACA: ${plate}`);
+            encoder.line(`PLACA: ${plate}`);
         }
 
-        result = result
+        encoder
             .line(hr)
             .line('SERVICIOS');
 
@@ -53,14 +81,37 @@ export async function printTicketBluetooth(ticket: any) {
             const price = Number(item?.price || 0);
             const priceStr = ` C$${price.toFixed(2)}`;
             const nameWidth = Math.max(0, columns - priceStr.length);
-            result = result.line(`${name.substring(0, nameWidth).padEnd(nameWidth)}${priceStr}`);
+            encoder.line(`${name.substring(0, nameWidth).padEnd(nameWidth)}${priceStr}`);
+            if (item.vehicleLabel) {
+                encoder.line(` (${item.vehicleLabel})`);
+            }
         });
 
-        result = result
+        encoder
             .line(hr)
             .align('right')
+            .line(`SUBTOTAL: C$${Number(ticket.subtotal || 0).toFixed(2)}`);
+
+        if (Number(ticket.discount || 0) > 0) {
+            encoder.line(`DESCUENTO: -C$${Number(ticket.discount).toFixed(2)}`);
+        }
+
+        encoder
             .line(`TOTAL: C$${Number(ticket.total || 0).toFixed(2)}`)
-            .newline()
+            .newline();
+
+        // Payment Info
+        if (ticket.payment) {
+            encoder
+                .line(hr)
+                .line(`PAGO (${ticket.payment.method}): ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.received.toFixed(2)}`);
+            if (ticket.payment.change > 0) {
+                encoder.line(`VUELTO: ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.change.toFixed(2)}`);
+            }
+            encoder.newline();
+        }
+
+        const result = encoder
             .align('center')
             .line(ticket.settings?.receipt_footer || "GRACIAS POR SU VISITA")
             .newline()
