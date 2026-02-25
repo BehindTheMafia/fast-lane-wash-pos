@@ -39,7 +39,8 @@ export async function printTicketBluetooth(ticket: any) {
 
         // 2. Build Recipe
         // Start directly with alignment to avoid potential reset feed from initialize()
-        encoder.pulse(); // Abrir cajón monedero (3nStar CD250 compatible)
+        encoder.raw([0x1b, 0x70, 0x00, 0x19, 0xfa]); // Pulso pin 2 (Estándar)
+        encoder.raw([0x1b, 0x70, 0x01, 0x19, 0xfa]); // Pulso pin 5 (Alternativo)
         encoder.align('center');
 
         // 1. Logo (tightly coupled with header)
