@@ -8,15 +8,27 @@ const methodLabels: Record<string, string> = { cash: "Efectivo", card: "Tarjeta"
 export default function Reports() {
   const { data: settings } = useBusinessSettings();
   const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString().split("T")[0];
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split("T")[0]);
+  const [dateTo, setDateTo] = useState(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingTicket, setEditingTicket] = useState<any>(null);
   const [deletingTicket, setDeletingTicket] = useState<any>(null);
   const [reprintTicket, setReprintTicket] = useState<any>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterType, setFilterType] = useState<"all" | "regular" | "sale" | "usage">("all");
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -25,8 +37,10 @@ export default function Reports() {
 
   const loadReport = async () => {
     setLoading(true);
-    const from = new Date(dateFrom); from.setHours(0, 0, 0, 0);
-    const to = new Date(dateTo); to.setHours(23, 59, 59, 999);
+    const [yFrom, mFrom, dFrom] = dateFrom.split("-").map(Number);
+    const [yTo, mTo, dTo] = dateTo.split("-").map(Number);
+    const from = new Date(yFrom, mFrom - 1, dFrom, 0, 0, 0, 0);
+    const to = new Date(yTo, mTo - 1, dTo, 23, 59, 59, 999);
 
     // Fetch tickets with vehicle type and payments
     const { data: rawTickets, error: ticketsError } = await supabase
@@ -139,6 +153,15 @@ export default function Reports() {
 
       if (error) throw error;
 
+      // Update associated payment amount if only one payment exists
+      // This ensures reports that sum payments (like "By Method") match the ticket total
+      if (editingTicket.payments?.length === 1) {
+        await supabase
+          .from("payments")
+          .update({ amount: editingTicket.total })
+          .eq("id", editingTicket.payments[0].id);
+      }
+
       showToast("Ticket actualizado correctamente");
       setEditingTicket(null);
       loadReport();
@@ -203,6 +226,7 @@ export default function Reports() {
   const byService: Record<string, { count: number; total: number }> = {};
   const byVehicle: Record<string, { count: number; total: number }> = {};
   const byMethod: Record<string, number> = {};
+  const cashBreakdown = { nio: 0, usd: 0 };
 
   tickets.forEach((t: any) => {
     // By service from ticket_items
@@ -219,10 +243,33 @@ export default function Reports() {
     byVehicle[vn].count++;
     byVehicle[vn].total += Number(t.total);
 
-    // By method
+    // By method with currency awareness
     t.payments?.forEach((p: any) => {
-      byMethod[p.payment_method] = (byMethod[p.payment_method] || 0) + Number(p.amount);
+      let amountNIO = Number(p.amount);
+      if (p.currency === "USD") {
+        const paymentRate = Number(p.exchange_rate) || rate;
+        amountNIO = amountNIO * paymentRate;
+        if (p.payment_method === "cash") cashBreakdown.usd += Number(p.amount);
+      } else {
+        if (p.payment_method === "cash") cashBreakdown.nio += Number(p.amount);
+      }
+      byMethod[p.payment_method] = (byMethod[p.payment_method] || 0) + amountNIO;
     });
+  });
+
+  const filteredTickets = tickets.filter(t => {
+    const matchesSearch =
+      t.ticket_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.vehicle_plate?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.customer_name?.toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchesType =
+      filterType === "all" ||
+      (filterType === "regular" && !t.is_membership_sale && !t.is_membership_usage) ||
+      (filterType === "sale" && t.is_membership_sale) ||
+      (filterType === "usage" && t.is_membership_usage);
+
+    return matchesSearch && matchesType;
   });
 
   const formatDate = (iso: string) => {
@@ -279,7 +326,7 @@ export default function Reports() {
             </div>
             <div className="pos-card p-6 text-center">
               <p className="text-sm text-secondary">Ventas Regulares</p>
-              <p className="text-2xl font-bold text-foreground">C${regularSalesTotal.toFixed(0)}</p>
+              <p className="text-2xl font-bold text-foreground">C${regularSalesTotal.toFixed(2)}</p>
               <p className="text-sm text-muted-foreground">{tickets.filter((t: any) => !t.is_membership_sale && !t.is_membership_usage).length} tickets</p>
             </div>
           </div>
@@ -292,7 +339,7 @@ export default function Reports() {
               {Object.entries(byService).map(([name, d]) => (
                 <div key={name} className="flex justify-between py-1 border-b border-border last:border-0 text-sm">
                   <span className="text-foreground">{name} ({d.count})</span>
-                  <span className="font-semibold">C${d.total.toFixed(0)}</span>
+                  <span className="font-semibold">C${d.total.toFixed(2)}</span>
                 </div>
               ))}
             </div>
@@ -302,7 +349,7 @@ export default function Reports() {
               {Object.entries(byVehicle).map(([type, d]) => (
                 <div key={type} className="flex justify-between py-1 border-b border-border last:border-0 text-sm">
                   <span className="text-foreground">{type} ({d.count})</span>
-                  <span className="font-semibold">C${d.total.toFixed(0)}</span>
+                  <span className="font-semibold">C${d.total.toFixed(2)}</span>
                 </div>
               ))}
             </div>
@@ -310,9 +357,17 @@ export default function Reports() {
               <h3 className="font-bold text-sm text-foreground mb-3"><i className="fa-solid fa-credit-card mr-2 text-secondary" />Por método</h3>
               {Object.entries(byMethod).length === 0 && <p className="text-xs text-muted-foreground">Sin datos</p>}
               {Object.entries(byMethod).map(([method, total]) => (
-                <div key={method} className="flex justify-between py-1 border-b border-border last:border-0 text-sm">
-                  <span className="text-foreground">{methodLabels[method] || method}</span>
-                  <span className="font-semibold">C${total.toFixed(0)}</span>
+                <div key={method} className="space-y-1 py-1 border-b border-border last:border-0">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-foreground">{methodLabels[method] || method}</span>
+                    <span className="font-semibold">C${total.toFixed(2)}</span>
+                  </div>
+                  {method === "cash" && (
+                    <div className="flex justify-between text-[10px] text-muted-foreground px-2">
+                      <span>NIO: C${cashBreakdown.nio.toFixed(2)}</span>
+                      <span>USD: ${cashBreakdown.usd.toFixed(2)}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -320,10 +375,32 @@ export default function Reports() {
 
           {/* Detail table */}
           <div className="pos-card overflow-hidden">
-            <div className="p-4 border-b border-border">
+            <div className="p-4 border-b border-border flex flex-wrap items-center justify-between gap-4">
               <h3 className="font-bold text-foreground">
-                <i className="fa-solid fa-table mr-2 text-secondary" />Detalle de tickets ({tickets.length})
+                <i className="fa-solid fa-table mr-2 text-secondary" />Detalle de tickets ({filteredTickets.length})
               </h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs" />
+                  <input
+                    type="text"
+                    placeholder="Buscar placa o ticket..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-8 pr-4 py-1.5 bg-background border border-border rounded-lg text-xs focus:ring-1 focus:ring-accent outline-none w-48"
+                  />
+                </div>
+                <select
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value as any)}
+                  className="px-3 py-1.5 bg-background border border-border rounded-lg text-xs outline-none"
+                >
+                  <option value="all">Todos los tipos</option>
+                  <option value="regular">Ventas Regulares</option>
+                  <option value="sale">Ventas Membresías</option>
+                  <option value="usage">Usos Membresías</option>
+                </select>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -343,15 +420,15 @@ export default function Reports() {
                   </tr>
                 </thead>
                 <tbody>
-                  {tickets.length === 0 && (
+                  {filteredTickets.length === 0 && (
                     <tr>
                       <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                         <i className="fa-solid fa-inbox text-3xl mb-2 opacity-30 block" />
-                        No hay tickets en el rango seleccionado
+                        No se encontraron tickets con los filtros aplicados
                       </td>
                     </tr>
                   )}
-                  {tickets.map((t: any, idx: number) => {
+                  {filteredTickets.map((t: any, idx: number) => {
                     const serviceNames = t.ticket_items?.map((ti: any) => ti.services?.name).filter(Boolean).join(", ") || "—";
                     const vehicleName = (t.vehicle_types as any)?.name || "—";
                     const paymentMethods = t.payments?.map((p: any) => methodLabels[p.payment_method] || p.payment_method).join(", ") || "—";
@@ -385,7 +462,7 @@ export default function Reports() {
                           <span className="px-2 py-1 rounded-full text-xs bg-accent/20 text-accent whitespace-nowrap">{paymentMethods}</span>
                         </td>
                         <td className="px-4 py-3 text-foreground">{cashierName}</td>
-                        <td className="px-4 py-3 text-right font-bold text-primary whitespace-nowrap">C${Number(t.total).toFixed(0)}</td>
+                        <td className="px-4 py-3 text-right font-bold text-primary whitespace-nowrap">C${Number(t.total).toFixed(2)}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-center gap-2">
                             <button
