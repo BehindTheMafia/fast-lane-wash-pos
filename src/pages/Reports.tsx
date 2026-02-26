@@ -28,7 +28,6 @@ export default function Reports() {
   const [reprintTicket, setReprintTicket] = useState<any>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterType, setFilterType] = useState<"all" | "regular" | "sale" | "usage">("all");
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -258,18 +257,8 @@ export default function Reports() {
   });
 
   const filteredTickets = tickets.filter(t => {
-    const matchesSearch =
-      t.ticket_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.vehicle_plate?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.customer_name?.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesType =
-      filterType === "all" ||
-      (filterType === "regular" && !t.is_membership_sale && !t.is_membership_usage) ||
-      (filterType === "sale" && t.is_membership_sale) ||
-      (filterType === "usage" && t.is_membership_usage);
-
-    return matchesSearch && matchesType;
+    const name = t.customer_name?.toLowerCase() || "";
+    return name.includes(searchTerm.toLowerCase());
   });
 
   const formatDate = (iso: string) => {
@@ -375,31 +364,21 @@ export default function Reports() {
 
           {/* Detail table */}
           <div className="pos-card overflow-hidden">
-            <div className="p-4 border-b border-border flex flex-wrap items-center justify-between gap-4">
+            <div className="p-4 border-b border-border flex items-center justify-between gap-4">
               <h3 className="font-bold text-foreground">
                 <i className="fa-solid fa-table mr-2 text-secondary" />Detalle de tickets ({filteredTickets.length})
               </h3>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2">
                 <div className="relative">
                   <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs" />
                   <input
                     type="text"
-                    placeholder="Buscar placa o ticket..."
+                    placeholder="Buscar por nombre..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="pl-8 pr-4 py-1.5 bg-background border border-border rounded-lg text-xs focus:ring-1 focus:ring-accent outline-none w-48"
                   />
                 </div>
-                <select
-                  value={filterType}
-                  onChange={(e) => setFilterType(e.target.value as any)}
-                  className="px-3 py-1.5 bg-background border border-border rounded-lg text-xs outline-none"
-                >
-                  <option value="all">Todos los tipos</option>
-                  <option value="regular">Ventas Regulares</option>
-                  <option value="sale">Ventas Membresías</option>
-                  <option value="usage">Usos Membresías</option>
-                </select>
               </div>
             </div>
             <div className="overflow-x-auto">
