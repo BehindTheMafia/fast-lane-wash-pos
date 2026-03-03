@@ -10,9 +10,27 @@ export default function TicketPrint({ ticket, onClose }: Props) {
   const [isPrintingBT, setIsPrintingBT] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [copyLabel, setCopyLabel] = useState<string | null>(null);
 
-  const handlePrint = () => {
-    window.print();
+  const doublePrint = ticket.settings?.double_print_ticket ?? true;
+
+  const handlePrint = async () => {
+    if (doublePrint) {
+      // First copy: NEGOCIO
+      setCopyLabel("NEGOCIO");
+      await new Promise(r => setTimeout(r, 150));
+      window.print();
+      // Wait for print dialog to close before printing second copy
+      await new Promise(r => setTimeout(r, 1200));
+      // Second copy: CLIENTE
+      setCopyLabel("CLIENTE");
+      await new Promise(r => setTimeout(r, 150));
+      window.print();
+      await new Promise(r => setTimeout(r, 500));
+      setCopyLabel(null);
+    } else {
+      window.print();
+    }
   };
 
   const handlePrintBluetooth = async () => {
@@ -117,6 +135,13 @@ export default function TicketPrint({ ticket, onClose }: Props) {
           className="bg-white p-6 rounded-xl text-foreground print:p-4 print:rounded-none print:shadow-none print:text-black"
           style={{ '--printer-width': `${printerWidth}mm` } as React.CSSProperties}
         >
+          {/* Copy label (double print) */}
+          {copyLabel && (
+            <div className="text-center font-black text-sm uppercase tracking-widest border-2 border-dashed border-gray-400 rounded-lg py-1 mb-3 print:border-black">
+              *** COPIA {copyLabel} ***
+            </div>
+          )}
+
           {/* Logo */}
           {ticket.settings?.logo_url && (
             <div className="flex justify-center mb-3 print:mb-2">
@@ -251,9 +276,15 @@ export default function TicketPrint({ ticket, onClose }: Props) {
         </div>
 
         <div className="flex flex-col gap-2 mt-4 print:hidden">
+          {doublePrint && (
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground bg-accent/5 border border-accent/20 rounded-lg px-3 py-2">
+              <i className="fa-solid fa-copy text-accent" />
+              <span>Modo <strong>doble ticket</strong> activado — se imprimirán 2 copias</span>
+            </div>
+          )}
           <div className="flex gap-2">
             <button onClick={handlePrint} className="touch-btn flex-1 bg-brick-red text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2">
-              <i className="fa-solid fa-print" />Browser
+              <i className="fa-solid fa-print" />{doublePrint ? "Browser (×2)" : "Browser"}
             </button>
             <button
               onClick={handlePrintBluetooth}

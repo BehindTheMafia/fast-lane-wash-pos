@@ -28,7 +28,7 @@ export async function printTicketBluetooth(ticket: any) {
         });
 
         const logoImg = ticket.settings?.logo_url ? await loadImage(ticket.settings.logo_url).catch(() => null) : null;
-        const doublePrint = ticket.settings?.double_print_ticket || false;
+        const doublePrint = ticket.settings?.double_print_ticket ?? true;
         const copies = doublePrint ? ['NEGOCIO', 'CLIENTE'] : [null];
 
         for (const label of copies) {

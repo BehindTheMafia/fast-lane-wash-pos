@@ -104,7 +104,7 @@ export default function Settings() {
       logo_url: settings.logo_url || "",
       printer_width_mm: String(settings.printer_width_mm || 80),
       exchange_rate: String(settings.exchange_rate),
-      double_print_ticket: settings.double_print_ticket || false,
+      double_print_ticket: settings.double_print_ticket ?? true,
     }), 0);
   }
 
