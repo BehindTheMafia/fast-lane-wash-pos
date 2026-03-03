@@ -172,42 +172,90 @@ export default function Reports() {
   const handleReprint = (ticket: any) => {
     console.log('Reprint ticket data:', ticket);
 
-    // Calculate subtotal from items
-    const itemsArray = ticket.ticket_items?.map((ti: any) => ({
+    const isMembershipSale = ticket.is_membership_sale || ticket.ticket_number?.startsWith("M-");
+
+    // Build items array with proper service names and prices
+    const itemsFromDB = ticket.ticket_items?.map((ti: any) => ({
       serviceName: ti.services?.name || "Servicio",
-      vehicleLabel: ticket.vehicle_types?.name || "",
+      vehicleLabel: (ticket.vehicle_types as any)?.name || "",
       price: Number(ti.price),
-      discountPercent: 0,
     })) || [];
 
-    const subtotal = itemsArray.reduce((sum, item) => sum + item.price, 0);
-    const discount = 0; // No discount info in historical tickets
+    // For membership sale tickets, enhance the item name with membership context
+    let itemsArray: any[];
+    if (isMembershipSale && itemsFromDB.length > 0) {
+      // The ticket_item.price is the final price paid (after any custom discount)
+      const finalPrice = Number(ticket.total);
+      const itemTotalFromDB = itemsFromDB.reduce((s: number, i: any) => s + i.price, 0);
+
+      // If there's a difference between the item total and ticket total, there was a discount
+      // The item price in DB stores the final paid price for memberships  
+      const hasDiscount = itemTotalFromDB > finalPrice;
+
+      itemsArray = [{
+        serviceName: `MEMBRESÍA: ${itemsFromDB[0].serviceName}`,
+        vehicleLabel: itemsFromDB[0].vehicleLabel,
+        price: itemTotalFromDB,
+      }];
+
+      // If there's a discount difference, add a discount line
+      if (hasDiscount) {
+        const discountAmt = itemTotalFromDB - finalPrice;
+        itemsArray.push({
+          serviceName: "Descuento aplicado",
+          vehicleLabel: "",
+          price: -discountAmt,
+        });
+      }
+    } else {
+      itemsArray = itemsFromDB;
+    }
+
+    // Calculate subtotal and discount
+    const positiveItems = itemsArray.filter((i: any) => i.price >= 0);
+    const negativeItems = itemsArray.filter((i: any) => i.price < 0);
+    const subtotal = positiveItems.reduce((sum: number, item: any) => sum + item.price, 0);
+    const discount = Math.abs(negativeItems.reduce((sum: number, item: any) => sum + item.price, 0));
+
+    // Get customer data with phone for WhatsApp
+    const customerData = ticket.customer_data;
+    const customer = customerData ? {
+      name: customerData.name || "Cliente General",
+      plate: customerData.plate || ticket.vehicle_plate || "",
+      phone: customerData.phone || "",
+      is_general: false,
+    } : {
+      name: "Cliente General",
+      plate: ticket.vehicle_plate || "",
+      phone: "",
+      is_general: true,
+    };
+
+    // Build payment info from the payments array
+    const primaryPayment = ticket.payments?.[0];
+    const payment = primaryPayment ? {
+      method: primaryPayment.payment_method || "cash",
+      currency: primaryPayment.currency || "NIO",
+      received: Number(primaryPayment.amount_received || ticket.total),
+      change: Number(primaryPayment.change_amount || 0),
+    } : null;
 
     // Prepare ticket data for printing
     const reprintData = {
       ...ticket,
-      customer: ticket.customer_data || {
-        name: "Cliente General",
-        plate: ticket.vehicle_plate,
-        phone: "",
-        is_general: true
-      },
+      customer,
       items: itemsArray,
-      subtotal: subtotal,
-      discount: discount,
+      subtotal,
+      discount,
       total: Number(ticket.total),
-      payment: {
-        method: ticket.payments?.[0]?.payment_method || "cash",
-        currency: ticket.payments?.[0]?.currency || "NIO",
-        received: Number(ticket.payments?.[0]?.amount_received || ticket.total),
-        change: Number(ticket.payments?.[0]?.change_amount || 0),
-      },
+      payment,
       settings,
     };
 
     console.log('Prepared reprint data:', reprintData);
     setReprintTicket(reprintData);
   };
+
 
   const rate = settings?.exchange_rate || 36.5;
   const totalNIO = tickets.reduce((s, t) => s + Number(t.total), 0);

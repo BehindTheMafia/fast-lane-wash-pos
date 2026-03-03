@@ -22,6 +22,7 @@ export type Database = {
                     receipt_footer: string | null
                     ruc: string | null
                     social_media: string | null
+                    double_print_ticket: boolean
                     updated_at: string | null
                 }
                 Insert: {
@@ -36,6 +37,7 @@ export type Database = {
                     receipt_footer?: string | null
                     ruc?: string | null
                     social_media?: string | null
+                    double_print_ticket?: boolean
                     updated_at?: string | null
                 }
                 Update: {
@@ -50,6 +52,7 @@ export type Database = {
                     receipt_footer?: string | null
                     ruc?: string | null
                     social_media?: string | null
+                    double_print_ticket?: boolean
                     updated_at?: string | null
                 }
                 Relationships: []

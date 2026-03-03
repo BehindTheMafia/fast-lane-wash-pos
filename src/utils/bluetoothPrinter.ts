@@ -27,117 +27,126 @@ export async function printTicketBluetooth(ticket: any) {
             width: columns,
         });
 
-        // 1. Prepare Content
-        const businessName = ticket.settings?.business_name || "EL RAPIDO";
-        const ticketNum = ticket.ticket_number || "----";
-        const date = new Date(ticket.created_at || Date.now());
-        const dateStr = date.toLocaleDateString("es-NI") + " " + date.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
-        const clientName = ticket.customer?.name || "Cliente General";
-        const plate = ticket.customer?.plate ? String(ticket.customer.plate).toUpperCase() : "";
+        const logoImg = ticket.settings?.logo_url ? await loadImage(ticket.settings.logo_url).catch(() => null) : null;
+        const doublePrint = ticket.settings?.double_print_ticket || false;
+        const copies = doublePrint ? ['NEGOCIO', 'CLIENTE'] : [null];
 
-        const hr = '-'.repeat(columns);
+        for (const label of copies) {
+            // 2. Build Recipe
+            encoder.align('center');
 
-        // 2. Build Recipe
-        // Start directly with alignment to avoid potential reset feed from initialize()
-        encoder.raw([0x1b, 0x70, 0x00, 0x19, 0xfa]); // Pulso pin 2 (Estándar)
-        encoder.raw([0x1b, 0x70, 0x01, 0x19, 0xfa]); // Pulso pin 5 (Alternativo)
-        encoder.align('center');
-
-        // 1. Logo (tightly coupled with header)
-        if (ticket.settings?.logo_url) {
-            try {
-                const img = await loadImage(ticket.settings.logo_url);
-                encoder.image(img, 160, 160, 'atkinson');
-            } catch (e) {
-                console.warn("Could not load logo for printing", e);
+            if (label) {
+                encoder.size('normal').bold(true).line(`*** COPIA ${label} ***`).bold(false).newline();
             }
-        }
 
-        // 2. Encabezado de Empresa
-        encoder
-            .size('normal')
-            .line(businessName.toUpperCase())
-            .size('small')
-            .line(ticket.settings?.address || "")
-            .line(`Tel: ${ticket.settings?.phone || ""}`);
+            // Start directly with alignment to avoid potential reset feed from initialize()
+            encoder.raw([0x1b, 0x70, 0x00, 0x19, 0xfa]); // Pulso pin 2 (Estándar)
+            encoder.raw([0x1b, 0x70, 0x01, 0x19, 0xfa]); // Pulso pin 5 (Alternativo)
+            encoder.align('center');
 
-        if (ticket.settings?.ruc) encoder.line(`RUC: ${ticket.settings.ruc}`);
-        if (ticket.settings?.social_media) encoder.line(`Social: ${ticket.settings.social_media}`);
-
-        // 3. Información del Ticket
-        encoder
-            .size('normal')
-            .align('left')
-            .line(`TICKET #: ${ticketNum}`)
-            .line(`FECHA: ${dateStr}`)
-            .line(`CLIENTE: ${clientName.toUpperCase()}`);
-
-        if (plate) {
-            encoder.line(`PLACA: ${plate}`);
-        }
-
-        // 4. Detalle de Servicios
-        encoder
-            .line(hr)
-            .line('SERVICIOS');
-
-        const items = Array.isArray(ticket.items) ? ticket.items : [];
-        items.forEach((item: any) => {
-            const name = item?.serviceName ?? "Servicio";
-            const price = Number(item?.price || 0);
-            const priceStr = ` C$${price.toFixed(2)}`;
-            const nameWidth = Math.max(0, columns - priceStr.length);
-
-            encoder.size('normal').line(`${name.substring(0, nameWidth).padEnd(nameWidth)}${priceStr}`);
-
-            if (item.vehicleLabel) {
-                encoder.size('small').line(` (${item.vehicleLabel})`);
+            // 1. Logo (tightly coupled with header)
+            if (logoImg) {
+                encoder.image(logoImg, 160, 160, 'atkinson');
             }
-        });
 
-        // 5. Totales
-        encoder
-            .size('normal')
-            .line(hr)
-            .align('right')
-            .line(`SUBTOTAL: C$${Number(ticket.subtotal || 0).toFixed(2)}`);
+            // 1. Prepare Content
+            const businessName = ticket.settings?.business_name || "EL RAPIDO";
+            const ticketNum = ticket.ticket_number || "----";
+            const date = new Date(ticket.created_at || Date.now());
+            const dateStr = date.toLocaleDateString("es-NI") + " " + date.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
+            const clientName = ticket.customer?.name || "Cliente General";
+            const plate = ticket.customer?.plate ? String(ticket.customer.plate).toUpperCase() : "";
 
-        if (Number(ticket.discount || 0) > 0) {
-            encoder.line(`DESCUENTO: -C$${Number(ticket.discount).toFixed(2)}`);
-        }
+            const hr = '-'.repeat(columns);
 
-        encoder
-            .bold(true)
-            .line(`TOTAL: C$${Number(ticket.total || 0).toFixed(2)}`)
-            .bold(false)
-            .newline();
+            // 2. Encabezado de Empresa
+            encoder
+                .size('normal')
+                .line(businessName.toUpperCase())
+                .size('small')
+                .line(ticket.settings?.address || "")
+                .line(`Tel: ${ticket.settings?.phone || ""}`);
 
-        // 6. Información de Pago
-        if (ticket.payment) {
+            if (ticket.settings?.ruc) encoder.line(`RUC: ${ticket.settings.ruc}`);
+            if (ticket.settings?.social_media) encoder.line(`Social: ${ticket.settings.social_media}`);
+
+            // 3. Información del Ticket
+            encoder
+                .size('normal')
+                .align('left')
+                .line(`TICKET #: ${ticketNum}`)
+                .line(`FECHA: ${dateStr}`)
+                .line(`CLIENTE: ${clientName.toUpperCase()}`);
+
+            if (plate) {
+                encoder.line(`PLACA: ${plate}`);
+            }
+
+            // 4. Detalle de Servicios
             encoder
                 .line(hr)
-                .align('left')
-                .size('small')
-                .line(`PAGO (${ticket.payment.method}): ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.received.toFixed(2)}`);
-            if (ticket.payment.change > 0) {
-                encoder.line(`VUELTO: ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.change.toFixed(2)}`);
-            }
-            encoder.newline();
-        }
+                .line('SERVICIOS');
 
-        // 7. Pie de Página (Footer) - ASEGURADO AL FINAL
-        encoder
-            .size('normal')
-            .align('center')
-            .line(hr)
-            .line(ticket.settings?.receipt_footer || "¡GRACIAS POR SU VISITA!")
-            .line("VUELVA PRONTO")
-            .newline()
-            .newline()
-            .newline()
-            .newline()
-            .newline()
-            .cut();
+            const items = Array.isArray(ticket.items) ? ticket.items : [];
+            items.forEach((item: any) => {
+                const name = item?.serviceName ?? "Servicio";
+                const price = Number(item?.price || 0);
+                const priceStr = ` C$${price.toFixed(2)}`;
+                const nameWidth = Math.max(0, columns - priceStr.length);
+
+                encoder.size('normal').line(`${name.substring(0, nameWidth).padEnd(nameWidth)}${priceStr}`);
+
+                if (item.vehicleLabel) {
+                    encoder.size('small').line(` (${item.vehicleLabel})`);
+                }
+            });
+
+            // 5. Totales
+            encoder
+                .size('normal')
+                .line(hr)
+                .align('right')
+                .line(`SUBTOTAL: C$${Number(ticket.subtotal || 0).toFixed(2)}`);
+
+            if (Number(ticket.discount || 0) > 0) {
+                encoder.line(`DESCUENTO: -C$${Number(ticket.discount).toFixed(2)}`);
+            }
+
+            encoder
+                .bold(true)
+                .line(`TOTAL: C$${Number(ticket.total || 0).toFixed(2)}`)
+                .bold(false)
+                .newline();
+
+            // 6. Información de Pago
+            if (ticket.payment) {
+                encoder
+                    .line(hr)
+                    .align('left')
+                    .size('small')
+                    .line(`PAGO (${ticket.payment.method}): ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.received.toFixed(2)}`);
+                if (ticket.payment.change > 0) {
+                    encoder.line(`VUELTO: ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.change.toFixed(2)}`);
+                }
+                encoder.newline();
+            }
+
+            // 7. Pie de Página (Footer) - ASEGURADO AL FINAL
+            encoder
+                .size('normal')
+                .align('center')
+                .line(hr)
+                .line(ticket.settings?.receipt_footer || "¡GRACIAS POR SU VISITA!")
+                .line("VUELVA PRONTO")
+                .newline()
+                .newline()
+                .newline()
+                .newline()
+                .newline();
+
+            // Add a cut between copies or at the end
+            encoder.cut();
+        }
 
         const result = encoder.encode();
 

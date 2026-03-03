@@ -6,6 +6,7 @@ import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import MembershipCard from "@/components/memberships/MembershipCard";
 import MembershipRenewalModal from "@/components/memberships/MembershipRenewalModal";
 import PaymentModal from "@/components/pos/PaymentModal";
+import TicketPrint from "@/components/pos/TicketPrint";
 
 type FilterType = 'all' | 'active' | 'expired';
 
@@ -25,11 +26,14 @@ export default function Memberships() {
   const [loading, setLoading] = useState(true);
   const [showAssign, setShowAssign] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
+  const [showPrint, setShowPrint] = useState(false);
+  const [lastTicket, setLastTicket] = useState<any>(null);
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [selectedService, setSelectedService] = useState<number>(1); // Default to Lavado Breve
   const [selectedVehicleType, setSelectedVehicleType] = useState<number>(2);
-  const [membershipPrice, setMembershipPrice] = useState(0);
+  const [membershipBasePrice, setMembershipBasePrice] = useState(0);
+  const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [filter, setFilter] = useState<FilterType>('active');
   const [renewingMembership, setRenewingMembership] = useState<any>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -39,6 +43,10 @@ export default function Memberships() {
   const { memberships: allMemberships, renewMembership, createMembership, isRenewing, getMembershipWithStatus } = useMemberships();
 
   const exchangeRate = settings?.exchange_rate || 36.5;
+
+  // Calculate final price after discount
+  const discountAmount = membershipBasePrice * (discountPercent / 100);
+  const membershipPrice = Math.max(0, membershipBasePrice - discountAmount);
 
   // Filter customers by search
   const filteredCustomers = customers.filter(c =>
@@ -53,7 +61,7 @@ export default function Memberships() {
     setLoading(true);
     const [{ data: p }, { data: c }, { data: s }] = await Promise.all([
       supabase.from("membership_plans").select("*").eq("is_active", true),
-      supabase.from("customers").select("id, name").eq("is_general", false).order("name"),
+      supabase.from("customers").select("id, name, phone, plate").eq("is_general", false).order("name"),
       supabase.from("services").select("id, name, service_prices(price, vehicle_type_id)").eq("is_active", true),
     ]);
 
@@ -62,8 +70,6 @@ export default function Memberships() {
       svc.id === 1 || svc.id === 2  // Lavado Breve (1) and Lavado Nítido (2)
     );
 
-    console.log("Loaded plans:", p);
-    console.log("Loaded services:", eligibleServices);
     setPlans(p || []);
     setCustomers(c || []);
     setServices(eligibleServices || []);
@@ -79,7 +85,7 @@ export default function Memberships() {
         const basePrice = Number(priceEntry.price);
         // Package price: (price per wash × 8) × 0.64 (36% discount)
         const packagePrice = (basePrice * 8) * 0.64;
-        setMembershipPrice(packagePrice);
+        setMembershipBasePrice(packagePrice);
       }
     }
   }, [selectedService, selectedVehicleType, services]);
@@ -92,59 +98,57 @@ export default function Memberships() {
   const handlePaymentComplete = async (paymentData: any) => {
     try {
       if (!user) {
-        showToast("Usuario no autenticado");
+        showToastMsg("Usuario no autenticado");
         return;
       }
 
-      // Validate all required fields
       if (!selectedCustomer) {
-        showToast("Por favor selecciona un cliente");
+        showToastMsg("Por favor selecciona un cliente");
         return;
       }
 
       if (!selectedService) {
-        showToast("Por favor selecciona un servicio");
+        showToastMsg("Por favor selecciona un servicio");
         return;
       }
 
       if (!selectedVehicleType) {
-        showToast("Por favor selecciona un tipo de vehículo");
+        showToastMsg("Por favor selecciona un tipo de vehículo");
         return;
       }
 
       if (membershipPrice <= 0) {
-        showToast("El precio de la membresía no es válido");
+        showToastMsg("El precio de la membresía no es válido");
         return;
       }
-
-      console.log("Available plans:", plans);
 
       // Use the first available plan (Combo 8 Lavados)
       const planToUse = plans && plans.length > 0 ? plans[0]?.id : null;
 
       if (!planToUse) {
-        console.error("No plans available. Plans array:", plans);
-        showToast("No hay planes disponibles. Por favor recarga la página.");
+        showToastMsg("No hay planes disponibles. Por favor recarga la página.");
         return;
       }
-
-      console.log("Creating membership with:", {
-        customer: selectedCustomer,
-        plan: planToUse,
-        service: selectedService,
-        vehicleType: selectedVehicleType,
-        price: membershipPrice
-      });
 
       // Generate ticket number
       const ticketNumber = `M-${Date.now().toString(36).toUpperCase()}`;
 
-      // Get customer data for plate information
-      const { data: customerData } = await supabase
-        .from("customers")
-        .select("plate")
-        .eq("id", Number(selectedCustomer))
-        .single();
+      // Get customer data for plate and name info
+      const customerObj = customers.find(c => c.id === Number(selectedCustomer));
+      const customerName = customerObj?.name || "Cliente";
+      const customerPhone = customerObj?.phone || "";
+      const customerPlate = customerObj?.plate || "";
+
+      // Get service and vehicle type names
+      const serviceObj = services.find(s => s.id === selectedService);
+      const serviceName = serviceObj?.name || "Servicio";
+      const vehicleObj = vehicleTypes.find(v => v.id === selectedVehicleType);
+      const vehicleLabel = vehicleObj?.label || "Vehículo";
+
+      // Get plan details
+      const planObj = plans.find(p => p.id === planToUse);
+      const planName = planObj?.name || "Membresía";
+      const washCount = planObj?.wash_count || 8;
 
       // Create ticket for membership sale
       const { data: ticket, error: ticketErr } = await supabase
@@ -154,7 +158,7 @@ export default function Memberships() {
           user_id: user.id,
           customer_id: Number(selectedCustomer),
           vehicle_type_id: selectedVehicleType,
-          vehicle_plate: customerData?.plate || "",
+          vehicle_plate: customerPlate,
           total: membershipPrice,
           status: "paid",
         } as any)
@@ -165,8 +169,6 @@ export default function Memberships() {
         console.error("Error creating ticket:", ticketErr);
         throw ticketErr;
       }
-
-      console.log("Ticket created:", ticket);
 
       // Create payment record
       const { error: paymentErr } = await supabase.from("payments").insert({
@@ -184,21 +186,18 @@ export default function Memberships() {
         throw paymentErr;
       }
 
-      console.log("Payment created");
-
       // Create ticket_item for the service (so it shows in reports)
+      // Store the BASE price (before discount) so Reports can calculate the discount
       const { error: ticketItemErr } = await supabase.from("ticket_items").insert({
         ticket_id: (ticket as any).id,
         service_id: selectedService,
-        price: membershipPrice,
+        price: membershipBasePrice,
       } as any);
 
       if (ticketItemErr) {
         console.error("Error creating ticket item:", ticketItemErr);
         throw ticketItemErr;
       }
-
-      console.log("Ticket item created");
 
       // Create membership
       await createMembership({
@@ -208,18 +207,59 @@ export default function Memberships() {
         serviceId: selectedService,
       });
 
-      console.log("Membership created successfully");
+      // Build ticket data for printing
+      const ticketForPrint = {
+        ...(ticket as any),
+        ticket_number: ticketNumber,
+        created_at: (ticket as any).created_at || new Date().toISOString(),
+        customer: {
+          name: customerName,
+          plate: customerPlate,
+          phone: customerPhone,
+          is_general: false,
+        },
+        items: [
+          {
+            serviceName: `MEMBRESÍA: ${planName}`,
+            vehicleLabel: `${vehicleLabel} - ${serviceName}`,
+            price: membershipBasePrice,
+          },
+          ...(discountPercent > 0 ? [{
+            serviceName: `Descuento (${discountPercent}%)`,
+            vehicleLabel: "",
+            price: -discountAmount,
+          }] : []),
+        ],
+        subtotal: membershipBasePrice,
+        discount: discountAmount,
+        total: membershipPrice,
+        payment: paymentData,
+        settings,
+        // Extra membership info for ticket
+        membershipInfo: {
+          planName,
+          washCount,
+          serviceName,
+          vehicleLabel,
+          discountPercent,
+        },
+      };
 
+      setLastTicket(ticketForPrint);
       setShowPayment(false);
       setShowAssign(false);
+      setShowPrint(true);
+
+      // Reset form
       setSelectedCustomer("");
       setCustomerSearch("");
-      setSelectedService(1); // Reset to Lavado Breve
+      setSelectedService(1);
       setSelectedVehicleType(2);
-      showToast("Membresía vendida y asignada correctamente");
+      setDiscountPercent(0);
+      showToastMsg("Membresía vendida y asignada correctamente");
     } catch (error: any) {
       console.error('Error completing membership sale:', error);
-      showToast(error.message || "Error al procesar la venta");
+      showToastMsg(error.message || "Error al procesar la venta");
     }
   };
 
@@ -227,14 +267,14 @@ export default function Memberships() {
     try {
       await renewMembership({ membershipId: Number(membershipId), vehicleTypeId });
       setRenewingMembership(null);
-      showToast("Membresía renovada correctamente");
+      showToastMsg("Membresía renovada correctamente");
     } catch (error: any) {
       console.error('Error renewing membership:', error);
-      showToast(error.message || "Error al renovar membresía");
+      showToastMsg(error.message || "Error al renovar membresía");
     }
   };
 
-  const showToast = (msg: string) => {
+  const showToastMsg = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
   };
@@ -245,11 +285,9 @@ export default function Memberships() {
     const washesExhausted = m.washes_used >= m.total_washes_allowed;
 
     if (filter === 'active') {
-      // Active only if: not expired, not exhausted, and active flag is true
       return (status === 'active' || status === 'expiring_soon') && !washesExhausted && m.active;
     }
     if (filter === 'expired') {
-      // Expired if: date expired OR washes exhausted OR active flag is false
       return status === 'expired' || washesExhausted || !m.active;
     }
     return true;
@@ -388,6 +426,7 @@ export default function Memberships() {
                       >
                         <i className="fa-solid fa-user mr-2 text-secondary" />
                         {c.name}
+                        {c.plate && <span className="ml-2 text-xs text-muted-foreground">({c.plate})</span>}
                       </button>
                     ))}
                   </div>
@@ -425,11 +464,63 @@ export default function Memberships() {
                 </div>
               </div>
 
+              {/* Discount Input */}
+              {membershipBasePrice > 0 && (
+                <div>
+                  <label className="text-sm font-semibold text-foreground block mb-1">
+                    <i className="fa-solid fa-percent mr-1 text-secondary" />
+                    Descuento personalizado
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={discountPercent || ""}
+                      onChange={(e) => {
+                        const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                        setDiscountPercent(val);
+                      }}
+                      className="input-touch text-center text-lg font-bold flex-1"
+                      placeholder="0"
+                      min={0}
+                      max={100}
+                      step={1}
+                    />
+                    <span className="text-lg font-bold text-muted-foreground">%</span>
+                  </div>
+                  {/* Quick discount buttons */}
+                  <div className="flex gap-2 mt-2">
+                    {[0, 5, 10, 15, 20, 25].map((pct) => (
+                      <button
+                        key={pct}
+                        onClick={() => setDiscountPercent(pct)}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${discountPercent === pct
+                          ? 'bg-secondary text-white'
+                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                          }`}
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Price Display */}
-              {membershipPrice > 0 && (
+              {membershipBasePrice > 0 && (
                 <div className="pos-card p-4 text-center bg-accent/10 border-2 border-accent/30">
                   <p className="text-sm text-secondary mb-1">Precio del paquete (8 lavados con 36% desc.)</p>
-                  <p className="text-3xl font-bold text-primary">C${membershipPrice.toFixed(2)}</p>
+                  {discountPercent > 0 ? (
+                    <>
+                      <p className="text-lg text-muted-foreground line-through">C${membershipBasePrice.toFixed(2)}</p>
+                      <p className="text-3xl font-bold text-primary">C${membershipPrice.toFixed(2)}</p>
+                      <p className="text-sm text-accent font-semibold mt-1">
+                        <i className="fa-solid fa-tag mr-1" />
+                        Ahorro: C${discountAmount.toFixed(2)} ({discountPercent}% desc.)
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-3xl font-bold text-primary">C${membershipPrice.toFixed(2)}</p>
+                  )}
                   <p className="text-xs text-muted-foreground mt-1">
                     ~${(membershipPrice / exchangeRate).toFixed(2)} USD
                   </p>
@@ -442,7 +533,7 @@ export default function Memberships() {
                 className="btn-cobrar w-full disabled:opacity-50"
               >
                 <i className="fa-solid fa-money-bill-wave mr-2" />
-                Proceder al Pago
+                Proceder al Pago — C${membershipPrice.toFixed(2)}
               </button>
             </div>
           </div>
@@ -456,6 +547,14 @@ export default function Memberships() {
           exchangeRate={exchangeRate}
           onClose={() => setShowPayment(false)}
           onConfirm={handlePaymentComplete}
+        />
+      )}
+
+      {/* Print Ticket Modal */}
+      {showPrint && lastTicket && (
+        <TicketPrint
+          ticket={lastTicket}
+          onClose={() => { setShowPrint(false); setLastTicket(null); }}
         />
       )}
 

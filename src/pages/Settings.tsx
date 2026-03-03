@@ -104,6 +104,7 @@ export default function Settings() {
       logo_url: settings.logo_url || "",
       printer_width_mm: String(settings.printer_width_mm || 80),
       exchange_rate: String(settings.exchange_rate),
+      double_print_ticket: settings.double_print_ticket || false,
     }), 0);
   }
 
@@ -142,6 +143,7 @@ export default function Settings() {
       logo_url: form.logo_url,
       printer_width_mm: parseInt(form.printer_width_mm),
       exchange_rate: parseFloat(form.exchange_rate),
+      double_print_ticket: form.double_print_ticket,
     });
     showToast("Configuración guardada");
   };
@@ -339,6 +341,18 @@ export default function Settings() {
               <option value="80">80mm (Estándar)</option>
               <option value="110">110mm (Grande)</option>
             </select>
+          </div>
+          <div className="flex items-center justify-between p-3 rounded-xl bg-accent/5 border border-accent/10">
+            <div className="space-y-0.5">
+              <label className="text-sm font-semibold text-foreground block">Imprimir doble ticket</label>
+              <p className="text-xs text-muted-foreground">Genera una copia para el negocio y otra para el cliente.</p>
+            </div>
+            <button
+              onClick={() => setForm({ ...form, double_print_ticket: !form.double_print_ticket })}
+              className={`w-12 h-6 rounded-full transition-colors relative ${form.double_print_ticket ? 'bg-secondary' : 'bg-muted'}`}
+            >
+              <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${form.double_print_ticket ? 'translate-x-6' : ''}`} />
+            </button>
           </div>
         </div>
       </div>
