@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import TicketPrint from "@/components/pos/TicketPrint";
 
 interface Stats {
   totalSalesNIO: number;
@@ -20,6 +21,8 @@ export default function Dashboard() {
 
   const [stats, setStats] = useState<Stats>({ totalSalesNIO: 0, totalSalesUSD: 0, ticketCount: 0, topServices: [], topVehicles: [], recentTickets: [] });
   const [loading, setLoading] = useState(true);
+  const [printTicket, setPrintTicket] = useState<any>(null);
+  const [loadingPrint, setLoadingPrint] = useState<number | null>(null);
 
   const loadStats = async () => {
     setLoading(true);
@@ -95,6 +98,76 @@ export default function Dashboard() {
     } catch (error: any) {
       console.error("Error deleting ticket:", error);
       toast.error("Error al eliminar el ticket: " + (error.message || "Permisos insuficientes"));
+    }
+  };
+
+  const handleReprintTicket = async (ticketId: number) => {
+    setLoadingPrint(ticketId);
+    try {
+      // Fetch ticket with all related data
+      const { data: ticket, error } = await supabase
+        .from("tickets")
+        .select("*, vehicle_types(name), ticket_items(*, services(name))")
+        .eq("id", ticketId)
+        .single();
+
+      if (error || !ticket) throw new Error("No se pudo cargar el ticket");
+
+      // Fetch payment info
+      const { data: payments } = await supabase
+        .from("payments")
+        .select("*")
+        .eq("ticket_id", ticketId);
+
+      // Fetch customer if customer_id exists
+      let customer: any = null;
+      try {
+        const { data: ticketWithCustomer } = await supabase
+          .from("tickets")
+          .select("customer_id, customers(name, phone, plate, is_general)")
+          .eq("id", ticketId)
+          .single() as any;
+        if (ticketWithCustomer?.customers) {
+          customer = ticketWithCustomer.customers;
+        }
+      } catch { /* customer_id may not exist */ }
+
+      // Build ticket object for TicketPrint component
+      const items = (ticket.ticket_items || []).map((ti: any) => ({
+        serviceName: ti.services?.name || "Servicio",
+        vehicleLabel: ticket.vehicle_types?.name || "—",
+        price: Number(ti.price),
+        qty: 1,
+      }));
+
+      const payment = payments && payments.length > 0 ? {
+        method: payments[0].payment_method === "cash" ? "Efectivo"
+          : payments[0].payment_method === "card" ? "Tarjeta"
+            : payments[0].payment_method === "transfer" ? "Transferencia"
+              : payments[0].payment_method,
+        currency: payments[0].currency || "NIO",
+        received: Number(payments[0].amount_received || payments[0].amount),
+        change: Number(payments[0].change_amount || 0),
+      } : null;
+
+      const subtotal = items.reduce((s: number, i: any) => s + i.price, 0);
+      const discount = subtotal - Number(ticket.total);
+
+      setPrintTicket({
+        ticket_number: ticket.ticket_number,
+        created_at: ticket.created_at,
+        total: ticket.total,
+        subtotal,
+        discount: discount > 0 ? discount : 0,
+        items,
+        customer: customer || { name: "Cliente General", is_general: true },
+        payment,
+        settings,
+      });
+    } catch (err: any) {
+      toast.error("Error al cargar ticket: " + (err.message || "Intente de nuevo"));
+    } finally {
+      setLoadingPrint(null);
     }
   };
 
@@ -200,13 +273,23 @@ export default function Dashboard() {
                   <td className="px-4 py-3 text-right font-bold text-primary">C${Number(t.total).toFixed(0)}</td>
                   {canDelete && (
                     <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() => handleDeleteTicket(t.id)}
-                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Eliminar ticket"
-                      >
-                        <i className="fa-solid fa-trash-can" />
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => handleReprintTicket(t.id)}
+                          disabled={loadingPrint === t.id}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                          title="Reimprimir ticket"
+                        >
+                          <i className={`fa-solid ${loadingPrint === t.id ? "fa-spinner fa-spin" : "fa-print"}`} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTicket(t.id)}
+                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Eliminar ticket"
+                        >
+                          <i className="fa-solid fa-trash-can" />
+                        </button>
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -215,6 +298,14 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+
+      {/* Reprint modal */}
+      {printTicket && (
+        <TicketPrint
+          ticket={printTicket}
+          onClose={() => setPrintTicket(null)}
+        />
+      )}
     </div>
   );
 }
