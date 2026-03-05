@@ -310,6 +310,7 @@ export default function POS() {
 
       {/* Center: Vehicle + Service selection */}
       <div className="flex-1 flex flex-col overflow-auto">
+
         {/* Vehicle types */}
         <div className="p-4 border-b border-border">
           <p className="text-sm font-semibold text-foreground mb-3">
@@ -599,14 +600,22 @@ export default function POS() {
       {showPrint && lastTicket && (
         <TicketPrint
           ticket={lastTicket}
-          onClose={() => { setShowPrint(false); newTicket(); }}
+          onClose={() => {
+            setShowPrint(false);
+            newTicket();
+          }}
         />
       )}
 
       {/* Toast */}
       {toast && (
-        <div className={toast.type === "success" ? "toast-success" : "toast-error"}>
-          <i className={`fa-solid ${toast.type === "success" ? "fa-circle-check" : "fa-circle-exclamation"} mr-2`} />
+        <div
+          className={toast.type === "success" ? "toast-success" : "toast-error"}
+        >
+          <i
+            className={`fa-solid ${toast.type === "success" ? "fa-circle-check" : "fa-circle-exclamation"
+              } mr-2`}
+          />
           {toast.msg}
         </div>
       )}

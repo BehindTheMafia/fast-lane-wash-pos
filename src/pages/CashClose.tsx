@@ -3,381 +3,834 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+interface TicketDetail {
+  id: string;
+  ticket_number: string;
+  total: number;
+  method: string;
+  created_at: string;
+  service_name: string;
+  vehicle_name: string;
+  plate: string;
+  customer_name: string;
+  cashier_name: string;
+}
+
+interface DayStats {
+  cashNIO: number;
+  cashUSD: number;
+  card: number;
+  transfer: number;
+  totalTickets: number;
+  cashTickets: number;
+  cardTickets: number;
+  transferTickets: number;
+  tickets: TicketDetail[];
+}
+
+type ToastType = { msg: string; type: "success" | "error" } | null;
+type MethodFilter = "all" | "cash" | "card" | "transfer";
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function CashClose() {
   const { user, profile } = useAuth();
   const { data: settings } = useBusinessSettings();
-  const [initialBalance, setInitialBalance] = useState("0");
-  const [shift, setShift] = useState("Matutino");
-  const [observations, setObservations] = useState("");
-  const [countedTotal, setCountedTotal] = useState("0");
-  const [bills, setBills] = useState<Record<string, number>>({});
-  const [coins, setCoins] = useState<Record<string, number>>({});
-  const [expenses, setExpenses] = useState<{ description: string; amount: string; category: string }[]>([]);
-  const [history, setHistory] = useState<any[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
-  const [dayStats, setDayStats] = useState({ cashNIO: 0, cashUSD: 0, card: 0, transfer: 0 });
-  const [showConfirmation, setShowConfirmation] = useState(false);
 
-  const calculateTotal = (billsObj: Record<string, number>, coinsObj: Record<string, number>) => {
-    let total = 0;
-    // Bills
-    [1000, 500, 200, 100, 50, 20, 10].forEach(denom => {
-      total += (billsObj[`bill_${denom}`] || 0) * denom;
-    });
-    // Coins
-    [5, 1, 0.5, 0.25, 0.10, 0.05].forEach(denom => {
-      total += (coinsObj[`coin_${denom}`] || 0) * denom;
-    });
-    setCountedTotal(total.toFixed(2));
+  // Data
+  const [dayStats, setDayStats] = useState<DayStats>({
+    cashNIO: 0, cashUSD: 0, card: 0, transfer: 0,
+    totalTickets: 0, cashTickets: 0, cardTickets: 0, transferTickets: 0,
+    tickets: [],
+  });
+  const [history, setHistory] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // User inputs
+  const [cashCounted, setCashCounted] = useState("");
+  const [egresos, setEgresos] = useState<{ amount: string; reason: string }[]>([]);
+  const [note, setNote] = useState("");
+
+  // UI state
+  const [methodFilter, setMethodFilter] = useState<MethodFilter | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<ToastType>(null);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // ── Load data ───────────────────────────────────
+  useEffect(() => { loadAll(); }, []);
+
+  const loadAll = async () => {
+    setLoading(true);
+    await Promise.all([loadDayStats(), loadHistory()]);
+    setLoading(false);
   };
 
-  useEffect(() => {
-    loadHistory();
-    loadDayStats();
-  }, []);
+  const loadDayStats = async () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const { data: payments } = await supabase
+      .from("payments")
+      .select(`
+        *,
+        tickets(
+          id, ticket_number, total, created_at, vehicle_plate, user_id,
+          vehicle_types(name),
+          ticket_items(services(name))
+        )
+      `)
+      .gte("created_at", today.toISOString());
+
+    if (!payments) return;
+
+    // Collect unique user_ids to fetch cashier names
+    const userIds = new Set<string>();
+    payments.forEach((p: any) => {
+      if (p.tickets?.user_id) userIds.add(p.tickets.user_id);
+    });
+
+    // Fetch profiles for cashier names
+    const profileMap: Map<string, string> = new Map();
+    if (userIds.size > 0) {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", Array.from(userIds));
+      if (profiles) {
+        profiles.forEach((pr: any) => profileMap.set(pr.id, pr.full_name || "—"));
+      }
+    }
+
+    // Try to fetch customer names for tickets that have customer_id
+    const ticketIds = payments.filter((p: any) => p.tickets).map((p: any) => p.ticket_id);
+    const customerMap: Map<number, { name: string; plate: string }> = new Map();
+    if (ticketIds.length > 0) {
+      try {
+        const { data: ticketCustomers } = await supabase
+          .from("tickets")
+          .select("id, customer_id, customers(name, plate)")
+          .in("id", ticketIds) as any;
+        if (ticketCustomers) {
+          ticketCustomers.forEach((tc: any) => {
+            if (tc.customers) {
+              customerMap.set(tc.id, { name: tc.customers.name, plate: tc.customers.plate || "" });
+            }
+          });
+        }
+      } catch { /* customer_id may not exist, no problem */ }
+    }
+
+    let cashNIO = 0, cashUSD = 0, card = 0, transfer = 0;
+    let cashTickets = 0, cardTickets = 0, transferTickets = 0;
+    const ticketMap: Map<string, TicketDetail> = new Map();
+
+    payments.forEach((p: any) => {
+      const t = p.tickets;
+      if (t && !ticketMap.has(p.ticket_id)) {
+        const items = t.ticket_items || [];
+        const serviceName = items.length > 0 && items[0].services ? items[0].services.name : "—";
+        const vehicleName = t.vehicle_types?.name || "—";
+        const custData = customerMap.get(p.ticket_id);
+        const customerName = custData?.name || "Cliente General";
+        const plate = t.vehicle_plate || custData?.plate || "—";
+        const cashierName = t.user_id ? (profileMap.get(t.user_id) || "—") : "—";
+
+        ticketMap.set(p.ticket_id, {
+          id: p.ticket_id,
+          ticket_number: t.ticket_number || "—",
+          total: Number(t.total),
+          method: p.payment_method,
+          created_at: t.created_at,
+          service_name: serviceName,
+          vehicle_name: vehicleName,
+          plate,
+          customer_name: customerName,
+          cashier_name: cashierName,
+        });
+      }
+
+      if (p.payment_method === "cash") {
+        if (p.currency === "USD") cashUSD += Number(p.amount);
+        else { cashNIO += Number(p.amount); cashTickets++; }
+      } else if (p.payment_method === "card") {
+        card += Number(p.amount); cardTickets++;
+      } else if (p.payment_method === "transfer") {
+        transfer += Number(p.amount); transferTickets++;
+      }
+    });
+
+    const tickets = Array.from(ticketMap.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    setDayStats({
+      cashNIO, cashUSD, card, transfer,
+      totalTickets: tickets.length,
+      cashTickets, cardTickets, transferTickets,
+      tickets,
+    });
+  };
 
   const loadHistory = async () => {
     const { data } = await supabase
       .from("cash_closures")
       .select("*")
       .order("closed_at", { ascending: false })
-      .limit(10);
+      .limit(8);
     if (data) setHistory(data);
   };
 
-  const loadDayStats = async () => {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const { data: payments } = await supabase
-      .from("payments")
-      .select("*")
-      .gte("created_at", today.toISOString());
+  // ── Calculations ──────────────────────────────── 
+  const totalEgresos = egresos.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+  const expectedCash = dayStats.cashNIO - totalEgresos;
+  const counted = parseFloat(cashCounted) || 0;
+  const difference = counted - expectedCash;
+  const hasCounted = cashCounted.trim() !== "";
+  const cuadra = hasCounted && Math.abs(difference) < 0.01;
+  const sobra = hasCounted && difference > 0.01;
+  const falta = hasCounted && difference < -0.01;
+  const totalDay = dayStats.cashNIO + dayStats.card + dayStats.transfer;
 
-    if (!payments) return;
-    let cashNIO = 0, cashUSD = 0, card = 0, transfer = 0;
-    payments.forEach((p: any) => {
-      if (p.payment_method === "cash") {
-        if (p.currency === "USD") cashUSD += Number(p.amount);
-        else cashNIO += Number(p.amount);
-      } else if (p.payment_method === "card") card += Number(p.amount);
-      else transfer += Number(p.amount);
-    });
-    setDayStats({ cashNIO, cashUSD, card, transfer });
+  // ── Save ───────────────────────────────────────
+  const showToast = (msg: string, type: "success" | "error" = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
   };
-
-  const totalExpenses = expenses.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const expected = parseFloat(initialBalance) + dayStats.cashNIO - totalExpenses;
-  const counted = parseFloat(countedTotal) || 0;
-  const difference = counted - expected;
-
-  const addExpense = () => setExpenses([...expenses, { description: "", amount: "0", category: "caja_chica" }]);
 
   const handleSave = async () => {
     if (!user) return;
     setSaving(true);
-    const { data: closure, error } = await supabase.from("cash_closures").insert({
+
+    const egresosText = egresos
+      .filter(e => parseFloat(e.amount) > 0)
+      .map(e => `${e.reason || "Sin motivo"}: C$${parseFloat(e.amount).toFixed(2)}`)
+      .join(" | ");
+
+    const { error } = await supabase.from("cash_closures").insert({
       cashier_id: user.id,
-      shift,
-      initial_balance: parseFloat(initialBalance),
+      shift: "General",
+      initial_balance: 0,
       total_cash_nio: dayStats.cashNIO,
       total_cash_usd: dayStats.cashUSD,
       total_card: dayStats.card,
       total_transfer: dayStats.transfer,
-      total_expenses: totalExpenses,
-      expected_total: expected,
+      total_expenses: totalEgresos,
+      expected_total: expectedCash,
       counted_total: counted,
       difference,
-      bills_count: bills,
-      coins_count: coins,
-      observations,
-    }).select().single();
+      bills_count: {},
+      coins_count: {},
+      observations: [note, egresosText ? `Egresos: ${egresosText}` : ""].filter(Boolean).join(" | ") || null,
+    } as any);
 
-    if (!error && closure) {
-      for (const exp of expenses) {
-        if (exp.description.trim()) {
-          await supabase.from("cash_expenses").insert({
-            closure_id: closure.id,
-            category: exp.category,
-            description: exp.description,
-            amount: parseFloat(exp.amount) || 0,
-          });
-        }
-      }
-      setToast("Cierre guardado correctamente");
-      setTimeout(() => setToast(null), 3000);
-      loadHistory();
-      setExpenses([]);
-      setObservations("");
-      setBills({});
-      setCoins({});
-      setCountedTotal("0");
+    if (!error) {
+      showToast("✅ Cierre de caja guardado correctamente");
+      setCashCounted("");
+      setEgresos([]);
+      setNote("");
+      setShowConfirm(false);
+      await loadHistory();
+    } else {
+      showToast("Error al guardar el cierre: " + error.message, "error");
     }
     setSaving(false);
   };
 
+  // ── Helpers ────────────────────────────────────
+  const filteredTickets = methodFilter
+    ? dayStats.tickets.filter(t => methodFilter === "all" ? true : t.method === methodFilter)
+    : [];
+
+  const methodLabel = (m: string) =>
+    m === "cash" ? "Efectivo" : m === "card" ? "Tarjeta" : m === "transfer" ? "Transferencia" : m;
+
+  const methodBadgeClass = (m: string) =>
+    m === "cash"
+      ? "bg-emerald-100 text-emerald-700"
+      : m === "card"
+        ? "bg-blue-100 text-blue-700"
+        : "bg-violet-100 text-violet-700";
+
+  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("es-NI", { day: "2-digit", month: "short" });
+  const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit", hour12: true });
+
+  const toggleMethodFilter = (m: MethodFilter) => {
+    setMethodFilter(methodFilter === m ? null : m);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4">
+        <i className="fa-solid fa-spinner fa-spin text-5xl text-primary" />
+        <p className="text-xl text-muted-foreground">Cargando información del día...</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
-      <h2 className="text-2xl font-bold text-foreground">
-        <i className="fa-solid fa-vault mr-3 text-secondary" />Cierre de Caja
-      </h2>
+    <div className="min-h-full bg-background p-4 md:p-6 space-y-6 animate-fade-in">
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Form */}
-        <div className="space-y-4">
-          <div className="pos-card p-4 space-y-3">
-            <h3 className="font-bold text-foreground"><i className="fa-solid fa-info-circle mr-2 text-secondary" />Información</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-semibold text-foreground">Negocio</label>
-                <p className="text-sm text-secondary">{settings?.business_name}</p>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-foreground">Responsable</label>
-                <p className="text-sm text-secondary">{profile?.full_name}</p>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-foreground">Turno</label>
-                <select value={shift} onChange={(e) => setShift(e.target.value)} className="input-touch">
-                  <option>Matutino</option><option>Vespertino</option><option>Nocturno</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-foreground">Saldo inicial (C$)</label>
-                <input type="number" value={initialBalance} onChange={(e) => setInitialBalance(e.target.value)} className="input-touch" />
-              </div>
+      {/* ─── HEADER ───────────────────────────────────────── */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <span className="text-4xl">🏦</span> Cierre de Caja
+          </h2>
+          <p className="text-muted-foreground mt-1">
+            {new Date().toLocaleDateString("es-NI", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+            {" · "}{profile?.full_name || "—"}
+          </p>
+        </div>
+        <button
+          onClick={() => setShowHistory(!showHistory)}
+          className="touch-btn flex items-center gap-2 px-4 py-2 rounded-xl bg-muted text-muted-foreground hover:bg-muted/80 text-sm font-semibold transition-colors"
+        >
+          <i className="fa-solid fa-clock-rotate-left" />
+          Cierres anteriores
+        </button>
+      </div>
+
+      {/* ─── HISTORY PANEL (collapsible) ──────────────────── */}
+      {showHistory && (
+        <div className="pos-card p-4 animate-scale-in">
+          <h3 className="font-bold text-foreground mb-3 flex items-center gap-2">
+            <i className="fa-solid fa-history text-secondary" /> Últimos cierres registrados
+          </h3>
+          {history.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No hay cierres anteriores.</p>
+          ) : (
+            <div className="space-y-3">
+              {history.map((h: any) => {
+                const diff = Number(h.difference);
+                const cashNIO = Number(h.total_cash_nio || 0);
+                const card = Number(h.total_card || 0);
+                const transfer = Number(h.total_transfer || 0);
+                const totalDayH = cashNIO + card + transfer;
+                return (
+                  <div key={h.id} className="p-4 rounded-xl bg-background border border-border text-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="font-bold text-foreground">
+                        {new Date(h.closed_at).toLocaleDateString("es-NI", { day: "2-digit", month: "short", year: "numeric" })}
+                        {" · "}
+                        {new Date(h.closed_at).toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                      </p>
+                      <span className={`text-sm font-black px-3 py-1 rounded-full ${Math.abs(diff) < 0.01
+                        ? "bg-emerald-100 text-emerald-700"
+                        : diff > 0 ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"
+                        }`}>
+                        {Math.abs(diff) < 0.01 ? "✅ Cuadró" : diff > 0 ? `⬆ Sobró C$${diff.toFixed(0)}` : `⬇ Faltó C$${Math.abs(diff).toFixed(0)}`}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border">
+                      <div className="text-center">
+                        <p className="text-xs text-emerald-600 font-semibold"><i className="fa-solid fa-money-bills mr-1" />Efectivo</p>
+                        <p className="font-black text-foreground">C${cashNIO.toFixed(0)}</p>
+                      </div>
+                      <div className="text-center border-x border-border">
+                        <p className="text-xs text-violet-600 font-semibold"><i className="fa-solid fa-building-columns mr-1" />Transfer.</p>
+                        <p className="font-black text-foreground">C${transfer.toFixed(0)}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-blue-600 font-semibold"><i className="fa-solid fa-credit-card mr-1" />Tarjeta</p>
+                        <p className="font-black text-foreground">C${card.toFixed(0)}</p>
+                      </div>
+                    </div>
+                    <div className="flex justify-between pt-1 border-t border-border text-xs text-muted-foreground">
+                      <span>Total: <strong className="text-foreground">C${totalDayH.toFixed(0)}</strong></span>
+                      <span>Contado: <strong className="text-foreground">C${Number(h.counted_total).toFixed(0)}</strong></span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          </div>
+          )}
+        </div>
+      )}
 
-          {/* Day income */}
-          <div className="pos-card p-4">
-            <h3 className="font-bold text-foreground mb-3"><i className="fa-solid fa-arrow-trend-up mr-2 text-secondary" />Ingresos del día</h3>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="flex justify-between"><span className="text-secondary">Efectivo C$:</span><span className="font-semibold">C${dayStats.cashNIO.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-secondary">Efectivo USD:</span><span className="font-semibold">${dayStats.cashUSD.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-secondary">Tarjeta:</span><span className="font-semibold">C${dayStats.card.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-secondary">Transferencia:</span><span className="font-semibold">C${dayStats.transfer.toFixed(2)}</span></div>
+      {/* ─── SECTION 1: RESUMEN DEL DÍA ──────────────────── */}
+      <div className="pos-card p-6 space-y-4">
+        <div className="flex items-center gap-3 mb-2">
+          <span className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold text-lg">1</span>
+          <h3 className="text-xl font-bold text-foreground">RESUMEN DEL DÍA — según facturas registradas</h3>
+        </div>
+        <p className="text-muted-foreground text-sm -mt-1">
+          Haz clic en cualquier método de pago para ver el detalle de las facturas.
+        </p>
+
+        {/* Clickable cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+          {/* Cash */}
+          <button
+            onClick={() => toggleMethodFilter("cash")}
+            className={`rounded-2xl p-5 text-left transition-all duration-200 border-2 ${methodFilter === "cash"
+              ? "border-emerald-500 ring-2 ring-emerald-300 scale-[1.02] bg-emerald-100 dark:bg-emerald-900/40"
+              : "border-emerald-200 bg-emerald-50 hover:border-emerald-400 hover:scale-[1.01] dark:bg-emerald-900/20 dark:border-emerald-700/40"
+              }`}>
+            <div className="flex items-center gap-2 mb-3">
+              <i className="fa-solid fa-money-bills text-2xl text-emerald-600" />
+              <span className="font-bold text-emerald-700 dark:text-emerald-400 text-base">Efectivo</span>
+              {methodFilter === "cash" && <i className="fa-solid fa-chevron-down text-xs text-emerald-500 ml-auto" />}
             </div>
-          </div>
+            <p className="text-4xl font-black text-emerald-700 dark:text-emerald-300">C${dayStats.cashNIO.toFixed(0)}</p>
+            <p className="text-xs text-emerald-600 mt-1">{dayStats.cashTickets} factura{dayStats.cashTickets !== 1 ? "s" : ""}</p>
+            {dayStats.cashUSD > 0 && <p className="text-xs text-emerald-600 mt-0.5">+ ${dayStats.cashUSD.toFixed(2)} USD</p>}
+          </button>
 
-          {/* Expenses */}
-          <div className="pos-card p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-foreground"><i className="fa-solid fa-arrow-trend-down mr-2 text-secondary" />Egresos</h3>
-              <button onClick={addExpense} className="touch-btn text-sm bg-accent/10 text-accent px-3 py-1 rounded-lg">
-                <i className="fa-solid fa-plus mr-1" />Agregar
+          {/* Transfer */}
+          <button
+            onClick={() => toggleMethodFilter("transfer")}
+            className={`rounded-2xl p-5 text-left transition-all duration-200 border-2 ${methodFilter === "transfer"
+              ? "border-violet-500 ring-2 ring-violet-300 scale-[1.02] bg-violet-100 dark:bg-violet-900/40"
+              : "border-violet-200 bg-violet-50 hover:border-violet-400 hover:scale-[1.01] dark:bg-violet-900/20 dark:border-violet-700/40"
+              }`}>
+            <div className="flex items-center gap-2 mb-3">
+              <i className="fa-solid fa-building-columns text-2xl text-violet-600" />
+              <span className="font-bold text-violet-700 dark:text-violet-400 text-base">Transferencia</span>
+              {methodFilter === "transfer" && <i className="fa-solid fa-chevron-down text-xs text-violet-500 ml-auto" />}
+            </div>
+            <p className="text-4xl font-black text-violet-700 dark:text-violet-300">C${dayStats.transfer.toFixed(0)}</p>
+            <p className="text-xs text-violet-600 mt-1">{dayStats.transferTickets} factura{dayStats.transferTickets !== 1 ? "s" : ""}</p>
+          </button>
+
+          {/* Card */}
+          <button
+            onClick={() => toggleMethodFilter("card")}
+            className={`rounded-2xl p-5 text-left transition-all duration-200 border-2 ${methodFilter === "card"
+              ? "border-blue-500 ring-2 ring-blue-300 scale-[1.02] bg-blue-100 dark:bg-blue-900/40"
+              : "border-blue-200 bg-blue-50 hover:border-blue-400 hover:scale-[1.01] dark:bg-blue-900/20 dark:border-blue-700/40"
+              }`}>
+            <div className="flex items-center gap-2 mb-3">
+              <i className="fa-solid fa-credit-card text-2xl text-blue-600" />
+              <span className="font-bold text-blue-700 dark:text-blue-400 text-base">Tarjeta</span>
+              {methodFilter === "card" && <i className="fa-solid fa-chevron-down text-xs text-blue-500 ml-auto" />}
+            </div>
+            <p className="text-4xl font-black text-blue-700 dark:text-blue-300">C${dayStats.card.toFixed(0)}</p>
+            <p className="text-xs text-blue-600 mt-1">{dayStats.cardTickets} factura{dayStats.cardTickets !== 1 ? "s" : ""}</p>
+          </button>
+
+          {/* Grand Total */}
+          <button
+            onClick={() => toggleMethodFilter("all")}
+            className={`rounded-2xl p-5 text-left transition-all duration-200 border-2 ${methodFilter === "all"
+              ? "border-foreground/50 ring-2 ring-foreground/20 scale-[1.02] bg-foreground/10"
+              : "border-foreground/20 bg-foreground/5 hover:border-foreground/40 hover:scale-[1.01]"
+              }`}>
+            <div className="flex items-center gap-2 mb-3">
+              <i className="fa-solid fa-chart-simple text-2xl text-foreground/60" />
+              <span className="font-bold text-foreground text-base">TOTAL GENERAL</span>
+              {methodFilter === "all" && <i className="fa-solid fa-chevron-down text-xs text-foreground/60 ml-auto" />}
+            </div>
+            <p className="text-4xl font-black text-foreground">C${totalDay.toFixed(0)}</p>
+            <p className="text-xs text-muted-foreground mt-1">{dayStats.totalTickets} factura{dayStats.totalTickets !== 1 ? "s" : ""}</p>
+          </button>
+        </div>
+
+        {/* ── TICKETS TABLE (shown when a card is clicked) ── */}
+        {methodFilter && (
+          <div className="animate-scale-in space-y-3 mt-2">
+            <div className="flex items-center justify-between">
+              <h4 className="font-bold text-foreground text-sm flex items-center gap-2">
+                <i className="fa-solid fa-list text-secondary" />
+                {methodFilter === "all" ? "Todas las facturas" : `Facturas — ${methodLabel(methodFilter)}`}
+                <span className="text-xs text-muted-foreground font-normal">({filteredTickets.length})</span>
+              </h4>
+              <button
+                onClick={() => setMethodFilter(null)}
+                className="touch-btn text-xs px-3 py-1 rounded-lg bg-muted text-muted-foreground hover:bg-muted/80"
+              >
+                <i className="fa-solid fa-xmark mr-1" /> Cerrar
               </button>
             </div>
-            {expenses.map((exp, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <select value={exp.category} onChange={(e) => { const n = [...expenses]; n[i].category = e.target.value; setExpenses(n); }} className="input-touch w-32">
-                  <option value="caja_chica">Caja chica</option>
-                  <option value="compras">Compras</option>
-                  <option value="proveedores">Proveedores</option>
-                  <option value="retiros">Retiros</option>
-                </select>
-                <input value={exp.description} onChange={(e) => { const n = [...expenses]; n[i].description = e.target.value; setExpenses(n); }} className="input-touch flex-1" placeholder="Descripción" />
-                <input type="number" value={exp.amount} onChange={(e) => { const n = [...expenses]; n[i].amount = e.target.value; setExpenses(n); }} className="input-touch w-24" />
-                <button onClick={() => setExpenses(expenses.filter((_, j) => j !== i))} className="touch-btn text-destructive p-2"><i className="fa-solid fa-trash-can" /></button>
+
+            {filteredTickets.length === 0 ? (
+              <p className="text-center text-muted-foreground py-6 text-sm">No hay facturas con este método de pago hoy.</p>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/50 text-muted-foreground">
+                      <th className="px-3 py-2.5 text-left font-semibold">#</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Fecha</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Hora</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Servicio</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Vehículo</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Placa</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Cliente</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Método</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Registró</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredTickets.map((t, i) => (
+                      <tr key={t.id} className={`border-t border-border ${i % 2 === 0 ? "bg-background" : "bg-muted/20"} hover:bg-primary/5 transition-colors`}>
+                        <td className="px-3 py-2.5 font-semibold text-foreground">{t.ticket_number}</td>
+                        <td className="px-3 py-2.5 text-muted-foreground">{fmtDate(t.created_at)}</td>
+                        <td className="px-3 py-2.5 text-muted-foreground">{fmtTime(t.created_at)}</td>
+                        <td className="px-3 py-2.5 text-foreground">{t.service_name}</td>
+                        <td className="px-3 py-2.5 text-foreground">{t.vehicle_name}</td>
+                        <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{t.plate}</td>
+                        <td className="px-3 py-2.5 text-foreground">{t.customer_name}</td>
+                        <td className="px-3 py-2.5">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${methodBadgeClass(t.method)}`}>
+                            {methodLabel(t.method)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-muted-foreground text-xs">{t.cashier_name}</td>
+                        <td className="px-3 py-2.5 text-right font-black text-foreground">C${t.total.toFixed(0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border bg-muted/30">
+                      <td colSpan={9} className="px-3 py-2.5 font-bold text-foreground text-right">Total:</td>
+                      <td className="px-3 py-2.5 text-right font-black text-primary text-lg">
+                        C${filteredTickets.reduce((s, t) => s + t.total, 0).toFixed(0)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
               </div>
-            ))}
-            {expenses.length === 0 && <p className="text-sm text-muted-foreground">Sin egresos registrados</p>}
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ─── SECTION 2: DATOS DEL CIERRE ─────────────────── */}
+      <div className="pos-card p-6 space-y-5">
+        <div className="flex items-center gap-3 mb-1">
+          <span className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold text-lg">2</span>
+          <h3 className="text-xl font-bold text-foreground">DATOS DEL CIERRE</h3>
+        </div>
+        <p className="text-muted-foreground text-sm">
+          Completa los campos para registrar el cierre. Solo se comparará el efectivo contado con las ventas en efectivo registradas hoy.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {/* Efectivo registrado en facturas — automático */}
+          <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-700 p-6 space-y-2">
+            <label className="flex items-center gap-2 text-sm font-bold text-emerald-700 dark:text-emerald-300">
+              <i className="fa-solid fa-money-bills text-emerald-600 text-xl" />
+              Efectivo registrado en facturas
+            </label>
+            <p className="text-xs text-emerald-600">
+              Total que el sistema registró como pagado en efectivo hoy.
+            </p>
+            <p className="text-5xl font-black text-emerald-700 dark:text-emerald-300 mt-2 tabular-nums">
+              C${dayStats.cashNIO.toFixed(0)}
+            </p>
+            <p className="text-xs text-emerald-500 mt-1">
+              {dayStats.cashTickets} factura{dayStats.cashTickets !== 1 ? "s" : ""} en efectivo
+            </p>
           </div>
 
-          {/* Counted - Bill/Coin Counter */}
-          <div className="pos-card p-4 space-y-3">
-            <h3 className="font-bold text-foreground"><i className="fa-solid fa-calculator mr-2 text-secondary" />Conteo físico</h3>
-
-            {/* Bills */}
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground mb-2">Billetes (C$)</p>
-              <div className="grid grid-cols-3 gap-2">
-                {[1000, 500, 200, 100, 50, 20, 10].map(denom => {
-                  const key = `bill_${denom}`;
-                  const count = (bills as any)[key] || 0;
-                  return (
-                    <div key={denom} className="flex items-center gap-1 bg-background border border-border rounded p-1">
-                      <span className="text-xs text-secondary w-12">{denom}</span>
-                      <input
-                        type="number"
-                        value={count}
-                        onChange={(e) => {
-                          const newBills = { ...bills, [key]: parseInt(e.target.value) || 0 };
-                          setBills(newBills);
-                          calculateTotal(newBills, coins);
-                        }}
-                        className="w-full px-1 py-0.5 bg-background border-0 text-xs text-right focus:outline-none focus:ring-1 focus:ring-brick-red/50 rounded"
-                        min={0}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+          {/* Efectivo contado — el ÚNICO input obligatorio */}
+          <div className="rounded-2xl border-2 border-primary/50 bg-primary/5 p-6 space-y-2">
+            <label className="flex items-center gap-2 text-sm font-bold text-foreground">
+              <i className="fa-solid fa-hand-holding-dollar text-primary text-xl" />
+              Efectivo contado en caja
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Cuenta el dinero físicamente en la caja e ingresa el total.
+            </p>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-2xl font-black text-muted-foreground">C$</span>
+              <input
+                type="number"
+                value={cashCounted}
+                onChange={(e) => setCashCounted(e.target.value)}
+                className="flex-1 text-4xl font-black text-center rounded-2xl border-3 border-primary bg-background focus:ring-4 focus:ring-primary/20 py-4 px-4 focus:outline-none transition-all"
+                placeholder="0"
+                min={0}
+                step={1}
+              />
             </div>
-
-            {/* Coins */}
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground mb-2">Monedas (C$)</p>
-              <div className="grid grid-cols-3 gap-2">
-                {[5, 1, 0.5, 0.25, 0.10, 0.05].map(denom => {
-                  const key = `coin_${denom}`;
-                  const count = (coins as any)[key] || 0;
-                  return (
-                    <div key={denom} className="flex items-center gap-1 bg-background border border-border rounded p-1">
-                      <span className="text-xs text-secondary w-12">{denom}</span>
-                      <input
-                        type="number"
-                        value={count}
-                        onChange={(e) => {
-                          const newCoins = { ...coins, [key]: parseInt(e.target.value) || 0 };
-                          setCoins(newCoins);
-                          calculateTotal(bills, newCoins);
-                        }}
-                        className="w-full px-1 py-0.5 bg-background border-0 text-xs text-right focus:outline-none focus:ring-1 focus:ring-brick-red/50 rounded"
-                        min={0}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Total calculated */}
-            <div className="pt-3 border-t border-border">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-foreground">Total contado:</span>
-                <span className="text-2xl font-bold text-primary">C${counted.toFixed(2)}</span>
-              </div>
-            </div>
-
-            <textarea value={observations} onChange={(e) => setObservations(e.target.value)} className="input-touch" rows={2} placeholder="Observaciones..." />
           </div>
         </div>
 
-        {/* Summary */}
-        <div className="space-y-4">
-          <div className="pos-card p-6">
-            <h3 className="font-bold text-foreground mb-4"><i className="fa-solid fa-chart-column mr-2 text-secondary" />Resultado</h3>
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between"><span className="text-secondary">Esperado:</span><span className="font-bold text-foreground">C${expected.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-secondary">Contado:</span><span className="font-bold text-foreground">C${counted.toFixed(2)}</span></div>
-              <div className={`flex justify-between pt-2 border-t border-border ${difference >= 0 ? "" : "text-destructive"}`}>
-                <span className="font-bold">Diferencia:</span>
-                <span className="font-bold text-lg">{difference >= 0 ? "+" : ""}C${difference.toFixed(2)}</span>
-              </div>
-            </div>
-            <button onClick={() => setShowConfirmation(true)} disabled={saving} className="btn-cobrar w-full mt-4 flex items-center justify-center gap-2">
-              {saving ? <i className="fa-solid fa-spinner fa-spin" /> : <><i className="fa-solid fa-floppy-disk" />Guardar cierre</>}
+        {/* ── EGRESOS / RETIROS ───────────────────── */}
+        <div className="rounded-2xl border-2 border-destructive/20 bg-destructive/5 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-2 text-sm font-bold text-foreground">
+              <i className="fa-solid fa-arrow-trend-down text-destructive" />
+              Egresos / Retiros de efectivo
+            </label>
+            <button
+              onClick={() => setEgresos([...egresos, { amount: "", reason: "" }])}
+              className="touch-btn text-xs px-3 py-1.5 rounded-lg bg-destructive/10 text-destructive font-semibold hover:bg-destructive/20 transition-colors"
+            >
+              <i className="fa-solid fa-plus mr-1" /> Agregar egreso
             </button>
           </div>
+          <p className="text-xs text-muted-foreground">
+            ¿Sacaron dinero de la caja hoy? (compras, pagos a proveedores…) Estos montos se restan del esperado.
+          </p>
 
-          {/* History */}
-          <div className="pos-card p-4">
-            <h3 className="font-bold text-foreground mb-3"><i className="fa-solid fa-history mr-2 text-secondary" />Histórico</h3>
-            <div className="space-y-2 max-h-60 overflow-auto">
-              {history.map((h: any) => (
-                <div key={h.id} className="p-3 border border-border rounded-lg text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-secondary">{new Date(h.closed_at).toLocaleDateString("es-NI")}</span>
-                    <span className="font-bold">{h.shift}</span>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span>Esperado: C${Number(h.expected_total).toFixed(0)}</span>
-                    <span>Contado: C${Number(h.counted_total).toFixed(0)}</span>
-                    <span className={Number(h.difference) >= 0 ? "text-accent" : "text-destructive"}>
-                      Dif: {Number(h.difference) >= 0 ? "+" : ""}C${Number(h.difference).toFixed(0)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {history.length === 0 && <p className="text-sm text-muted-foreground">Sin cierres previos</p>}
+          {egresos.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-2 italic">
+              Sin egresos registrados.
+            </p>
+          )}
+          {egresos.map((eg, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-xs font-bold text-muted-foreground">C$</span>
+                <input
+                  type="number"
+                  value={eg.amount}
+                  onChange={(e) => { const n = [...egresos]; n[i].amount = e.target.value; setEgresos(n); }}
+                  className="w-24 input-touch text-base font-black text-center py-2"
+                  placeholder="0"
+                  min={0}
+                />
+              </div>
+              <input
+                type="text"
+                value={eg.reason}
+                onChange={(e) => { const n = [...egresos]; n[i].reason = e.target.value; setEgresos(n); }}
+                className="flex-1 input-touch text-sm py-2"
+                placeholder="Motivo (ej: Compra de suministros, pago proveedor...)"
+              />
+              <button
+                onClick={() => setEgresos(egresos.filter((_, j) => j !== i))}
+                className="touch-btn p-2 text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+              >
+                <i className="fa-solid fa-trash-can" />
+              </button>
+            </div>
+          ))}
+          {egresos.length > 0 && (
+            <div className="flex justify-between items-center pt-2 border-t border-destructive/20 text-sm font-bold">
+              <span className="text-foreground">Total egresos:</span>
+              <span className="text-destructive">− C${totalEgresos.toFixed(0)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* ── EXPECTED CASH breakdown ─────────────── */}
+        {(totalEgresos > 0) && (
+          <div className="rounded-2xl bg-background border border-border p-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Efectivo esperado en caja</p>
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Ventas en efectivo:</span>
+                <span className="font-semibold">+ C${dayStats.cashNIO.toFixed(0)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Egresos / Retiros:</span>
+                <span className="font-semibold text-destructive">− C${totalEgresos.toFixed(0)}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t border-border">
+                <span className="font-bold text-foreground">💵 Total esperado:</span>
+                <span className="font-black text-lg text-foreground">C${expectedCash.toFixed(0)}</span>
+              </div>
             </div>
           </div>
+        )}
+
+        {/* ── RESULTADO INMEDIATO ─────────────────── */}
+        {hasCounted && (
+          <div className={`rounded-2xl p-6 border-4 transition-all duration-300 text-center ${cuadra
+            ? "bg-emerald-50 border-emerald-400 dark:bg-emerald-900/30 dark:border-emerald-600"
+            : sobra
+              ? "bg-blue-50 border-blue-400 dark:bg-blue-900/30 dark:border-blue-600"
+              : "bg-red-50 border-red-400 dark:bg-red-900/30 dark:border-red-600"
+            }`}>
+            {cuadra && (
+              <>
+                <p className="text-6xl mb-2">✅</p>
+                <p className="text-4xl font-black text-emerald-700 dark:text-emerald-300">¡CUADRA!</p>
+                <p className="text-emerald-600 font-semibold mt-1 text-lg">El efectivo coincide con las ventas</p>
+              </>
+            )}
+            {sobra && (
+              <>
+                <p className="text-6xl mb-2">⬆️</p>
+                <p className="text-3xl font-black text-blue-700 dark:text-blue-300">SOBRA</p>
+                <p className="text-5xl font-black text-blue-700 dark:text-blue-300 mt-1">C${difference.toFixed(0)}</p>
+                <p className="text-blue-600 font-semibold mt-1">de más en la caja</p>
+              </>
+            )}
+            {falta && (
+              <>
+                <p className="text-6xl mb-2">⬇️</p>
+                <p className="text-3xl font-black text-red-700 dark:text-red-300">FALTA</p>
+                <p className="text-5xl font-black text-red-700 dark:text-red-300 mt-1">C${Math.abs(difference).toFixed(0)}</p>
+                <p className="text-red-600 font-semibold mt-1">de menos en la caja</p>
+              </>
+            )}
+            <div className="mt-4 bg-white/60 dark:bg-black/20 rounded-xl p-4 text-base space-y-2 max-w-md mx-auto">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Efectivo esperado:</span>
+                <span className="font-bold">C${expectedCash.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Efectivo contado:</span>
+                <span className="font-bold">C${counted.toFixed(2)}</span>
+              </div>
+              <div className={`flex justify-between pt-2 border-t ${cuadra ? "border-emerald-200" : sobra ? "border-blue-200" : "border-red-200"}`}>
+                <span className="font-bold">Diferencia:</span>
+                <span className={`font-black text-lg ${cuadra ? "text-emerald-700" : sobra ? "text-blue-700" : "text-red-700"}`}>
+                  {difference >= 0 ? "+" : ""}C${difference.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Note */}
+        <div>
+          <label className="block text-sm font-semibold text-foreground mb-1">
+            <i className="fa-solid fa-note-sticky mr-2 text-secondary" />
+            Nota del cierre (opcional)
+          </label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            className="input-touch text-base"
+            rows={2}
+            placeholder="Ej: Sin novedades, turno normal..."
+          />
         </div>
       </div>
 
-      {/* Confirmation Modal */}
-      {showConfirmation && (
-        <div className="modal-overlay" onClick={() => setShowConfirmation(false)}>
-          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-foreground">
-                <i className="fa-solid fa-triangle-exclamation mr-2 text-amber-500" />
-                Confirmar Cierre de Caja
+      {/* ─── CLOSE BUTTON ────────────────────────────────── */}
+      <button
+        onClick={() => setShowConfirm(true)}
+        disabled={!hasCounted}
+        className="w-full py-6 rounded-2xl font-black text-2xl flex items-center justify-center gap-4 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed hover:scale-[1.01] active:scale-[0.99]"
+        style={{
+          background: hasCounted
+            ? "linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%)"
+            : undefined,
+          color: hasCounted ? "white" : undefined,
+          border: hasCounted ? "none" : "3px solid hsl(var(--border))",
+        }}
+      >
+        <i className="fa-solid fa-vault text-3xl" />
+        CERRAR CAJA
+      </button>
+
+      {!hasCounted && (
+        <p className="text-center text-muted-foreground text-sm -mt-4">
+          👆 Primero ingresa el efectivo contado
+        </p>
+      )}
+
+      {/* ─── CONFIRM MODAL ────────────────────────────────── */}
+      {showConfirm && (
+        <div className="modal-overlay" onClick={() => !saving && setShowConfirm(false)}>
+          <div className="modal-content animate-scale-in max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-2xl font-black text-foreground flex items-center gap-2">
+                <i className="fa-solid fa-vault text-secondary" /> Confirmar Cierre
               </h2>
-              <button onClick={() => setShowConfirmation(false)} className="touch-btn p-2 text-muted-foreground">
-                <i className="fa-solid fa-xmark text-xl" />
-              </button>
+              {!saving && (
+                <button onClick={() => setShowConfirm(false)} className="touch-btn p-2 text-muted-foreground">
+                  <i className="fa-solid fa-xmark text-xl" />
+                </button>
+              )}
             </div>
 
-            <div className="space-y-4">
-              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
-                <p className="text-sm text-foreground font-semibold mb-2">
-                  <i className="fa-solid fa-info-circle mr-2 text-amber-500" />
-                  Importante:
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Una vez guardado, el cierre de caja <strong>NO puede ser editado ni eliminado</strong>.
-                  Por favor verifica que toda la información sea correcta.
+            <div className="space-y-3 mb-5">
+              <div className={`rounded-2xl p-4 text-center border-2 ${cuadra ? "bg-emerald-50 border-emerald-300" : sobra ? "bg-blue-50 border-blue-300" : "bg-red-50 border-red-300"}`}>
+                <p className="text-2xl mb-1">{cuadra ? "✅" : "⚠️"}</p>
+                <p className={`text-xl font-black ${cuadra ? "text-emerald-700" : sobra ? "text-blue-700" : "text-red-700"}`}>
+                  {cuadra ? "¡Cuadra!" : sobra ? `Sobra C$${difference.toFixed(2)}` : `Falta C$${Math.abs(difference).toFixed(2)}`}
                 </p>
               </div>
 
-              <div className="pos-card p-4 space-y-2 text-sm">
-                <h3 className="font-bold text-foreground mb-3">Resumen del cierre:</h3>
-                <div className="flex justify-between">
-                  <span className="text-secondary">Turno:</span>
-                  <span className="font-semibold">{shift}</span>
+              <div className="pos-card p-4 space-y-3 text-sm">
+                <p className="font-bold text-foreground text-base">Resumen del cierre:</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="text-center p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                    <i className="fa-solid fa-money-bills text-emerald-600 text-lg mb-1 block" />
+                    <p className="text-xs text-emerald-600 font-semibold">Efectivo</p>
+                    <p className="font-black text-emerald-700">C${dayStats.cashNIO.toFixed(0)}</p>
+                  </div>
+                  <div className="text-center p-3 rounded-xl bg-violet-50 border border-violet-200">
+                    <i className="fa-solid fa-building-columns text-violet-600 text-lg mb-1 block" />
+                    <p className="text-xs text-violet-600 font-semibold">Transfer.</p>
+                    <p className="font-black text-violet-700">C${dayStats.transfer.toFixed(0)}</p>
+                  </div>
+                  <div className="text-center p-3 rounded-xl bg-blue-50 border border-blue-200">
+                    <i className="fa-solid fa-credit-card text-blue-600 text-lg mb-1 block" />
+                    <p className="text-xs text-blue-600 font-semibold">Tarjeta</p>
+                    <p className="font-black text-blue-700">C${dayStats.card.toFixed(0)}</p>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-secondary">Saldo inicial:</span>
-                  <span className="font-semibold">C${parseFloat(initialBalance).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-secondary">Total esperado:</span>
-                  <span className="font-semibold">C${expected.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-secondary">Total contado:</span>
-                  <span className="font-semibold">C${counted.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between pt-2 border-t border-border">
-                  <span className="font-bold">Diferencia:</span>
-                  <span className={`font-bold ${difference >= 0 ? "text-accent" : "text-destructive"}`}>
-                    {difference >= 0 ? "+" : ""}C${difference.toFixed(2)}
-                  </span>
-                </div>
-                {totalExpenses > 0 && (
+                <div className="space-y-1 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-secondary">Egresos totales:</span>
-                    <span className="font-semibold">C${totalExpenses.toFixed(2)}</span>
+                    <span className="text-muted-foreground">Ventas en efectivo:</span>
+                    <span className="font-semibold">C${dayStats.cashNIO.toFixed(2)}</span>
+                  </div>
+                  {totalEgresos > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Egresos / Retiros:</span>
+                      <span className="font-semibold text-destructive">− C${totalEgresos.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between pt-1 border-t border-border">
+                    <span className="text-muted-foreground">Efectivo esperado:</span>
+                    <span className="font-semibold">C${expectedCash.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Efectivo contado:</span>
+                    <span className="font-semibold">C${counted.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-black text-base pt-1 border-t border-border">
+                    <span>Diferencia:</span>
+                    <span className={cuadra ? "text-emerald-600" : sobra ? "text-blue-600" : "text-destructive"}>
+                      {difference >= 0 ? "+" : ""}C${difference.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                {note && (
+                  <div className="text-xs pt-1 border-t border-border">
+                    <span className="text-muted-foreground">Nota: </span>
+                    <span className="text-foreground">{note}</span>
                   </div>
                 )}
               </div>
 
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowConfirmation(false)}
-                  className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
-                >
-                  <i className="fa-solid fa-arrow-left mr-2" />
-                  Revisar
-                </button>
-                <button
-                  onClick={() => {
-                    setShowConfirmation(false);
-                    handleSave();
-                  }}
-                  className="flex-1 py-3 rounded-xl bg-accent text-accent-foreground font-semibold hover:bg-accent/90 transition-colors"
-                >
-                  <i className="fa-solid fa-check mr-2" />
-                  Confirmar y Guardar
-                </button>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-200">
+                <i className="fa-solid fa-triangle-exclamation mr-2" />
+                Una vez guardado, el cierre <strong>no puede modificarse</strong>.
               </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowConfirm(false)}
+                disabled={saving}
+                className="touch-btn flex-1 py-4 rounded-2xl border-2 border-border text-foreground font-bold text-base disabled:opacity-50"
+              >
+                <i className="fa-solid fa-arrow-left mr-2" /> Revisar
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 py-4 rounded-2xl bg-accent text-accent-foreground font-black text-base disabled:opacity-70 flex items-center justify-center gap-2 transition-all hover:bg-accent/90"
+              >
+                {saving ? (
+                  <><i className="fa-solid fa-spinner fa-spin" /> Guardando...</>
+                ) : (
+                  <><i className="fa-solid fa-check" /> SÍ, CERRAR CAJA</>
+                )}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {toast && <div className="toast-success"><i className="fa-solid fa-circle-check mr-2" />{toast}</div>}
+      {/* ─── TOAST ────────────────────────────────────────── */}
+      {toast && (
+        <div className={toast.type === "success" ? "toast-success" : "toast-error"}>
+          {toast.msg}
+        </div>
+      )}
     </div>
   );
 }

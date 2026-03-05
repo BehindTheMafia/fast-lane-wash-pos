@@ -16,48 +16,57 @@ interface PaymentModalProps {
   }) => void;
 }
 
+type PaymentMethod = "cash" | "card" | "transfer";
+
 export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }: PaymentModalProps) {
   const [currency, setCurrency] = useState<"NIO" | "USD">("NIO");
-  const [method, setMethod] = useState("cash");
+  const [method, setMethod] = useState<PaymentMethod>("cash");
   const [received, setReceived] = useState("");
-  const [mixedMode, setMixedMode] = useState(false);
-  const [cashAmount, setCashAmount] = useState("");
-  const [cardAmount, setCardAmount] = useState("");
 
   const totalInCurrency = currency === "NIO" ? total : +(total / exchangeRate).toFixed(2);
+  const symbol = currency === "NIO" ? "C$" : "$";
 
-  // Mixed payment logic
-  const cashNum = parseFloat(cashAmount) || 0;
-  const cardNum = parseFloat(cardAmount) || 0;
-  const mixedTotal = cashNum + cardNum;
-  const mixedRemaining = Math.max(0, totalInCurrency - mixedTotal);
-
-  // Single payment logic
+  // Single payment logic (cash only needs received amount)
   const receivedNum = parseFloat(received) || 0;
   const change = Math.max(0, receivedNum - totalInCurrency);
 
-  const canConfirm = mixedMode
-    ? mixedTotal >= totalInCurrency
-    : (method !== "cash" || receivedNum >= totalInCurrency);
+  // For transfer/card: amount is exactly the total
+  const canConfirm =
+    method === "cash"
+      ? receivedNum >= totalInCurrency
+      : true; // transfer and card: total is confirmed directly
 
   const handleConfirm = () => {
     if (!canConfirm) return;
 
-    if (mixedMode) {
-      onConfirm({
-        currency,
-        method: "mixed",
-        received: mixedTotal,
-        change: 0,
-        mixedPayment: {
-          cashAmount: cashNum,
-          cardAmount: cardNum
-        }
-      });
-    } else {
+    if (method === "cash") {
       onConfirm({ currency, method, received: receivedNum, change });
+    } else {
+      // For card and transfer: received = total, no change
+      onConfirm({ currency, method, received: totalInCurrency, change: 0 });
     }
   };
+
+  const paymentMethods: { id: PaymentMethod; label: string; icon: string; description: string }[] = [
+    {
+      id: "cash",
+      label: "Efectivo",
+      icon: "fa-money-bills",
+      description: "Pago en físico",
+    },
+    {
+      id: "card",
+      label: "Tarjeta",
+      icon: "fa-credit-card",
+      description: "Débito / Crédito",
+    },
+    {
+      id: "transfer",
+      label: "Transferencia",
+      icon: "fa-building-columns",
+      description: "Bancaria / Móvil",
+    },
+  ];
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -75,7 +84,7 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
         <div className="pos-card p-4 mb-4 text-center">
           <p className="text-sm text-secondary">Total a cobrar</p>
           <p className="text-3xl font-bold text-primary">
-            {currency === "NIO" ? "C$" : "$"}{totalInCurrency.toFixed(2)}
+            {symbol}{totalInCurrency.toFixed(2)}
           </p>
           <p className="text-xs text-muted-foreground">
             {currency === "NIO" ? `~$${(total / exchangeRate).toFixed(2)} USD` : `~C$${total.toFixed(2)}`}
@@ -101,127 +110,104 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
           </div>
         </div>
 
-        {/* Mixed Payment Toggle - DISABLED */}
-        {/* <div className="mb-4 flex items-center justify-between p-3 bg-accent/5 rounded-xl border border-accent/20">
-          <div className="flex items-center gap-2">
-            <i className="fa-solid fa-shuffle text-accent" />
-            <span className="text-sm font-semibold text-foreground">Pago Mixto (Efectivo + Tarjeta)</span>
-          </div>
-          <button
-            onClick={() => setMixedMode(!mixedMode)}
-            className={`w-12 h-6 rounded-full transition-colors ${mixedMode ? 'bg-accent' : 'bg-border'}`}
-          >
-            <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${mixedMode ? 'translate-x-6' : 'translate-x-0.5'}`} />
-          </button>
-        </div> */}
-
-        {mixedMode ? (
-          /* Mixed Payment Mode */
-          <div className="space-y-3 mb-4">
-            <div className="pos-card p-3">
-              <label className="text-sm font-semibold text-foreground mb-2 block">
-                <i className="fa-solid fa-money-bills mr-2 text-secondary" />Efectivo ({currency === "NIO" ? "C$" : "$"})
-              </label>
-              <input
-                type="number"
-                value={cashAmount}
-                onChange={(e) => setCashAmount(e.target.value)}
-                className="input-touch text-xl font-bold text-center"
-                placeholder="0.00"
-                min={0}
-                step={0.01}
-              />
-            </div>
-
-            <div className="pos-card p-3">
-              <label className="text-sm font-semibold text-foreground mb-2 block">
-                <i className="fa-solid fa-credit-card mr-2 text-secondary" />Tarjeta ({currency === "NIO" ? "C$" : "$"})
-              </label>
-              <input
-                type="number"
-                value={cardAmount}
-                onChange={(e) => setCardAmount(e.target.value)}
-                className="input-touch text-xl font-bold text-center"
-                placeholder="0.00"
-                min={0}
-                step={0.01}
-              />
-            </div>
-
-            {/* Mixed payment summary */}
-            <div className="bg-background border border-border rounded-xl p-3 space-y-1">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Total pagado:</span>
-                <span className="font-bold text-foreground">{currency === "NIO" ? "C$" : "$"}{mixedTotal.toFixed(2)}</span>
-              </div>
-              {mixedRemaining > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-destructive">Falta:</span>
-                  <span className="font-bold text-destructive">{currency === "NIO" ? "C$" : "$"}{mixedRemaining.toFixed(2)}</span>
-                </div>
-              )}
-              {mixedTotal >= totalInCurrency && (
-                <div className="flex items-center gap-2 text-green-500 text-sm">
-                  <i className="fa-solid fa-circle-check" />
-                  <span className="font-semibold">Pago completo</span>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          /* Single Payment Mode */
-          <>
-            {/* Method - Only Cash */}
-            <div className="mb-4">
-              <p className="text-sm font-semibold text-foreground mb-2">
-                <i className="fa-solid fa-credit-card mr-2 text-secondary" />Método de pago
-              </p>
-              <div className="grid grid-cols-1 gap-2">
+        {/* Payment Method */}
+        <div className="mb-4">
+          <p className="text-sm font-semibold text-foreground mb-2">
+            <i className="fa-solid fa-credit-card mr-2 text-secondary" />Método de pago
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {paymentMethods.map((pm) => {
+              const isSelected = method === pm.id;
+              return (
                 <button
-                  onClick={() => setMethod("cash")}
-                  className="vehicle-card vehicle-card-active"
+                  key={pm.id}
+                  onClick={() => {
+                    setMethod(pm.id);
+                    setReceived("");
+                  }}
+                  className={`vehicle-card flex-col py-4 transition-all duration-200 ${isSelected
+                      ? "vehicle-card-active ring-2 ring-primary"
+                      : "hover:border-primary/40"
+                    }`}
                 >
-                  <i className="fa-solid fa-money-bills text-lg text-brick-red" />
-                  <p className="text-xs font-semibold mt-1">Efectivo</p>
-                  <i className="fa-solid fa-circle-check text-brick-red text-sm mt-1" />
+                  <i
+                    className={`fa-solid ${pm.icon} text-2xl mb-1 ${isSelected ? "text-brick-red" : "text-secondary"
+                      }`}
+                  />
+                  <p className="text-sm font-bold">{pm.label}</p>
+                  <p className="text-xs text-muted-foreground">{pm.description}</p>
+                  {isSelected && (
+                    <i className="fa-solid fa-circle-check text-brick-red text-sm mt-1" />
+                  )}
                 </button>
-              </div>
-            </div>
+              );
+            })}
+          </div>
+        </div>
 
-            {/* Received amount (cash only) */}
-            {method === "cash" && (
-              <div className="mb-4">
-                <label className="text-sm font-semibold text-foreground mb-2 block">
-                  <i className="fa-solid fa-hand-holding-dollar mr-2 text-secondary" />Monto recibido ({currency === "NIO" ? "C$" : "$"})
-                </label>
-                <input
-                  type="number"
-                  value={received}
-                  onChange={(e) => setReceived(e.target.value)}
-                  className="input-touch text-2xl font-bold text-center"
-                  placeholder="0.00"
-                  min={0}
-                  step={0.01}
-                />
-                {receivedNum > 0 && receivedNum < totalInCurrency && (
-                  <div className="mt-2 p-3 bg-destructive/10 rounded-lg text-center">
-                    <p className="text-sm text-destructive font-semibold">
-                      <i className="fa-solid fa-triangle-exclamation mr-2" />
-                      Monto insuficiente. Falta {currency === "NIO" ? "C$" : "$"}{(totalInCurrency - receivedNum).toFixed(2)}
-                    </p>
-                  </div>
-                )}
-                {receivedNum > 0 && receivedNum >= totalInCurrency && (
-                  <div className="mt-2 pos-card p-3 text-center">
-                    <p className="text-sm text-secondary">Vuelto</p>
-                    <p className={`text-2xl font-bold ${change > 0 ? "text-accent" : "text-foreground"}`}>
-                      {currency === "NIO" ? "C$" : "$"}{change.toFixed(2)}
-                    </p>
-                  </div>
-                )}
+        {/* Cash: received amount input */}
+        {method === "cash" && (
+          <div className="mb-4">
+            <label className="text-sm font-semibold text-foreground mb-2 block">
+              <i className="fa-solid fa-hand-holding-dollar mr-2 text-secondary" />
+              Monto recibido ({symbol})
+            </label>
+            <input
+              type="number"
+              value={received}
+              onChange={(e) => setReceived(e.target.value)}
+              className="input-touch text-2xl font-bold text-center"
+              placeholder="0.00"
+              min={0}
+              step={0.01}
+              autoFocus
+            />
+            {receivedNum > 0 && receivedNum < totalInCurrency && (
+              <div className="mt-2 p-3 bg-destructive/10 rounded-lg text-center">
+                <p className="text-sm text-destructive font-semibold">
+                  <i className="fa-solid fa-triangle-exclamation mr-2" />
+                  Monto insuficiente. Falta {symbol}{(totalInCurrency - receivedNum).toFixed(2)}
+                </p>
               </div>
             )}
-          </>
+            {receivedNum > 0 && receivedNum >= totalInCurrency && (
+              <div className="mt-2 pos-card p-3 text-center">
+                <p className="text-sm text-secondary">Vuelto</p>
+                <p className={`text-2xl font-bold ${change > 0 ? "text-accent" : "text-foreground"}`}>
+                  {symbol}{change.toFixed(2)}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Card: info panel */}
+        {method === "card" && (
+          <div className="mb-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl flex items-center gap-3">
+            <i className="fa-solid fa-credit-card text-2xl text-blue-500" />
+            <div>
+              <p className="font-semibold text-foreground text-sm">Pago con Tarjeta</p>
+              <p className="text-xs text-muted-foreground">
+                Monto a cobrar en terminal: <span className="font-bold text-foreground">{symbol}{totalInCurrency.toFixed(2)}</span>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Transfer: info panel */}
+        {method === "transfer" && (
+          <div className="mb-4 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-3">
+            <i className="fa-solid fa-building-columns text-2xl text-emerald-500" />
+            <div>
+              <p className="font-semibold text-foreground text-sm">Pago por Transferencia</p>
+              <p className="text-xs text-muted-foreground">
+                Monto total a transferir: <span className="font-bold text-foreground">{symbol}{totalInCurrency.toFixed(2)}</span>
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Confirma que la transferencia fue recibida antes de continuar.
+              </p>
+            </div>
+          </div>
         )}
 
         <button
@@ -229,7 +215,12 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
           disabled={!canConfirm}
           className="btn-cobrar w-full flex items-center justify-center gap-2 disabled:opacity-50"
         >
-          <i className="fa-solid fa-check-circle" />Confirmar Pago
+          <i className="fa-solid fa-check-circle" />
+          {method === "transfer"
+            ? "Confirmar Transferencia"
+            : method === "card"
+              ? "Confirmar Pago con Tarjeta"
+              : "Confirmar Pago"}
         </button>
       </div>
     </div>
