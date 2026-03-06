@@ -120,18 +120,11 @@ export async function printTicketBluetooth(ticket: any) {
 
             // 6. Información de Pago
             if (ticket.payment) {
-                const methodLabel =
-                    ticket.payment.method === "cash" ? "EFECTIVO" :
-                        ticket.payment.method === "card" ? "TARJETA" :
-                            ticket.payment.method === "transfer" ? "TRANSFERENCIA" :
-                                String(ticket.payment.method).toUpperCase();
-
                 encoder
                     .line(hr)
                     .align('left')
                     .size('small')
-                    .line(`PAGO (${methodLabel}): ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.received.toFixed(2)}`);
-
+                    .line(`PAGO (${ticket.payment.method}): ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.received.toFixed(2)}`);
                 if (ticket.payment.change > 0) {
                     encoder.line(`VUELTO: ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.change.toFixed(2)}`);
                 }

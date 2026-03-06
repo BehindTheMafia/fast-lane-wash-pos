@@ -208,39 +208,63 @@ export default function TicketPrint({ ticket, onClose }: Props) {
           <div className="mb-3 print:mb-2">
             <div className="text-xs font-bold mb-2 uppercase">Servicios</div>
             <div className="space-y-1.5">
-              {ticket.items?.map((item: any, i: number) => (
-                <div key={i} className="text-[11px]">
-                  <div className="flex justify-between font-semibold">
-                    <span>{item.serviceName}</span>
-                    <span>C${item.price.toFixed(2)}</span>
+              {ticket.items?.map((item: any, i: number) => {
+                const itemPrice = Number(item.price) || 0;
+                const discPct = Number(item.discountPercent) || 0;
+                const itemDiscountAmt = itemPrice * discPct / 100;
+                return (
+                  <div key={i} className="text-[11px]">
+                    <div className="flex justify-between font-semibold">
+                      <span>{item.serviceName}{discPct > 0 ? ` – ${discPct}% desc.` : ''}</span>
+                      <span>C${itemPrice.toFixed(2)}</span>
+                    </div>
+                    <div className="text-[9px] text-muted-foreground print:text-gray-600 pl-2">
+                      {item.vehicleLabel}
+                    </div>
+                    {discPct > 0 && (
+                      <div className="text-[9px] text-destructive print:text-black pl-2 font-semibold">
+                        Descuento: -C${itemDiscountAmt.toFixed(2)}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-[9px] text-muted-foreground print:text-gray-600 pl-2">
-                    {item.vehicleLabel}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
           <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
 
           {/* Totals */}
-          <div className="text-xs space-y-1 mb-3 print:mb-2">
-            <div className="flex justify-between">
-              <span>Subtotal:</span>
-              <span>C${Number(ticket.subtotal).toFixed(2)}</span>
-            </div>
-            {Number(ticket.discount) > 0 && (
-              <div className="flex justify-between text-destructive font-semibold">
-                <span>Descuento:</span>
-                <span>-C${Number(ticket.discount).toFixed(2)}</span>
+          {(() => {
+            const items = Array.isArray(ticket.items) ? ticket.items : [];
+            const computedSubtotal = items.reduce((s: number, i: any) => s + (Number(i.price) || 0), 0);
+            const computedDiscount = items.reduce((s: number, i: any) => {
+              const p = Number(i.price) || 0;
+              const d = Number(i.discountPercent) || 0;
+              return s + (p * d / 100);
+            }, 0);
+            const displaySubtotal = Number(ticket.subtotal) || computedSubtotal;
+            const displayDiscount = Number(ticket.discount) || computedDiscount;
+            const displayTotal = Number(ticket.total) || (displaySubtotal - displayDiscount);
+            return (
+              <div className="text-xs space-y-1 mb-3 print:mb-2">
+                <div className="flex justify-between">
+                  <span>Subtotal:</span>
+                  <span>C${displaySubtotal.toFixed(2)}</span>
+                </div>
+                {displayDiscount > 0 && (
+                  <div className="flex justify-between text-destructive print:text-black font-semibold">
+                    <span>Descuento:</span>
+                    <span>-C${displayDiscount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-black text-base pt-1 border-t border-border print:border-black">
+                  <span>TOTAL:</span>
+                  <span>C${displayTotal.toFixed(2)}</span>
+                </div>
               </div>
-            )}
-            <div className="flex justify-between font-black text-base pt-1 border-t border-border print:border-black">
-              <span>TOTAL:</span>
-              <span>C${Number(ticket.total).toFixed(2)}</span>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Payment Info */}
           {ticket.payment && (
@@ -248,12 +272,7 @@ export default function TicketPrint({ ticket, onClose }: Props) {
               <div className="border-t border-dashed border-border print:border-black my-2" />
               <div className="text-xs space-y-1">
                 <div className="flex justify-between">
-                  <span>Pago ({
-                    ticket.payment.method === "cash" ? "Efectivo" :
-                      ticket.payment.method === "card" ? "Tarjeta" :
-                        ticket.payment.method === "transfer" ? "Transferencia" :
-                          ticket.payment.method
-                  }):</span>
+                  <span>Pago ({ticket.payment.method}):</span>
                   <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.received.toFixed(2)}</span>
                 </div>
                 {ticket.payment.change > 0 && (
