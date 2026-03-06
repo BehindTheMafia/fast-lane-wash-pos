@@ -210,7 +210,7 @@ export default function CashClose() {
 
     const { error } = await supabase.from("cash_closures").insert({
       cashier_id: user.id,
-      shift: "General",
+      shift: "",
       initial_balance: 0,
       total_cash_nio: dayStats.cashNIO,
       total_cash_usd: dayStats.cashUSD,
