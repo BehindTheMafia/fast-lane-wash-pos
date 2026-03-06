@@ -214,11 +214,22 @@ export function useMemberships(customerId?: string) {
             membershipId: number;
             vehicleTypeId?: number;
         }) => {
+            // Fetch the membership's plan to get the correct duration
+            const { data: membershipData } = await supabase
+                .from('customer_memberships')
+                .select('plan_id, membership_plans(duration_days, wash_count)')
+                .eq('id', membershipId)
+                .single();
+
+            const durationDays = (membershipData as any)?.membership_plans?.duration_days || 28;
+            const washCount = (membershipData as any)?.membership_plans?.wash_count || 8;
+
             const now = new Date();
-            const expiresAt = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000);
+            const expiresAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
 
             const updateData: any = {
                 washes_used: 0,
+                total_washes_allowed: washCount,
                 bonus_washes_earned: 0,
                 expires_at: expiresAt.toISOString(),
                 active: true,

@@ -32,6 +32,7 @@ export default function Memberships() {
   const [customerSearch, setCustomerSearch] = useState("");
   const [selectedService, setSelectedService] = useState<number>(1); // Default to Lavado Breve
   const [selectedVehicleType, setSelectedVehicleType] = useState<number>(2);
+  const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null); // NEW: selected plan
   const [membershipBasePrice, setMembershipBasePrice] = useState(0);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [filter, setFilter] = useState<FilterType>('active');
@@ -44,7 +45,13 @@ export default function Memberships() {
 
   const exchangeRate = settings?.exchange_rate || 36.5;
 
-  // Calculate final price after discount
+  // Get selected plan object
+  const selectedPlan = plans.find(p => p.id === selectedPlanId) || null;
+  const planWashCount = selectedPlan?.wash_count || 0;
+  const planDiscountPercent = selectedPlan?.discount_percent || 0;
+  const planDurationDays = selectedPlan?.duration_days || 28;
+
+  // Calculate final price after additional custom discount
   const discountAmount = membershipBasePrice * (discountPercent / 100);
   const membershipPrice = Math.max(0, membershipBasePrice - discountAmount);
 
@@ -60,7 +67,7 @@ export default function Memberships() {
   const loadData = async () => {
     setLoading(true);
     const [{ data: p }, { data: c }, { data: s }] = await Promise.all([
-      supabase.from("membership_plans").select("*").eq("is_active", true),
+      supabase.from("membership_plans").select("*").eq("is_active", true).order("wash_count", { ascending: true }),
       supabase.from("customers").select("id, name, phone, plate").eq("is_general", false).order("name"),
       supabase.from("services").select("id, name, service_prices(price, vehicle_type_id)").eq("is_active", true),
     ]);
@@ -73,25 +80,33 @@ export default function Memberships() {
     setPlans(p || []);
     setCustomers(c || []);
     setServices(eligibleServices || []);
+
+    // Auto-select first plan if available
+    if (p && p.length > 0 && !selectedPlanId) {
+      setSelectedPlanId(p[0].id);
+    }
+
     setLoading(false);
   };
 
-  // Calculate membership price when service or vehicle type changes
+  // Calculate membership price when service, vehicle type, or plan changes
   useEffect(() => {
-    if (selectedService && selectedVehicleType) {
+    if (selectedService && selectedVehicleType && selectedPlan) {
       const service = services.find(s => s.id === selectedService);
       const priceEntry = service?.service_prices?.find((p: any) => p.vehicle_type_id === selectedVehicleType);
       if (priceEntry) {
         const basePrice = Number(priceEntry.price);
-        // Package price: (price per wash × 8) × 0.64 (36% discount)
-        const packagePrice = (basePrice * 8) * 0.64;
+        // Dynamic formula: (price_per_wash × wash_count) × (1 - plan_discount)
+        const packagePrice = (basePrice * selectedPlan.wash_count) * (1 - selectedPlan.discount_percent / 100);
         setMembershipBasePrice(packagePrice);
       }
+    } else {
+      setMembershipBasePrice(0);
     }
-  }, [selectedService, selectedVehicleType, services]);
+  }, [selectedService, selectedVehicleType, services, selectedPlan]);
 
   const handleProceedToPayment = () => {
-    if (!selectedCustomer || membershipPrice <= 0) return;
+    if (!selectedCustomer || membershipPrice <= 0 || !selectedPlanId) return;
     setShowPayment(true);
   };
 
@@ -104,6 +119,11 @@ export default function Memberships() {
 
       if (!selectedCustomer) {
         showToastMsg("Por favor selecciona un cliente");
+        return;
+      }
+
+      if (!selectedPlanId || !selectedPlan) {
+        showToastMsg("Por favor selecciona un plan de membresía");
         return;
       }
 
@@ -122,14 +142,6 @@ export default function Memberships() {
         return;
       }
 
-      // Use the first available plan (Combo 8 Lavados)
-      const planToUse = plans && plans.length > 0 ? plans[0]?.id : null;
-
-      if (!planToUse) {
-        showToastMsg("No hay planes disponibles. Por favor recarga la página.");
-        return;
-      }
-
       // Generate ticket number
       const ticketNumber = `M-${Date.now().toString(36).toUpperCase()}`;
 
@@ -145,10 +157,11 @@ export default function Memberships() {
       const vehicleObj = vehicleTypes.find(v => v.id === selectedVehicleType);
       const vehicleLabel = vehicleObj?.label || "Vehículo";
 
-      // Get plan details
-      const planObj = plans.find(p => p.id === planToUse);
-      const planName = planObj?.name || "Membresía";
-      const washCount = planObj?.wash_count || 8;
+      // Get plan details dynamically
+      const planName = selectedPlan.name;
+      const washCount = selectedPlan.wash_count;
+      const durationDays = selectedPlan.duration_days || 28;
+      const durationWeeks = Math.round(durationDays / 7);
 
       // Create ticket for membership sale
       const { data: ticket, error: ticketErr } = await supabase
@@ -202,7 +215,7 @@ export default function Memberships() {
       // Create membership
       await createMembership({
         customerId: Number(selectedCustomer),
-        planId: Number(planToUse),
+        planId: Number(selectedPlanId),
         vehicleTypeId: selectedVehicleType,
         serviceId: selectedService,
       });
@@ -242,6 +255,9 @@ export default function Memberships() {
           serviceName,
           vehicleLabel,
           discountPercent,
+          planDiscountPercent: selectedPlan.discount_percent,
+          durationDays,
+          durationWeeks,
         },
       };
 
@@ -323,7 +339,7 @@ export default function Memberships() {
               </span>
               <span className="px-3 py-1 rounded-full bg-secondary/10 text-secondary font-semibold">
                 <i className="fa-solid fa-calendar-days mr-1" />
-                {p.duration_days || 28} días
+                {p.duration_days || 28} días ({Math.round((p.duration_days || 28) / 7)} semanas)
               </span>
             </div>
           </div>
@@ -374,6 +390,9 @@ export default function Memberships() {
                     customer_name: membership.customers?.name || '',
                     plan_name: membership.membership_plans?.name || '',
                     vehicle_type_id: membership.vehicle_type_id,
+                    wash_count: membership.membership_plans?.wash_count || 8,
+                    duration_days: membership.membership_plans?.duration_days || 28,
+                    discount_percent: membership.membership_plans?.discount_percent || 0,
                   });
                 }
               }}
@@ -401,6 +420,47 @@ export default function Memberships() {
               </button>
             </div>
             <div className="space-y-4">
+              {/* Plan Selection */}
+              <div>
+                <label className="text-sm font-semibold text-foreground block mb-2">Plan de membresía</label>
+                <div className="grid grid-cols-1 gap-2">
+                  {plans.map((plan) => {
+                    const isSelected = selectedPlanId === plan.id;
+                    return (
+                      <button
+                        key={plan.id}
+                        onClick={() => setSelectedPlanId(plan.id)}
+                        className={`p-4 rounded-xl border-2 text-left transition-all ${isSelected
+                          ? 'border-primary bg-primary/10 shadow-md'
+                          : 'border-border hover:border-primary/50'
+                          }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className={`font-bold text-sm ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                              {plan.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5">{plan.description}</p>
+                          </div>
+                          {isSelected && <i className="fa-solid fa-circle-check text-primary text-lg" />}
+                        </div>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <span className="px-2 py-0.5 rounded-full bg-accent/10 text-accent text-xs font-semibold">
+                            {plan.discount_percent}% desc.
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-semibold">
+                            {plan.wash_count} lavados
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-secondary/10 text-secondary text-xs font-semibold">
+                            {Math.round((plan.duration_days || 28) / 7)} semanas
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div>
                 <label className="text-sm font-semibold text-foreground block mb-1">Cliente</label>
                 <input
@@ -505,10 +565,12 @@ export default function Memberships() {
                 </div>
               )}
 
-              {/* Price Display */}
-              {membershipBasePrice > 0 && (
+              {/* Price Display - Now dynamic based on selected plan */}
+              {membershipBasePrice > 0 && selectedPlan && (
                 <div className="pos-card p-4 text-center bg-accent/10 border-2 border-accent/30">
-                  <p className="text-sm text-secondary mb-1">Precio del paquete (8 lavados con 36% desc.)</p>
+                  <p className="text-sm text-secondary mb-1">
+                    Precio del paquete ({selectedPlan.wash_count} lavados con {selectedPlan.discount_percent}% desc.)
+                  </p>
                   {discountPercent > 0 ? (
                     <>
                       <p className="text-lg text-muted-foreground line-through">C${membershipBasePrice.toFixed(2)}</p>
@@ -524,12 +586,16 @@ export default function Memberships() {
                   <p className="text-xs text-muted-foreground mt-1">
                     ~${(membershipPrice / exchangeRate).toFixed(2)} USD
                   </p>
+                  <p className="text-xs text-secondary mt-1">
+                    <i className="fa-solid fa-calendar-days mr-1" />
+                    Vigencia: {planDurationDays} días ({Math.round(planDurationDays / 7)} semanas)
+                  </p>
                 </div>
               )}
 
               <button
                 onClick={handleProceedToPayment}
-                disabled={!selectedCustomer || !selectedService || !selectedVehicleType || membershipPrice <= 0}
+                disabled={!selectedCustomer || !selectedService || !selectedVehicleType || !selectedPlanId || membershipPrice <= 0}
                 className="btn-cobrar w-full disabled:opacity-50"
               >
                 <i className="fa-solid fa-money-bill-wave mr-2" />

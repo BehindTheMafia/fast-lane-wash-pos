@@ -6,6 +6,9 @@ interface MembershipRenewalModalProps {
         customer_name: string;
         plan_name: string;
         vehicle_type_id?: number;
+        wash_count?: number;
+        duration_days?: number;
+        discount_percent?: number;
     };
     onConfirm: (membershipId: string, vehicleTypeId: number) => void;
     onClose: () => void;
@@ -30,6 +33,12 @@ export default function MembershipRenewalModal({
     const [selectedVehicleType, setSelectedVehicleType] = useState<number>(
         membership.vehicle_type_id || 2
     );
+
+    // Dynamic plan values with fallbacks
+    const washCount = membership.wash_count || 8;
+    const durationDays = membership.duration_days || 28;
+    const durationWeeks = Math.round(durationDays / 7);
+    const discountPercent = membership.discount_percent || 0;
 
     const handleConfirm = () => {
         onConfirm(membership.id, selectedVehicleType);
@@ -83,16 +92,18 @@ export default function MembershipRenewalModal({
                         </div>
                     </div>
 
-                    {/* Info Alert */}
+                    {/* Info Alert - Dynamic values from plan */}
                     <div className="p-3 bg-accent/10 border border-accent/20 rounded-lg">
                         <div className="flex gap-2">
                             <i className="fa-solid fa-circle-info text-accent mt-0.5" />
                             <div className="text-xs text-foreground">
                                 <p className="font-semibold mb-1">Al renovar la membresía:</p>
                                 <ul className="list-disc list-inside space-y-0.5 text-secondary">
-                                    <li>Se reiniciará el contador de lavados (0/8)</li>
-                                    <li>Nueva fecha de expiración: +28 días</li>
-                                    <li>Descuento del 36% en lavados elegibles</li>
+                                    <li>Se reiniciará el contador de lavados (0/{washCount})</li>
+                                    <li>Nueva fecha de expiración: +{durationDays} días ({durationWeeks} semanas)</li>
+                                    {discountPercent > 0 && (
+                                        <li>Descuento del {discountPercent}% en lavados elegibles</li>
+                                    )}
                                 </ul>
                             </div>
                         </div>
