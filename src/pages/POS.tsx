@@ -263,7 +263,15 @@ export default function POS() {
         }
       }
 
-      setLastTicket({ ...ticket, customer, items: ticketItems, payment: paymentData, settings });
+      setLastTicket({
+        ...ticket,
+        customer,
+        items: ticketItems,
+        payment: paymentData,
+        settings,
+        subtotal,
+        discount: totalDiscount
+      });
       setShowPayment(false);
       setShowPrint(true);
       showToast("Venta registrada correctamente");

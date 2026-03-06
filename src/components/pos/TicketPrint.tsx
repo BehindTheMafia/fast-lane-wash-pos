@@ -231,7 +231,7 @@ export default function TicketPrint({ ticket, onClose }: Props) {
               <span>C${Number(ticket.subtotal).toFixed(2)}</span>
             </div>
             {Number(ticket.discount) > 0 && (
-              <div className="flex justify-between text-destructive print:text-black font-semibold">
+              <div className="flex justify-between text-destructive font-semibold">
                 <span>Descuento:</span>
                 <span>-C${Number(ticket.discount).toFixed(2)}</span>
               </div>
@@ -248,7 +248,12 @@ export default function TicketPrint({ ticket, onClose }: Props) {
               <div className="border-t border-dashed border-border print:border-black my-2" />
               <div className="text-xs space-y-1">
                 <div className="flex justify-between">
-                  <span>Pago ({ticket.payment.method}):</span>
+                  <span>Pago ({
+                    ticket.payment.method === "cash" ? "Efectivo" :
+                      ticket.payment.method === "card" ? "Tarjeta" :
+                        ticket.payment.method === "transfer" ? "Transferencia" :
+                          ticket.payment.method
+                  }):</span>
                   <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.received.toFixed(2)}</span>
                 </div>
                 {ticket.payment.change > 0 && (
