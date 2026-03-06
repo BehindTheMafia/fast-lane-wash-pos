@@ -141,7 +141,7 @@ export default function Reports() {
     if (!editingTicket) return;
 
     try {
-      // Update ticket
+      // Update ticket total and plate
       const { error } = await supabase
         .from("tickets")
         .update({
@@ -152,12 +152,25 @@ export default function Reports() {
 
       if (error) throw error;
 
-      // Update associated payment amount if only one payment exists
-      // This ensures reports that sum payments (like "By Method") match the ticket total
-      if (editingTicket.payments?.length === 1) {
+      if (editingTicket.payments?.length === 0 || !editingTicket.payments) {
+        // No payment exists → INSERT a new one with the selected method
+        await supabase.from("payments").insert({
+          ticket_id: editingTicket.id,
+          amount: editingTicket.total,
+          currency: "NIO",
+          payment_method: editingTicket._editPaymentMethod || "cash",
+          amount_received: editingTicket.total,
+          change_amount: 0,
+          exchange_rate: settings?.exchange_rate || 36.5,
+        } as any);
+      } else if (editingTicket.payments?.length === 1) {
+        // One payment exists → UPDATE amount and method
         await supabase
           .from("payments")
-          .update({ amount: editingTicket.total })
+          .update({
+            amount: editingTicket.total,
+            payment_method: editingTicket._editPaymentMethod || editingTicket.payments[0].payment_method,
+          })
           .eq("id", editingTicket.payments[0].id);
       }
 
@@ -541,7 +554,7 @@ export default function Reports() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-foreground">
                 <i className="fa-solid fa-pen mr-2 text-secondary" />
-                Editar Ticket
+                Editar Ticket {editingTicket.ticket_number}
               </h2>
               <button onClick={() => setEditingTicket(null)} className="touch-btn p-2 text-muted-foreground">
                 <i className="fa-solid fa-xmark text-xl" />
@@ -568,6 +581,36 @@ export default function Reports() {
                   step="0.01"
                   min="0"
                 />
+              </div>
+              {/* Payment method */}
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1">
+                  Método de pago
+                  {(!editingTicket.payments || editingTicket.payments.length === 0) && (
+                    <span className="ml-2 text-xs font-normal text-destructive">
+                      <i className="fa-solid fa-triangle-exclamation mr-1" />
+                      Sin pago registrado
+                    </span>
+                  )}
+                </label>
+                <select
+                  value={
+                    editingTicket._editPaymentMethod
+                    ?? editingTicket.payments?.[0]?.payment_method
+                    ?? "card"
+                  }
+                  onChange={(e) => setEditingTicket({ ...editingTicket, _editPaymentMethod: e.target.value })}
+                  className="input-touch w-full"
+                >
+                  <option value="cash">Efectivo</option>
+                  <option value="card">Tarjeta</option>
+                  <option value="transfer">Transferencia</option>
+                </select>
+                {(!editingTicket.payments || editingTicket.payments.length === 0) && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Se creará el registro de pago al guardar.
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex gap-2 mt-6">
