@@ -91,10 +91,17 @@ export async function printTicketBluetooth(ticket: any) {
             items.forEach((item: any) => {
                 const name = item?.serviceName ?? "Servicio";
                 const price = Number(item?.price || 0);
-                const priceStr = ` C$${price.toFixed(2)}`;
-                const nameWidth = Math.max(0, columns - priceStr.length);
+                const priceStr = `C$${price.toFixed(2)}`;
+                const nameWidth = Math.max(0, columns - priceStr.length - 1);
 
-                encoder.size('normal').line(`${name.substring(0, nameWidth).padEnd(nameWidth)}${priceStr}`);
+                if (name.length <= nameWidth) {
+                    // Name fits on same line as price
+                    encoder.size('normal').line(`${name.padEnd(nameWidth)} ${priceStr}`);
+                } else {
+                    // Name is too long – print name first, then price right-aligned
+                    encoder.size('normal').line(name);
+                    encoder.align('right').line(priceStr).align('left');
+                }
 
                 if (item.vehicleLabel) {
                     encoder.size('small').line(` (${item.vehicleLabel})`);

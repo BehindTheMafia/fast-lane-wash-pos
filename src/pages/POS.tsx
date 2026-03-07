@@ -237,8 +237,9 @@ export default function POS() {
         }
       }
 
-      // Increment loyalty visit for non-general customers on regular purchases (not membership usage)
-      if (customer && !customer.is_general && !selectedMembershipId && ticketItems.length > 0) {
+      // Increment loyalty visit for ALL washes of non-general customers
+      // (both regular purchases AND membership usage count as a visit)
+      if (customer && !customer.is_general && ticketItems.length > 0) {
         try {
           const { data: loyaltyData, error: loyaltyError } = await (supabase.rpc as any)('increment_loyalty_visit', {
             p_customer_id: customer.id,
@@ -484,12 +485,14 @@ export default function POS() {
                   const membershipService = membership.services;
                   if (membershipService && membership.vehicle_type_id) {
                     const vt = vehicleTypes.find((v) => v.id === membership.vehicle_type_id);
-                    const washesRemaining = membership.total_washes_allowed - membership.washes_used;
+                    // -1: descontamos el lavado que se está usando ahora mismo
+                    // El ticket se construye ANTES de que recordWash incremente washes_used
+                    const washesRemaining = membership.total_washes_allowed - membership.washes_used - 1;
 
                     // Clear existing items and add membership service
                     setTicketItems([{
                       serviceId: membershipService.id,
-                      serviceName: `${membershipService.name} (Membresía - ${washesRemaining} lavados restantes)`,
+                      serviceName: `${membershipService.name} (Membresía - ${Math.max(0, washesRemaining)} lavados restantes)`,
                       vehicleTypeId: membership.vehicle_type_id,
                       vehicleLabel: vt?.label || "",
                       price: 0, // Free - already paid in membership

@@ -264,15 +264,30 @@ export function useMemberships(customerId?: string) {
             customerId: number;
             planId: number;
             vehicleTypeId: number;
-            serviceId: number;  // Now required, not optional
+            serviceId: number;
         }) => {
+            // Fetch plan details to set correct wash count and expiry
+            const { data: planData, error: planErr } = await supabase
+                .from('membership_plans')
+                .select('wash_count, duration_days')
+                .eq('id', planId)
+                .single();
+
+            if (planErr) throw planErr;
+
+            const washCount = planData?.wash_count ?? 8;
+            const durationDays = planData?.duration_days ?? 28;
+            const expiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+
             const { error } = await supabase
                 .from('customer_memberships')
                 .insert({
                     customer_id: customerId,
                     plan_id: planId,
                     vehicle_type_id: vehicleTypeId,
-                    service_id: serviceId,  // Include service_id in insert
+                    service_id: serviceId,
+                    total_washes_allowed: washCount,   // ← Correcto según el plan
+                    expires_at: expiresAt,             // ← Calculado desde duration_days
                 });
 
             if (error) throw error;
