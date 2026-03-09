@@ -48,13 +48,10 @@ export default function Dashboard() {
     if (!tickets) { setLoading(false); return; }
 
     const rate = settings?.exchange_rate || 36.5;
-    let totalNIO = 0;
     const svcCount: Record<string, number> = {};
     const vehCount: Record<string, number> = {};
 
     tickets.forEach((t: any) => {
-      totalNIO += Number(t.total);
-
       // By vehicle
       const vn = (t.vehicle_types as any)?.name || "N/A";
       vehCount[vn] = (vehCount[vn] || 0) + 1;
@@ -66,14 +63,20 @@ export default function Dashboard() {
       svcCount[svcName] = (svcCount[svcName] || 0) + 1;
     });
 
-    // Payment currency breakdown
+    // Payment currency breakdown — payUSD uses amount_received (actual dollars entered by cashier)
     let payNIO = 0, payUSD = 0;
     tickets.forEach((t: any) => {
       t.payments?.forEach((p: any) => {
-        if (p.currency === "USD") payUSD += Number(p.amount);
-        else payNIO += Number(p.amount);
+        if (p.currency === "USD") {
+          payUSD += Number(p.amount_received || 0);
+        } else {
+          payNIO += Number(p.amount);
+        }
       });
     });
+
+    // Total in NIO: NIO payments + USD converted at exchange rate
+    const totalNIO = payNIO + payUSD * rate;
 
     setStats({
       totalSalesNIO: totalNIO,
@@ -281,7 +284,12 @@ export default function Dashboard() {
                   <td className="px-4 py-3 text-foreground">{formatTime(t.created_at)}</td>
                   <td className="px-4 py-3 text-foreground">{(t.vehicle_types as any)?.name || "—"}</td>
                   <td className="px-4 py-3 text-foreground font-mono">{t.vehicle_plate || "—"}</td>
-                  <td className="px-4 py-3 text-right font-bold text-primary">C${Number(t.total).toFixed(0)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-primary">
+                    {t.payments?.[0]?.currency === "USD"
+                      ? `$${Number(t.payments[0].amount_received || 0).toFixed(2)}`
+                      : `C$${Number(t.total).toFixed(0)}`
+                    }
+                  </td>
                   {canDelete && (
                     <td className="px-4 py-3 text-center">
                       <div className="flex items-center justify-center gap-1">

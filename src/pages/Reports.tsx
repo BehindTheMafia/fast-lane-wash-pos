@@ -290,7 +290,6 @@ export default function Reports() {
 
 
   const rate = settings?.exchange_rate || 36.5;
-  const totalNIO = tickets.reduce((s, t) => s + Number(t.total), 0);
 
   // Calculate actual payment totals by currency
   let payTotalNIO = 0;
@@ -298,12 +297,16 @@ export default function Reports() {
   tickets.forEach((t: any) => {
     t.payments?.forEach((p: any) => {
       if (p.currency === "USD") {
-        payTotalUSD += Number(p.amount);
+        // amount_received stores the actual USD amount entered by cashier
+        payTotalUSD += Number(p.amount_received || 0);
       } else {
         payTotalNIO += Number(p.amount);
       }
     });
   });
+
+  // True total in NIO: NIO payments + USD converted at exchange rate
+  const totalNIO = payTotalNIO + payTotalUSD * rate;
 
   // Membership-specific metrics
   const membershipSalesTotal = tickets
@@ -321,27 +324,32 @@ export default function Reports() {
   const cashBreakdown = { nio: 0, usd: 0 };
 
   tickets.forEach((t: any) => {
-    // By service from ticket_items
+    // By service from ticket_items — use NIO-equivalent for USD tickets
+    const ticketNIOValue = t.payments?.[0]?.currency === "USD"
+      ? Number(t.payments[0].amount_received || 0) * (Number(t.payments[0].exchange_rate) || rate)
+      : Number(t.total);
+
     t.ticket_items?.forEach((ti: any) => {
       const sn = ti.services?.name || "Otro";
       byService[sn] = byService[sn] || { count: 0, total: 0 };
       byService[sn].count++;
-      byService[sn].total += Number(ti.price);
+      byService[sn].total += ticketNIOValue;
     });
 
     // By vehicle
     const vn = (t.vehicle_types as any)?.name || "N/A";
     byVehicle[vn] = byVehicle[vn] || { count: 0, total: 0 };
     byVehicle[vn].count++;
-    byVehicle[vn].total += Number(t.total);
+    byVehicle[vn].total += ticketNIOValue;
 
     // By method with currency awareness
     t.payments?.forEach((p: any) => {
       let amountNIO = Number(p.amount);
       if (p.currency === "USD") {
         const paymentRate = Number(p.exchange_rate) || rate;
-        amountNIO = amountNIO * paymentRate;
-        if (p.payment_method === "cash") cashBreakdown.usd += Number(p.amount);
+        const usdAmount = Number(p.amount_received || 0);
+        amountNIO = usdAmount * paymentRate;
+        if (p.payment_method === "cash") cashBreakdown.usd += Number(p.amount_received || 0);
       } else {
         if (p.payment_method === "cash") cashBreakdown.nio += Number(p.amount);
       }
