@@ -576,7 +576,12 @@ export default function Reports() {
                   <tfoot>
                     <tr className="bg-muted/50 border-t-2 border-border">
                       <td colSpan={9} className="px-4 py-3 font-bold text-foreground text-right">TOTAL:</td>
-                      <td className="px-4 py-3 text-right font-bold text-primary text-lg">C${totalNIO.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-primary text-lg space-y-1">
+                        <div>C${payTotalNIO.toFixed(2)}</div>
+                        {payTotalUSD > 0 && (
+                          <div className="text-green-500 text-sm">+ ${payTotalUSD.toFixed(2)} USD</div>
+                        )}
+                      </td>
                       <td></td>
                     </tr>
                   </tfoot>

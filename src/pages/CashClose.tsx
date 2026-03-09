@@ -22,7 +22,9 @@ interface DayStats {
   cashNIO: number;
   cashUSD: number;
   card: number;
+  cardUSD: number;
   transfer: number;
+  transferUSD: number;
   totalTickets: number;
   cashTickets: number;
   cardTickets: number;
@@ -40,7 +42,7 @@ export default function CashClose() {
 
   // Data
   const [dayStats, setDayStats] = useState<DayStats>({
-    cashNIO: 0, cashUSD: 0, card: 0, transfer: 0,
+    cashNIO: 0, cashUSD: 0, card: 0, cardUSD: 0, transfer: 0, transferUSD: 0,
     totalTickets: 0, cashTickets: 0, cardTickets: 0, transferTickets: 0,
     tickets: [],
   });
@@ -49,6 +51,7 @@ export default function CashClose() {
 
   // User inputs
   const [cashCounted, setCashCounted] = useState("");
+  const [cashCountedUSD, setCashCountedUSD] = useState("");
   const [egresos, setEgresos] = useState<{ amount: string; reason: string }[]>([]);
   const [note, setNote] = useState("");
 
@@ -122,7 +125,7 @@ export default function CashClose() {
       } catch { /* customer_id may not exist, no problem */ }
     }
 
-    let cashNIO = 0, cashUSD = 0, card = 0, transfer = 0;
+    let cashNIO = 0, cashUSD = 0, card = 0, cardUSD = 0, transfer = 0, transferUSD = 0;
     let cashTickets = 0, cardTickets = 0, transferTickets = 0;
     const ticketMap: Map<string, TicketDetail> = new Map();
 
@@ -151,13 +154,16 @@ export default function CashClose() {
         });
       }
 
+      const isUSD = p.currency === "USD";
       if (p.payment_method === "cash") {
-        if (p.currency === "USD") { cashUSD += Number(p.amount); cashTickets++; }
-        else { cashNIO += Number(p.amount); cashTickets++; }
+        if (isUSD) { cashUSD += Number(p.amount); } else { cashNIO += Number(p.amount); }
+        cashTickets++;
       } else if (p.payment_method === "card") {
-        card += Number(p.amount); cardTickets++;
+        if (isUSD) { cardUSD += Number(p.amount); } else { card += Number(p.amount); }
+        cardTickets++;
       } else if (p.payment_method === "transfer") {
-        transfer += Number(p.amount); transferTickets++;
+        if (isUSD) { transferUSD += Number(p.amount); } else { transfer += Number(p.amount); }
+        transferTickets++;
       }
     });
 
@@ -166,7 +172,7 @@ export default function CashClose() {
     );
 
     setDayStats({
-      cashNIO, cashUSD, card, transfer,
+      cashNIO, cashUSD, card, cardUSD, transfer, transferUSD,
       totalTickets: tickets.length,
       cashTickets, cardTickets, transferTickets,
       tickets,
@@ -187,7 +193,10 @@ export default function CashClose() {
   const totalEgresos = egresos.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const expectedCash = dayStats.cashNIO + cashUSDinNIO - totalEgresos;
   const counted = parseFloat(cashCounted) || 0;
-  const difference = counted - expectedCash;
+  const countedUSD = parseFloat(cashCountedUSD) || 0;
+  const countedUSDinNIO = countedUSD * rate;
+  const totalCounted = counted + countedUSDinNIO;
+  const difference = totalCounted - expectedCash;
   const hasCounted = cashCounted.trim() !== "";
   const cuadra = hasCounted && Math.abs(difference) < 0.01;
   const sobra = hasCounted && difference > 0.01;
@@ -219,7 +228,7 @@ export default function CashClose() {
       total_transfer: dayStats.transfer,
       total_expenses: totalEgresos,
       expected_total: expectedCash,
-      counted_total: counted,
+      counted_total: totalCounted,
       difference,
       bills_count: {},
       coins_count: {},
@@ -229,6 +238,7 @@ export default function CashClose() {
     if (!error) {
       showToast("✅ Cierre de caja guardado correctamente");
       setCashCounted("");
+      setCashCountedUSD("");
       setEgresos([]);
       setNote("");
       setShowConfirm(false);
@@ -378,7 +388,7 @@ export default function CashClose() {
             </div>
             <p className="text-4xl font-black text-emerald-700 dark:text-emerald-300">C${dayStats.cashNIO.toFixed(0)}</p>
             <p className="text-xs text-emerald-600 mt-1">{dayStats.cashTickets} factura{dayStats.cashTickets !== 1 ? "s" : ""}</p>
-            {dayStats.cashUSD > 0 && <p className="text-xs text-emerald-600 mt-0.5">+ ${dayStats.cashUSD.toFixed(2)} USD</p>}
+            {dayStats.cashUSD > 0 && <p className="text-xs text-green-500 mt-0.5">+ ${dayStats.cashUSD.toFixed(2)} USD</p>}
           </button>
 
           {/* Transfer */}
@@ -395,6 +405,7 @@ export default function CashClose() {
             </div>
             <p className="text-4xl font-black text-violet-700 dark:text-violet-300">C${dayStats.transfer.toFixed(0)}</p>
             <p className="text-xs text-violet-600 mt-1">{dayStats.transferTickets} factura{dayStats.transferTickets !== 1 ? "s" : ""}</p>
+            {dayStats.transferUSD > 0 && <p className="text-xs text-green-500 mt-0.5">+ ${dayStats.transferUSD.toFixed(2)} USD</p>}
           </button>
 
           {/* Card */}
@@ -411,6 +422,7 @@ export default function CashClose() {
             </div>
             <p className="text-4xl font-black text-blue-700 dark:text-blue-300">C${dayStats.card.toFixed(0)}</p>
             <p className="text-xs text-blue-600 mt-1">{dayStats.cardTickets} factura{dayStats.cardTickets !== 1 ? "s" : ""}</p>
+            {dayStats.cardUSD > 0 && <p className="text-xs text-green-500 mt-0.5">+ ${dayStats.cardUSD.toFixed(2)} USD</p>}
           </button>
 
           {/* Grand Total */}
@@ -525,32 +537,53 @@ export default function CashClose() {
             <p className="text-5xl font-black text-emerald-700 dark:text-emerald-300 mt-2 tabular-nums">
               C${dayStats.cashNIO.toFixed(0)}
             </p>
+            {dayStats.cashUSD > 0 && (
+              <p className="text-lg font-bold text-green-500">
+                + ${dayStats.cashUSD.toFixed(2)} USD
+                <span className="text-xs text-emerald-500 ml-1">(≈ C${cashUSDinNIO.toFixed(0)})</span>
+              </p>
+            )}
             <p className="text-xs text-emerald-500 mt-1">
               {dayStats.cashTickets} factura{dayStats.cashTickets !== 1 ? "s" : ""} en efectivo
             </p>
           </div>
 
-          {/* Efectivo contado — el ÚNICO input obligatorio */}
-          <div className="rounded-2xl border-2 border-primary/50 bg-primary/5 p-6 space-y-2">
+          {/* Efectivo contado — inputs NIO y USD */}
+          <div className="rounded-2xl border-2 border-primary/50 bg-primary/5 p-6 space-y-3">
             <label className="flex items-center gap-2 text-sm font-bold text-foreground">
               <i className="fa-solid fa-hand-holding-dollar text-primary text-xl" />
               Efectivo contado en caja
             </label>
             <p className="text-xs text-muted-foreground">
-              Cuenta el dinero físicamente en la caja e ingresa el total.
+              Ingresa el monto en córdobas y/o en dólares que hay en caja.
             </p>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-2xl font-black text-muted-foreground">C$</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xl font-black text-muted-foreground w-8">C$</span>
               <input
                 type="number"
                 value={cashCounted}
                 onChange={(e) => setCashCounted(e.target.value)}
-                className="flex-1 text-4xl font-black text-center rounded-2xl border-3 border-primary bg-background focus:ring-4 focus:ring-primary/20 py-4 px-4 focus:outline-none transition-all"
+                className="flex-1 text-3xl font-black text-center rounded-2xl border-2 border-primary bg-background focus:ring-4 focus:ring-primary/20 py-3 px-3 focus:outline-none transition-all"
                 placeholder="0"
                 min={0}
                 step={1}
               />
             </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xl font-black text-green-600 w-8">$</span>
+              <input
+                type="number"
+                value={cashCountedUSD}
+                onChange={(e) => setCashCountedUSD(e.target.value)}
+                className="flex-1 text-3xl font-black text-center rounded-2xl border-2 border-green-400 bg-background focus:ring-4 focus:ring-green-200 py-3 px-3 focus:outline-none transition-all"
+                placeholder="0.00 USD"
+                min={0}
+                step={0.01}
+              />
+            </div>
+            {countedUSD > 0 && (
+              <p className="text-xs text-green-500">≈ C${countedUSDinNIO.toFixed(0)} (a C${rate}/USD)</p>
+            )}
           </div>
         </div>
 
