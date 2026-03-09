@@ -3,6 +3,7 @@ import { useServices } from "@/hooks/useServices";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
+import { niStartOfDay, niNow } from "@/utils/niDate";
 import PaymentModal from "@/components/pos/PaymentModal";
 import CustomerModal from "@/components/pos/CustomerModal";
 import TicketPrint from "@/components/pos/TicketPrint";
@@ -89,7 +90,7 @@ export default function POS() {
     const { data } = await supabase
       .from("tickets")
       .select("id, ticket_number, total, status, created_at, vehicle_types(name)")
-      .gte("created_at", today.toISOString())
+      .gte("created_at", niStartOfDay())
       .order("created_at", { ascending: false })
       .limit(10);
     if (data) setRecentTickets(data);
@@ -170,6 +171,7 @@ export default function POS() {
           vehicle_plate: customer?.plate || "",
           total,
           status: "paid",
+          created_at: niNow(),
         } as any)
         .select()
         .single();

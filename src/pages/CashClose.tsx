@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
-import { niStartOfDay, niFormatTime, niFormatLongDate, niFormatShortDate } from "@/utils/niDate";
+import { niStartOfDay, niFormatTime, niFormatLongDate, niFormatShortDate, niNow } from "@/utils/niDate";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TicketDetail {
@@ -266,6 +266,7 @@ export default function CashClose() {
       bills_count: {},
       coins_count: {},
       observations: [note, egresosText ? `Egresos: ${egresosText}` : ""].filter(Boolean).join(" | ") || null,
+      closed_at: niNow(),
     } as any);
 
     if (!error) {

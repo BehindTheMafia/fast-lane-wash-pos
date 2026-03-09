@@ -51,3 +51,22 @@ export const niFormatShortDate = (iso: string | Date): string =>
         month: "short",
         year: "numeric",
     });
+/** Get "Now" as an ISO string in Nicaragua timezone (-06:00 offset)
+ * This avoids using the device's local clock directly for the hour.
+ */
+export const niNow = (): string => {
+    const now = new Date();
+    // Use Intl to get the parts in Managua time
+    const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: NI_TZ,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        hour12: false
+    });
+
+    const parts = formatter.formatToParts(now);
+    const getPart = (type: string) => parts.find(p => p.type === type)?.value;
+
+    const isoStr = `${getPart("year")}-${getPart("month")}-${getPart("day")}T${getPart("hour")}:${getPart("minute")}:${getPart("second")}-06:00`;
+    return isoStr;
+};

@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useMemberships } from "@/hooks/useMemberships";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
+import { niFormatDate, niFormatLongDate, niNow } from "@/utils/niDate";
 import MembershipCard from "@/components/memberships/MembershipCard";
 import MembershipRenewalModal from "@/components/memberships/MembershipRenewalModal";
 import PaymentModal from "@/components/pos/PaymentModal";
@@ -174,6 +175,7 @@ export default function Memberships() {
           vehicle_plate: customerPlate,
           total: membershipPrice,
           status: "paid",
+          created_at: niNow(),
         } as any)
         .select()
         .single();
@@ -225,7 +227,7 @@ export default function Memberships() {
       const ticketForPrint = {
         ...(ticket as any),
         ticket_number: ticketNumber,
-        created_at: (ticket as any).created_at || new Date().toISOString(),
+        created_at: (ticket as any).created_at || niNow(),
         customer: {
           name: customerName,
           plate: customerPlate,

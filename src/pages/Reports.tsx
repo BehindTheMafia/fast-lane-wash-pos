@@ -27,17 +27,15 @@ export default function Reports() {
 
   const loadReport = async () => {
     setLoading(true);
-    const [yFrom, mFrom, dFrom] = dateFrom.split("-").map(Number);
-    const [yTo, mTo, dTo] = dateTo.split("-").map(Number);
-    const from = new Date(yFrom, mFrom - 1, dFrom, 0, 0, 0, 0);
-    const to = new Date(yTo, mTo - 1, dTo, 23, 59, 59, 999);
+    const fromISO = `${dateFrom}T00:00:00-06:00`;
+    const toISO = `${dateTo}T23:59:59-06:00`;
 
     // Fetch tickets with vehicle type and payments
     const { data: rawTickets, error: ticketsError } = await supabase
       .from("tickets")
       .select("*, vehicle_types(name), payments(*)")
-      .gte("created_at", from.toISOString())
-      .lte("created_at", to.toISOString())
+      .gte("created_at", fromISO)
+      .lte("created_at", toISO)
       .eq("status", "paid")
       .order("created_at", { ascending: false });
 
