@@ -87,6 +87,7 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     const clientName = ticket.customer?.name || "Cliente";
     const plate = ticket.customer?.plate ? String(ticket.customer.plate).toUpperCase() : "";
 
+    const symbol = ticket.payment?.currency === "USD" ? "$" : "C$";
     const line = "------------------------------"; // evita ───── (a veces rompe)
 
     let message = `✨ *${businessName}* ✨\n`;
@@ -104,13 +105,17 @@ export default function TicketPrint({ ticket, onClose }: Props) {
 
       // Bullets seguros (evita "•⁠  ⁠" con caracteres invisibles)
       message += `🔹 ${name}${qty > 1 ? ` (x${qty})` : ""}\n`;
-      message += `   💰 C$${(price * qty).toFixed(2)}\n`;
+      message += `   💰 ${symbol}${(price * qty).toFixed(2)}\n`;
     });
+
+    const rate = Number(ticket.settings?.exchange_rate || 36.5);
+    const totalUSD = total / rate;
 
     message += `${line}\n`;
     message += `📦 *SUBTOTAL:* C$${subtotal.toFixed(2)}\n`;
     if (discount > 0) message += `🏷️ *DESCUENTO:* -C$${discount.toFixed(2)}\n`;
     message += `💵 *TOTAL:* C$${total.toFixed(2)}\n`;
+    message += `🌎 *TOTAL USD:* $${totalUSD.toFixed(2)}\n`;
     message += `${line}\n`;
     message += `🙏 _${ticket.settings?.receipt_footer || "¡Gracias por su visita!"}_`;
 
@@ -213,18 +218,19 @@ export default function TicketPrint({ ticket, onClose }: Props) {
                 const itemPrice = Number(item.price) || 0;
                 const discPct = Number(item.discountPercent) || 0;
                 const itemDiscountAmt = itemPrice * discPct / 100;
+                const symbol = ticket.payment?.currency === "USD" ? "$" : "C$";
                 return (
                   <div key={i} className="text-[11px]">
                     <div className="flex justify-between font-semibold">
                       <span>{item.serviceName}{discPct > 0 ? ` – ${discPct}% desc.` : ''}</span>
-                      <span>C${itemPrice.toFixed(2)}</span>
+                      <span>{symbol}{itemPrice.toFixed(2)}</span>
                     </div>
                     <div className="text-[9px] text-muted-foreground print:text-gray-600 pl-2">
                       {item.vehicleLabel}
                     </div>
                     {discPct > 0 && (
                       <div className="text-[9px] text-destructive print:text-black pl-2 font-semibold">
-                        Descuento: -C${itemDiscountAmt.toFixed(2)}
+                        Descuento: -{symbol}{itemDiscountAmt.toFixed(2)}
                       </div>
                     )}
                   </div>
@@ -247,6 +253,9 @@ export default function TicketPrint({ ticket, onClose }: Props) {
             const displaySubtotal = Number(ticket.subtotal) || computedSubtotal;
             const displayDiscount = Number(ticket.discount) || computedDiscount;
             const displayTotal = Number(ticket.total) || (displaySubtotal - displayDiscount);
+            const rate = Number(ticket.settings?.exchange_rate || 36.5);
+            const totalUSD = displayTotal / rate;
+
             return (
               <div className="text-xs space-y-1 mb-3 print:mb-2">
                 <div className="flex justify-between">
@@ -259,9 +268,15 @@ export default function TicketPrint({ ticket, onClose }: Props) {
                     <span>-C${displayDiscount.toFixed(2)}</span>
                   </div>
                 )}
-                <div className="flex justify-between font-black text-base pt-1 border-t border-border print:border-black">
-                  <span>TOTAL:</span>
-                  <span>C${displayTotal.toFixed(2)}</span>
+                <div className="flex flex-col border-t border-border print:border-black pt-1">
+                  <div className="flex justify-between font-black text-base">
+                    <span>TOTAL:</span>
+                    <span>C${displayTotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-sm text-muted-foreground print:text-black italic">
+                    <span>TOTAL USD:</span>
+                    <span>${totalUSD.toFixed(2)}</span>
+                  </div>
                 </div>
               </div>
             );

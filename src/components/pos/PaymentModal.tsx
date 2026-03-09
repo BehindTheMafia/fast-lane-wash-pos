@@ -7,6 +7,7 @@ interface PaymentModalProps {
   onConfirm: (data: {
     currency: string;
     method: string;
+    amount: number;
     received: number;
     change: number;
     mixedPayment?: {
@@ -37,13 +38,14 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
       : true; // transfer and card: total is confirmed directly
 
   const handleConfirm = () => {
+    console.log("[PaymentModal] totalInCurrency:", totalInCurrency, "currency:", currency, "exchangeRate:", exchangeRate);
     if (!canConfirm) return;
 
     if (method === "cash") {
-      onConfirm({ currency, method, received: receivedNum, change });
+      onConfirm({ currency, method, amount: totalInCurrency, received: receivedNum, change });
     } else {
       // For card and transfer: received = total, no change
-      onConfirm({ currency, method, received: totalInCurrency, change: 0 });
+      onConfirm({ currency, method, amount: totalInCurrency, received: totalInCurrency, change: 0 });
     }
   };
 
@@ -126,8 +128,8 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
                     setReceived("");
                   }}
                   className={`vehicle-card flex-col py-4 transition-all duration-200 ${isSelected
-                      ? "vehicle-card-active ring-2 ring-primary"
-                      : "hover:border-primary/40"
+                    ? "vehicle-card-active ring-2 ring-primary"
+                    : "hover:border-primary/40"
                     }`}
                 >
                   <i

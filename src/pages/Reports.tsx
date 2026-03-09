@@ -547,10 +547,12 @@ export default function Reports() {
                         </td>
                         <td className="px-4 py-3 text-foreground">{cashierName}</td>
                         <td className="px-4 py-3 text-right font-bold text-primary whitespace-nowrap">
-                          {t.payments?.[0]?.currency === "USD"
-                            ? `$${Number(t.total).toFixed(2)}`
-                            : `C$${Number(t.total).toFixed(2)}`
-                          }
+                          {(() => {
+                            const p = t.payments?.[0];
+                            const symbol = p?.currency === "USD" ? "$" : "C$";
+                            const amt = p ? Number(p.amount) : Number(t.total);
+                            return `${symbol}${amt.toFixed(2)}`;
+                          })()}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-center gap-2">
@@ -589,9 +591,10 @@ export default function Reports() {
                         {(() => {
                           let nio = 0, usd = 0;
                           filteredTickets.forEach((t: any) => {
-                            const p = t.payments?.[0];
-                            if (p?.currency === "USD") usd += Number(t.total);
-                            else nio += Number(t.total);
+                            t.payments?.forEach((p: any) => {
+                              if (p.currency === "USD") usd += Number(p.amount);
+                              else nio += Number(p.amount);
+                            });
                           });
                           return (
                             <>

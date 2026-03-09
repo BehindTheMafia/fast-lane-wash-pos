@@ -184,9 +184,10 @@ export default function Memberships() {
       }
 
       // Create payment record
+      console.log("[Memberships] paymentData:", paymentData, "exchangeRate:", exchangeRate);
       const { error: paymentErr } = await supabase.from("payments").insert({
         ticket_id: (ticket as any).id,
-        amount: membershipPrice,
+        amount: paymentData.amount, // Ya viene convertido por el PaymentModal
         currency: paymentData.currency,
         payment_method: paymentData.method,
         amount_received: paymentData.received,

@@ -150,6 +150,7 @@ export default function POS() {
   }, [hasActiveMembership, activeMembershipVehicleTypeIds.length]);
 
   const handlePaymentComplete = async (paymentData: any) => {
+    console.log("[POS] handlePaymentComplete:", paymentData, "Exchange Rate:", exchangeRate);
     try {
       if (ticketItems.length === 0 || !user) return;
 
@@ -189,9 +190,10 @@ export default function POS() {
         const { cashAmount, cardAmount } = paymentData.mixedPayment;
 
         if (cashAmount > 0) {
+          const finalAmount = paymentData.currency === "USD" ? Number((cashAmount / exchangeRate).toFixed(2)) : cashAmount;
           await supabase.from("payments").insert({
             ticket_id: (ticket as any).id,
-            amount: cashAmount,
+            amount: finalAmount,
             currency: paymentData.currency,
             payment_method: "cash",
             amount_received: cashAmount,
@@ -201,9 +203,10 @@ export default function POS() {
         }
 
         if (cardAmount > 0) {
+          const finalAmount = paymentData.currency === "USD" ? Number((cardAmount / exchangeRate).toFixed(2)) : cardAmount;
           await supabase.from("payments").insert({
             ticket_id: (ticket as any).id,
-            amount: cardAmount,
+            amount: finalAmount,
             currency: paymentData.currency,
             payment_method: "card",
             amount_received: cardAmount,
@@ -214,7 +217,7 @@ export default function POS() {
       } else {
         await supabase.from("payments").insert({
           ticket_id: (ticket as any).id,
-          amount: total,
+          amount: paymentData.amount, // Ya viene convertido si es USD
           currency: paymentData.currency,
           payment_method: paymentData.method,
           amount_received: paymentData.received,

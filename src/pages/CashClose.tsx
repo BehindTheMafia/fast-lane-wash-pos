@@ -17,6 +17,7 @@ interface TicketDetail {
   customer_name: string;
   cashier_name: string;
   currency: string;
+  payment_amount: number;
 }
 
 interface DayStats {
@@ -153,6 +154,7 @@ export default function CashClose() {
           customer_name: customerName,
           cashier_name: cashierName,
           currency: p.currency || "NIO",
+          payment_amount: Number(p.amount),
         });
       }
 
@@ -184,7 +186,10 @@ export default function CashClose() {
   const loadHistory = async () => {
     const { data } = await supabase
       .from("cash_closures")
-      .select("*")
+      .select(`
+        *,
+        profiles(full_name)
+      `)
       .order("closed_at", { ascending: false });
     if (data) setHistory(data);
   };
@@ -335,19 +340,23 @@ export default function CashClose() {
 
                 return (
                   <div key={h.id} className="p-4 rounded-xl bg-background border border-border text-sm space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
                       <p className="font-bold text-foreground">
                         {niFormatShortDate(h.closed_at)}
                         {" · "}
                         {niFormatTime(h.closed_at)}
                       </p>
-                      <span className={`text-sm font-black px-3 py-1 rounded-full ${Math.abs(diff) < 0.01
-                        ? "bg-emerald-100 text-emerald-700"
-                        : diff > 0 ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"
-                        }`}>
-                        {Math.abs(diff) < 0.01 ? "✅ Cuadró" : diff > 0 ? `⬆ Sobró C$${diff.toFixed(2)}` : `⬇ Faltó C$${Math.abs(diff).toFixed(2)}`}
-                      </span>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <i className="fa-solid fa-user-check text-[10px]" />
+                        {h.profiles?.full_name || "Usuario desconocido"}
+                      </p>
                     </div>
+                    <span className={`text-sm font-black px-3 py-1 rounded-full ${Math.abs(diff) < 0.01
+                      ? "bg-emerald-100 text-emerald-700"
+                      : diff > 0 ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"
+                      }`}>
+                      {Math.abs(diff) < 0.01 ? "✅ Cuadró" : diff > 0 ? `⬆ Sobró C$${diff.toFixed(2)}` : `⬇ Faltó C$${Math.abs(diff).toFixed(2)}`}
+                    </span>
                     <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border">
                       <div className="text-center">
                         <p className="text-xs text-emerald-600 font-semibold"><i className="fa-solid fa-money-bills mr-1" />Efectivo</p>
@@ -531,7 +540,7 @@ export default function CashClose() {
                         </td>
                         <td className="px-3 py-2.5 text-muted-foreground text-xs">{t.cashier_name}</td>
                         <td className="px-3 py-2.5 text-right font-black text-foreground">
-                          {t.currency === "USD" ? "$" : "C$"}{t.total.toFixed(2)}
+                          {t.currency === "USD" ? "$" : "C$"}{t.payment_amount.toFixed(2)}
                         </td>
                       </tr>
                     ))}
@@ -543,8 +552,8 @@ export default function CashClose() {
                         {(() => {
                           let nio = 0, usd = 0;
                           filteredTickets.forEach(ft => {
-                            if (ft.currency === "USD") usd += Number(ft.total);
-                            else nio += Number(ft.total);
+                            if (ft.currency === "USD") usd += Number(ft.payment_amount);
+                            else nio += Number(ft.payment_amount);
                           });
                           if (nio > 0 && usd > 0) return `C$${nio.toFixed(2)} + $${usd.toFixed(2)}`;
                           if (usd > 0) return `$${usd.toFixed(2)}`;

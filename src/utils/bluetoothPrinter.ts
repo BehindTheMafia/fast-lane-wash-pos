@@ -82,6 +82,8 @@ export async function printTicketBluetooth(ticket: any) {
                 encoder.line(`PLACA: ${plate}`);
             }
 
+            const symbol = ticket.payment?.currency === 'USD' ? '$' : 'C$';
+
             // 4. Detalle de Servicios
             encoder
                 .line(hr)
@@ -91,7 +93,7 @@ export async function printTicketBluetooth(ticket: any) {
             items.forEach((item: any) => {
                 const name = item?.serviceName ?? "Servicio";
                 const price = Number(item?.price || 0);
-                const priceStr = `C$${price.toFixed(2)}`;
+                const priceStr = `${symbol}${price.toFixed(2)}`;
                 const nameWidth = Math.max(0, columns - priceStr.length - 1);
 
                 if (name.length <= nameWidth) {
@@ -108,6 +110,10 @@ export async function printTicketBluetooth(ticket: any) {
                 }
             });
 
+            const rate = Number(ticket.settings?.exchange_rate || 36.5);
+            const totalNIO = Number(ticket.total || 0);
+            const totalUSD = totalNIO / rate;
+
             // 5. Totales
             encoder
                 .size('normal')
@@ -121,19 +127,21 @@ export async function printTicketBluetooth(ticket: any) {
 
             encoder
                 .bold(true)
-                .line(`TOTAL: C$${Number(ticket.total || 0).toFixed(2)}`)
+                .line(`TOTAL: C$${totalNIO.toFixed(2)}`)
                 .bold(false)
+                .line(`TOTAL USD: $${totalUSD.toFixed(2)}`)
                 .newline();
 
             // 6. Información de Pago
             if (ticket.payment) {
+                const paySymbol = ticket.payment.currency === 'USD' ? '$' : 'C$';
                 encoder
                     .line(hr)
                     .align('left')
                     .size('small')
-                    .line(`PAGO (${ticket.payment.method}): ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.received.toFixed(2)}`);
+                    .line(`PAGO (${ticket.payment.method}): ${paySymbol}${ticket.payment.received.toFixed(2)}`);
                 if (ticket.payment.change > 0) {
-                    encoder.line(`VUELTO: ${ticket.payment.currency === 'NIO' ? 'C$' : '$'}${ticket.payment.change.toFixed(2)}`);
+                    encoder.line(`VUELTO: ${paySymbol}${ticket.payment.change.toFixed(2)}`);
                 }
                 encoder.newline();
             }
