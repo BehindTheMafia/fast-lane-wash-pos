@@ -140,8 +140,16 @@ export default function Reports() {
   const handleEditSave = async () => {
     if (!editingTicket) return;
     const exRate = settings?.exchange_rate || 36.5;
-
     try {
+      console.log("Saving edit for ticket:", editingTicket.id);
+      console.log("Draft state:", {
+        vehicle_plate: editingTicket.vehicle_plate,
+        total: editingTicket.total,
+        _editCurrency: editingTicket._editCurrency,
+        _editPaymentMethod: editingTicket._editPaymentMethod,
+        existingPayments: editingTicket.payments
+      });
+
       // 1. Update ticket fields
       const { error: ticketErr } = await supabase
         .from("tickets")
@@ -171,8 +179,10 @@ export default function Reports() {
       const currency = editingTicket._editCurrency ?? editingTicket.payments?.[0]?.currency ?? "NIO";
       const amount = Number(editingTicket.total);
 
+      console.log("Calculated payment data:", { method, currency, amount });
+
       if (!editingTicket.payments || editingTicket.payments.length === 0) {
-        // No payment → INSERT
+        console.log("No payments found, performing INSERT...");
         const { error: payErr } = await supabase.from("payments").insert({
           ticket_id: editingTicket.id,
           amount,
@@ -187,7 +197,7 @@ export default function Reports() {
           throw payErr;
         }
       } else {
-        // Has payment → UPDATE
+        console.log("Payment found, performing UPDATE for ID:", editingTicket.payments[0].id);
         const { error: payErr } = await supabase
           .from("payments")
           .update({
