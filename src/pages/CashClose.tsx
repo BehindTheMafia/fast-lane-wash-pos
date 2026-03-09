@@ -184,14 +184,34 @@ export default function CashClose() {
   };
 
   const loadHistory = async () => {
-    const { data } = await supabase
+    const { data: closures } = await supabase
       .from("cash_closures")
-      .select(`
-        *,
-        profiles(full_name)
-      `)
+      .select("*")
       .order("closed_at", { ascending: false });
-    if (data) setHistory(data);
+
+    if (!closures) return;
+
+    // Collect cashier IDs
+    const cashierIds = Array.from(new Set(closures.map(c => c.cashier_id)));
+
+    // Fetch profiles
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", cashierIds);
+
+    const profileMap: Map<string, string> = new Map();
+    if (profiles) {
+      profiles.forEach(p => profileMap.set(p.id, p.full_name || "—"));
+    }
+
+    // Map profiles back to closures for display
+    const historyWithNames = closures.map(c => ({
+      ...c,
+      profiles: { full_name: profileMap.get(c.cashier_id) || "Usuario desconocido" }
+    }));
+
+    setHistory(historyWithNames);
   };
 
   // ── Calculations ──────────────────────────────── 
