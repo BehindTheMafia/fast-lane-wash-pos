@@ -199,7 +199,7 @@ export default function Dashboard() {
         <div className="pos-card p-6 text-center">
           <i className="fa-solid fa-money-bill-trend-up text-3xl text-primary mb-2" />
           <p className="text-sm text-secondary">Ventas del día</p>
-          <p className="text-3xl font-bold text-foreground">C${stats.totalSalesNIO.toFixed(0)}</p>
+          <p className="text-3xl font-bold text-foreground">C${stats.totalSalesNIO.toFixed(2)}</p>
           <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
             {stats.payNIO > 0 && <p>NIO: C${stats.payNIO.toFixed(2)}</p>}
             {stats.payUSD > 0 && <p className="text-green-500">+ USD: ${stats.payUSD.toFixed(2)}</p>}
@@ -214,7 +214,7 @@ export default function Dashboard() {
           <i className="fa-solid fa-chart-line text-3xl text-accent mb-2" />
           <p className="text-sm text-secondary">Promedio por ticket</p>
           <p className="text-3xl font-bold text-foreground">
-            C${stats.ticketCount > 0 ? (stats.totalSalesNIO / stats.ticketCount).toFixed(0) : "0"}
+            C${stats.ticketCount > 0 ? (stats.totalSalesNIO / stats.ticketCount).toFixed(2) : "0.00"}
           </p>
         </div>
       </div>
@@ -283,8 +283,8 @@ export default function Dashboard() {
                   <td className="px-4 py-3 text-foreground font-mono">{t.vehicle_plate || "—"}</td>
                   <td className="px-4 py-3 text-right font-bold text-primary">
                     {t.payments?.[0]?.currency === "USD"
-                      ? `$${Number(t.total).toFixed(0)}`
-                      : `C$${Number(t.total).toFixed(0)}`
+                      ? `$${Number(t.total).toFixed(2)}`
+                      : `C$${Number(t.total).toFixed(2)}`
                     }
                   </td>
                   {canDelete && (

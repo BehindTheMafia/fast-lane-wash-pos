@@ -345,29 +345,29 @@ export default function CashClose() {
                         ? "bg-emerald-100 text-emerald-700"
                         : diff > 0 ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"
                         }`}>
-                        {Math.abs(diff) < 0.01 ? "✅ Cuadró" : diff > 0 ? `⬆ Sobró C$${diff.toFixed(0)}` : `⬇ Faltó C$${Math.abs(diff).toFixed(0)}`}
+                        {Math.abs(diff) < 0.01 ? "✅ Cuadró" : diff > 0 ? `⬆ Sobró C$${diff.toFixed(2)}` : `⬇ Faltó C$${Math.abs(diff).toFixed(2)}`}
                       </span>
                     </div>
                     <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border">
                       <div className="text-center">
                         <p className="text-xs text-emerald-600 font-semibold"><i className="fa-solid fa-money-bills mr-1" />Efectivo</p>
-                        <p className="font-black text-foreground">C${cashNIO.toFixed(0)}</p>
+                        <p className="font-black text-foreground">C${cashNIO.toFixed(2)}</p>
                         {cashUSD > 0 && <p className="text-[10px] text-green-600 font-bold leading-none">+${cashUSD.toFixed(2)} USD</p>}
                       </div>
                       <div className="text-center border-x border-border">
                         <p className="text-xs text-violet-600 font-semibold"><i className="fa-solid fa-building-columns mr-1" />Transfer.</p>
-                        <p className="font-black text-foreground">C${transNIO.toFixed(0)}</p>
+                        <p className="font-black text-foreground">C${transNIO.toFixed(2)}</p>
                         {transUSD > 0 && <p className="text-[10px] text-green-600 font-bold leading-none">+${transUSD.toFixed(2)} USD</p>}
                       </div>
                       <div className="text-center">
                         <p className="text-xs text-blue-600 font-semibold"><i className="fa-solid fa-credit-card mr-1" />Tarjeta</p>
-                        <p className="font-black text-foreground">C${cardNIO.toFixed(0)}</p>
+                        <p className="font-black text-foreground">C${cardNIO.toFixed(2)}</p>
                         {cardUSD > 0 && <p className="text-[10px] text-green-600 font-bold leading-none">+${cardUSD.toFixed(2)} USD</p>}
                       </div>
                     </div>
                     <div className="flex justify-between pt-1 border-t border-border text-[10px] text-muted-foreground">
-                      <span>Total: <strong className="text-foreground">C${totalDayH.toFixed(0)}</strong>{hTotalUSD > 0 && <span className="ml-1 text-green-600 font-bold">($${hTotalUSD.toFixed(2)} USD)</span>}</span>
-                      <span>Contado: <strong className="text-foreground">C${Number(h.counted_total).toFixed(0)}</strong></span>
+                      <span>Total: <strong className="text-foreground">C${totalDayH.toFixed(2)}</strong>{hTotalUSD > 0 && <span className="ml-1 text-green-600 font-bold">($${hTotalUSD.toFixed(2)} USD)</span>}</span>
+                      <span>Contado: <strong className="text-foreground">C${Number(h.counted_total).toFixed(2)}</strong></span>
                     </div>
                   </div>
                 );
@@ -401,12 +401,12 @@ export default function CashClose() {
               <span className="font-bold text-emerald-700 dark:text-emerald-400 text-base">Efectivo</span>
               {methodFilter === "cash" && <i className="fa-solid fa-chevron-down text-xs text-emerald-500 ml-auto" />}
             </div>
-            <p className="text-4xl font-black text-emerald-700 dark:text-emerald-300">C${dayStats.cashNIO.toFixed(0)}</p>
+            <p className="text-4xl font-black text-emerald-700 dark:text-emerald-300">C${dayStats.cashNIO.toFixed(2)}</p>
             <p className="text-xs text-emerald-600 mt-1">{dayStats.cashTickets} factura{dayStats.cashTickets !== 1 ? "s" : ""}</p>
             {dayStats.cashUSD > 0 && (
               <div className="flex flex-col">
                 <p className="text-xs text-green-500 mt-0.5">+ ${dayStats.cashUSD.toFixed(2)} USD</p>
-                <p className="text-[10px] text-emerald-500 opacity-80">(≈ C${(dayStats.cashNIO + dayStats.cashUSD * rate).toFixed(0)})</p>
+                <p className="text-[10px] text-emerald-500 opacity-80">(≈ C${(dayStats.cashNIO + dayStats.cashUSD * rate).toFixed(2)})</p>
               </div>
             )}
           </button>
@@ -423,12 +423,12 @@ export default function CashClose() {
               <span className="font-bold text-violet-700 dark:text-violet-400 text-base">Transferencia</span>
               {methodFilter === "transfer" && <i className="fa-solid fa-chevron-down text-xs text-violet-500 ml-auto" />}
             </div>
-            <p className="text-4xl font-black text-violet-700 dark:text-violet-300">C${dayStats.transfer.toFixed(0)}</p>
+            <p className="text-4xl font-black text-violet-700 dark:text-violet-300">C${dayStats.transfer.toFixed(2)}</p>
             <p className="text-xs text-violet-600 mt-1">{dayStats.transferTickets} factura{dayStats.transferTickets !== 1 ? "s" : ""}</p>
             {dayStats.transferUSD > 0 && (
               <div className="flex flex-col">
                 <p className="text-xs text-green-500 mt-0.5">+ ${dayStats.transferUSD.toFixed(2)} USD</p>
-                <p className="text-[10px] text-violet-500 opacity-80">(≈ C${(dayStats.transfer + dayStats.transferUSD * rate).toFixed(0)})</p>
+                <p className="text-[10px] text-violet-500 opacity-80">(≈ C${(dayStats.transfer + dayStats.transferUSD * rate).toFixed(2)})</p>
               </div>
             )}
           </button>
@@ -445,12 +445,12 @@ export default function CashClose() {
               <span className="font-bold text-blue-700 dark:text-blue-400 text-base">Tarjeta</span>
               {methodFilter === "card" && <i className="fa-solid fa-chevron-down text-xs text-blue-500 ml-auto" />}
             </div>
-            <p className="text-4xl font-black text-blue-700 dark:text-blue-300">C${dayStats.card.toFixed(0)}</p>
+            <p className="text-4xl font-black text-blue-700 dark:text-blue-300">C${dayStats.card.toFixed(2)}</p>
             <p className="text-xs text-blue-600 mt-1">{dayStats.cardTickets} factura{dayStats.cardTickets !== 1 ? "s" : ""}</p>
             {dayStats.cardUSD > 0 && (
               <div className="flex flex-col">
                 <p className="text-xs text-green-500 mt-0.5">+ ${dayStats.cardUSD.toFixed(2)} USD</p>
-                <p className="text-[10px] text-blue-500 opacity-80">(≈ C${(dayStats.card + dayStats.cardUSD * rate).toFixed(0)})</p>
+                <p className="text-[10px] text-blue-500 opacity-80">(≈ C${(dayStats.card + dayStats.cardUSD * rate).toFixed(2)})</p>
               </div>
             )}
           </button>
@@ -467,7 +467,7 @@ export default function CashClose() {
               <span className="font-bold text-foreground text-base">TOTAL GENERAL</span>
               {methodFilter === "all" && <i className="fa-solid fa-chevron-down text-xs text-foreground/60 ml-auto" />}
             </div>
-            <p className="text-4xl font-black text-foreground">C${totalNIO.toFixed(0)}</p>
+            <p className="text-4xl font-black text-foreground">C${totalNIO.toFixed(2)}</p>
             <p className="text-xs text-muted-foreground mt-1">{dayStats.totalTickets} factura{dayStats.totalTickets !== 1 ? "s" : ""}</p>
             {totalUSD > 0 && (
               <div className="flex flex-col">
@@ -531,7 +531,7 @@ export default function CashClose() {
                         </td>
                         <td className="px-3 py-2.5 text-muted-foreground text-xs">{t.cashier_name}</td>
                         <td className="px-3 py-2.5 text-right font-black text-foreground">
-                          {t.currency === "USD" ? "$" : "C$"}{t.total.toFixed(0)}
+                          {t.currency === "USD" ? "$" : "C$"}{t.total.toFixed(2)}
                         </td>
                       </tr>
                     ))}
@@ -546,9 +546,9 @@ export default function CashClose() {
                             if (ft.currency === "USD") usd += Number(ft.total);
                             else nio += Number(ft.total);
                           });
-                          if (nio > 0 && usd > 0) return `C$${nio.toFixed(0)} + $${usd.toFixed(0)}`;
-                          if (usd > 0) return `$${usd.toFixed(0)}`;
-                          return `C$${nio.toFixed(0)}`;
+                          if (nio > 0 && usd > 0) return `C$${nio.toFixed(2)} + $${usd.toFixed(2)}`;
+                          if (usd > 0) return `$${usd.toFixed(2)}`;
+                          return `C$${nio.toFixed(2)}`;
                         })()}
                       </td>
                     </tr>
@@ -581,12 +581,12 @@ export default function CashClose() {
               Total que el sistema registró como pagado en efectivo hoy.
             </p>
             <p className="text-5xl font-black text-emerald-700 dark:text-emerald-300 mt-2 tabular-nums">
-              C${dayStats.cashNIO.toFixed(0)}
+              C${dayStats.cashNIO.toFixed(2)}
             </p>
             {dayStats.cashUSD > 0 && (
               <p className="text-lg font-bold text-green-500">
                 + ${dayStats.cashUSD.toFixed(2)} USD
-                <span className="text-xs text-emerald-500 ml-1">(≈ TOTAL C$${(dayStats.cashNIO + dayStats.cashUSD * rate).toFixed(0)})</span>
+                <span className="text-xs text-emerald-500 ml-1">(≈ TOTAL C$${(dayStats.cashNIO + dayStats.cashUSD * rate).toFixed(2)})</span>
               </p>
             )}
             <p className="text-xs text-emerald-500 mt-1">
@@ -628,7 +628,7 @@ export default function CashClose() {
               />
             </div>
             {countedUSD > 0 && (
-              <p className="text-xs text-green-500">≈ C${countedUSDinNIO.toFixed(0)} (a C${rate}/USD)</p>
+              <p className="text-xs text-green-500">≈ C${countedUSDinNIO.toFixed(2)} (a C${rate}/USD)</p>
             )}
           </div>
         </div>
@@ -687,7 +687,7 @@ export default function CashClose() {
           {egresos.length > 0 && (
             <div className="flex justify-between items-center pt-2 border-t border-destructive/20 text-sm font-bold">
               <span className="text-foreground">Total egresos:</span>
-              <span className="text-destructive">− C${totalEgresos.toFixed(0)}</span>
+              <span className="text-destructive">− C${totalEgresos.toFixed(2)}</span>
             </div>
           )}
         </div>
@@ -699,15 +699,15 @@ export default function CashClose() {
             <div className="space-y-1 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Ventas en efectivo:</span>
-                <span className="font-semibold">+ C${dayStats.cashNIO.toFixed(0)}</span>
+                <span className="font-semibold">+ C${dayStats.cashNIO.toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Egresos / Retiros:</span>
-                <span className="font-semibold text-destructive">− C${totalEgresos.toFixed(0)}</span>
+                <span className="font-semibold text-destructive">− C${totalEgresos.toFixed(2)}</span>
               </div>
               <div className="flex justify-between pt-2 border-t border-border">
                 <span className="font-bold text-foreground">💵 Total esperado:</span>
-                <span className="font-black text-lg text-foreground">C${expectedCash.toFixed(0)}</span>
+                <span className="font-black text-lg text-foreground">C${expectedCash.toFixed(2)}</span>
               </div>
             </div>
           </div>
@@ -732,7 +732,7 @@ export default function CashClose() {
               <>
                 <p className="text-6xl mb-2">⬆️</p>
                 <p className="text-3xl font-black text-blue-700 dark:text-blue-300">SOBRA</p>
-                <p className="text-5xl font-black text-blue-700 dark:text-blue-300 mt-1">C${difference.toFixed(0)}</p>
+                <p className="text-5xl font-black text-blue-700 dark:text-blue-300 mt-1">C${difference.toFixed(2)}</p>
                 <p className="text-blue-600 font-semibold mt-1">de más en la caja</p>
               </>
             )}
@@ -740,7 +740,7 @@ export default function CashClose() {
               <>
                 <p className="text-6xl mb-2">⬇️</p>
                 <p className="text-3xl font-black text-red-700 dark:text-red-300">FALTA</p>
-                <p className="text-5xl font-black text-red-700 dark:text-red-300 mt-1">C${Math.abs(difference).toFixed(0)}</p>
+                <p className="text-5xl font-black text-red-700 dark:text-red-300 mt-1">C${Math.abs(difference).toFixed(2)}</p>
                 <p className="text-red-600 font-semibold mt-1">de menos en la caja</p>
               </>
             )}
@@ -834,19 +834,19 @@ export default function CashClose() {
                     <div className="text-center p-3 rounded-xl bg-emerald-50 border border-emerald-200">
                       <i className="fa-solid fa-money-bills text-emerald-600 text-lg mb-1 block" />
                       <p className="text-xs text-emerald-600 font-semibold">Efectivo</p>
-                      <p className="font-black text-emerald-700">C${dayStats.cashNIO.toFixed(0)}</p>
+                      <p className="font-black text-emerald-700">C${dayStats.cashNIO.toFixed(2)}</p>
                       {dayStats.cashUSD > 0 && <p className="text-[10px] text-green-600 font-bold leading-none">+ ${dayStats.cashUSD.toFixed(2)} USD</p>}
                     </div>
                     <div className="text-center p-3 rounded-xl bg-violet-50 border border-violet-200">
                       <i className="fa-solid fa-building-columns text-violet-600 text-lg mb-1 block" />
                       <p className="text-xs text-violet-600 font-semibold">Transfer.</p>
-                      <p className="font-black text-violet-700">C${dayStats.transfer.toFixed(0)}</p>
+                      <p className="font-black text-violet-700">C${dayStats.transfer.toFixed(2)}</p>
                       {dayStats.transferUSD > 0 && <p className="text-[10px] text-green-600 font-bold leading-none">+ ${dayStats.transferUSD.toFixed(2)} USD</p>}
                     </div>
                     <div className="text-center p-3 rounded-xl bg-blue-50 border border-blue-200">
                       <i className="fa-solid fa-credit-card text-blue-600 text-lg mb-1 block" />
                       <p className="text-xs text-blue-600 font-semibold">Tarjeta</p>
-                      <p className="font-black text-blue-700">C${dayStats.card.toFixed(0)}</p>
+                      <p className="font-black text-blue-700">C${dayStats.card.toFixed(2)}</p>
                       {dayStats.cardUSD > 0 && <p className="text-[10px] text-green-600 font-bold leading-none">+ ${dayStats.cardUSD.toFixed(2)} USD</p>}
                     </div>
                   </div>
