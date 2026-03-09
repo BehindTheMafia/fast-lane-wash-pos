@@ -22,6 +22,8 @@ export default function Reports() {
     return `${year}-${month}-${day}`;
   });
   const [tickets, setTickets] = useState<any[]>([]);
+  const [services, setServices] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingTicket, setEditingTicket] = useState<any>(null);
   const [deletingTicket, setDeletingTicket] = useState<any>(null);
@@ -115,7 +117,16 @@ export default function Reports() {
     setLoading(false);
   };
 
-  useEffect(() => { loadReport(); }, []);
+  useEffect(() => { loadReport(); loadCatalogs(); }, []);
+
+  const loadCatalogs = async () => {
+    const [{ data: svcs }, { data: custs }] = await Promise.all([
+      supabase.from("services").select("id, name").eq("is_active", true).order("name"),
+      supabase.from("customers").select("id, name").eq("is_general", false).order("name"),
+    ]);
+    setServices(svcs || []);
+    setCustomers(custs || []);
+  };
 
   const handleDeleteConfirm = async () => {
     if (!deletingTicket) return;
@@ -139,37 +150,56 @@ export default function Reports() {
 
   const handleEditSave = async () => {
     if (!editingTicket) return;
+    const exRate = settings?.exchange_rate || 36.5;
 
     try {
-      // Update ticket total and plate
-      const { error } = await supabase
+      // 1. Update ticket fields
+      await supabase
         .from("tickets")
         .update({
           vehicle_plate: editingTicket.vehicle_plate,
-          total: editingTicket.total,
+          total: Number(editingTicket.total),
+          customer_id: editingTicket._editCustomerId ?? editingTicket.customer_id,
+          vehicle_type_id: editingTicket._editVehicleTypeId ?? editingTicket.vehicle_type_id,
         })
         .eq("id", editingTicket.id);
 
-      if (error) throw error;
+      // 2. Update ticket_item service if changed
+      if (editingTicket._editServiceId && editingTicket.ticket_items?.length > 0) {
+        await supabase
+          .from("ticket_items")
+          .update({ service_id: editingTicket._editServiceId, price: Number(editingTicket.total) })
+          .eq("id", editingTicket.ticket_items[0].id);
+      }
 
-      if (editingTicket.payments?.length === 0 || !editingTicket.payments) {
-        // No payment exists → INSERT a new one with the selected method
+      const method = editingTicket._editPaymentMethod ?? editingTicket.payments?.[0]?.payment_method ?? "cash";
+      const currency = editingTicket._editCurrency ?? editingTicket.payments?.[0]?.currency ?? "NIO";
+      const amount = Number(editingTicket.total);
+      // Amount received: if USD, convert total NIO to USD for display
+      const amountReceived = currency === "USD" ? +(amount / exRate).toFixed(2) : amount;
+
+      if (!editingTicket.payments || editingTicket.payments.length === 0) {
+        // No payment → INSERT
         await supabase.from("payments").insert({
           ticket_id: editingTicket.id,
-          amount: editingTicket.total,
-          currency: "NIO",
-          payment_method: editingTicket._editPaymentMethod || "cash",
-          amount_received: editingTicket.total,
+          amount: currency === "USD" ? +(amount / exRate).toFixed(2) : amount,
+          currency,
+          payment_method: method,
+          amount_received: amountReceived,
           change_amount: 0,
-          exchange_rate: settings?.exchange_rate || 36.5,
+          exchange_rate: exRate,
         } as any);
-      } else if (editingTicket.payments?.length === 1) {
-        // One payment exists → UPDATE amount and method
+      } else {
+        // Has payment → UPDATE
         await supabase
           .from("payments")
           .update({
-            amount: editingTicket.total,
-            payment_method: editingTicket._editPaymentMethod || editingTicket.payments[0].payment_method,
+            amount: currency === "USD" ? +(amount / exRate).toFixed(2) : amount,
+            currency,
+            payment_method: method,
+            amount_received: amountReceived,
+            change_amount: 0,
+            exchange_rate: exRate,
           })
           .eq("id", editingTicket.payments[0].id);
       }
@@ -499,7 +529,19 @@ export default function Reports() {
                         <td className="px-4 py-3 text-foreground font-mono">{t.vehicle_plate || "—"}</td>
                         <td className="px-4 py-3 text-foreground">{customerName}</td>
                         <td className="px-4 py-3">
-                          <span className="px-2 py-1 rounded-full text-xs bg-accent/20 text-accent whitespace-nowrap">{paymentMethods}</span>
+                          <div className="flex flex-col gap-1">
+                            {t.payments?.map((p: any, pi: number) => (
+                              <div key={pi} className="flex items-center gap-1">
+                                <span className="px-2 py-0.5 rounded-full text-xs bg-accent/20 text-accent whitespace-nowrap">
+                                  {methodLabels[p.payment_method] || p.payment_method}
+                                </span>
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${p.currency === "USD" ? "bg-green-500/20 text-green-600" : "bg-blue-500/20 text-blue-600"
+                                  }`}>
+                                  {p.currency === "USD" ? `$${Number(p.amount).toFixed(2)} USD` : `C$${Number(p.amount).toFixed(2)}`}
+                                </span>
+                              </div>
+                            )) || <span className="text-muted-foreground text-xs">—</span>}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-foreground">{cashierName}</td>
                         <td className="px-4 py-3 text-right font-bold text-primary whitespace-nowrap">C${Number(t.total).toFixed(2)}</td>
@@ -550,7 +592,7 @@ export default function Reports() {
       {/* Edit Modal */}
       {editingTicket && (
         <div className="modal-overlay" onClick={() => setEditingTicket(null)}>
-          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content animate-scale-in max-w-lg" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-foreground">
                 <i className="fa-solid fa-pen mr-2 text-secondary" />
@@ -560,7 +602,82 @@ export default function Reports() {
                 <i className="fa-solid fa-xmark text-xl" />
               </button>
             </div>
-            <div className="space-y-4">
+
+            <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+
+              {/* Total + Currency */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-semibold text-foreground mb-1">Total</label>
+                  <input
+                    type="number"
+                    value={editingTicket.total ?? 0}
+                    onChange={(e) => setEditingTicket({ ...editingTicket, total: parseFloat(e.target.value) || 0 })}
+                    className="input-touch w-full"
+                    step="0.01" min="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-foreground mb-1">Moneda</label>
+                  <select
+                    value={editingTicket._editCurrency ?? editingTicket.payments?.[0]?.currency ?? "NIO"}
+                    onChange={(e) => setEditingTicket({ ...editingTicket, _editCurrency: e.target.value })}
+                    className="input-touch w-full"
+                  >
+                    <option value="NIO">C$ Córdobas (NIO)</option>
+                    <option value="USD">$ Dólares (USD)</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Tasa: C${settings?.exchange_rate || 36.5} por $1 USD
+                  </p>
+                </div>
+              </div>
+
+              {/* Payment Method */}
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1">Método de pago</label>
+                <select
+                  value={editingTicket._editPaymentMethod ?? editingTicket.payments?.[0]?.payment_method ?? "cash"}
+                  onChange={(e) => setEditingTicket({ ...editingTicket, _editPaymentMethod: e.target.value })}
+                  className="input-touch w-full"
+                >
+                  <option value="cash">Efectivo</option>
+                  <option value="card">Tarjeta</option>
+                  <option value="transfer">Transferencia</option>
+                </select>
+              </div>
+
+              {/* Service */}
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1">Servicio</label>
+                <select
+                  value={editingTicket._editServiceId ?? editingTicket.ticket_items?.[0]?.service_id ?? ""}
+                  onChange={(e) => setEditingTicket({ ...editingTicket, _editServiceId: Number(e.target.value) })}
+                  className="input-touch w-full"
+                >
+                  <option value="">— Sin cambiar —</option>
+                  {services.map((s: any) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Cliente */}
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1">Cliente</label>
+                <select
+                  value={editingTicket._editCustomerId ?? editingTicket.customer_id ?? ""}
+                  onChange={(e) => setEditingTicket({ ...editingTicket, _editCustomerId: e.target.value || null })}
+                  className="input-touch w-full"
+                >
+                  <option value="">Cliente General</option>
+                  {customers.map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Placa */}
               <div>
                 <label className="block text-sm font-semibold text-foreground mb-1">Placa del vehículo</label>
                 <input
@@ -571,48 +688,33 @@ export default function Reports() {
                   placeholder="Ej: ABC-123"
                 />
               </div>
+
+              {/* Tipo de vehículo */}
               <div>
-                <label className="block text-sm font-semibold text-foreground mb-1">Total (C$)</label>
-                <input
-                  type="number"
-                  value={editingTicket.total || 0}
-                  onChange={(e) => setEditingTicket({ ...editingTicket, total: parseFloat(e.target.value) || 0 })}
-                  className="input-touch w-full"
-                  step="0.01"
-                  min="0"
-                />
-              </div>
-              {/* Payment method */}
-              <div>
-                <label className="block text-sm font-semibold text-foreground mb-1">
-                  Método de pago
-                  {(!editingTicket.payments || editingTicket.payments.length === 0) && (
-                    <span className="ml-2 text-xs font-normal text-destructive">
-                      <i className="fa-solid fa-triangle-exclamation mr-1" />
-                      Sin pago registrado
-                    </span>
-                  )}
-                </label>
+                <label className="block text-sm font-semibold text-foreground mb-1">Tipo de vehículo</label>
                 <select
-                  value={
-                    editingTicket._editPaymentMethod
-                    ?? editingTicket.payments?.[0]?.payment_method
-                    ?? "card"
-                  }
-                  onChange={(e) => setEditingTicket({ ...editingTicket, _editPaymentMethod: e.target.value })}
+                  value={editingTicket._editVehicleTypeId ?? editingTicket.vehicle_type_id ?? ""}
+                  onChange={(e) => setEditingTicket({ ...editingTicket, _editVehicleTypeId: Number(e.target.value) || null })}
                   className="input-touch w-full"
                 >
-                  <option value="cash">Efectivo</option>
-                  <option value="card">Tarjeta</option>
-                  <option value="transfer">Transferencia</option>
+                  <option value="">— Sin cambiar —</option>
+                  <option value={1}>Moto</option>
+                  <option value={2}>Sedán</option>
+                  <option value={3}>SUV</option>
+                  <option value={4}>Pick up</option>
+                  <option value={5}>Microbús</option>
+                  <option value={6}>Taxi</option>
                 </select>
-                {(!editingTicket.payments || editingTicket.payments.length === 0) && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Se creará el registro de pago al guardar.
-                  </p>
-                )}
               </div>
+
+              {(!editingTicket.payments || editingTicket.payments.length === 0) && (
+                <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-xs text-yellow-700">
+                  <i className="fa-solid fa-triangle-exclamation mr-1" />
+                  Este ticket no tiene pago registrado. Se creará uno nuevo al guardar.
+                </div>
+              )}
             </div>
+
             <div className="flex gap-2 mt-6">
               <button
                 onClick={() => setEditingTicket(null)}
@@ -624,8 +726,7 @@ export default function Reports() {
                 onClick={handleEditSave}
                 className="flex-1 py-3 rounded-xl bg-accent text-accent-foreground font-semibold hover:bg-accent/90 transition-colors"
               >
-                <i className="fa-solid fa-save mr-2" />
-                Guardar
+                <i className="fa-solid fa-save mr-2" />Guardar
               </button>
             </div>
           </div>
