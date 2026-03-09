@@ -56,6 +56,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   };
 
+  // ── Session restriction helpers ──────────────────
+  const registerSession = async (userId: string, token: string) => {
+    try {
+      // Upsert: if user already has a session, replace it (kicks out old device)
+      await (supabase as any)
+        .from("active_sessions")
+        .upsert(
+          {
+            user_id: userId,
+            session_token: token,
+            device_info: navigator.userAgent?.substring(0, 200) || "unknown",
+            created_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" }
+        );
+    } catch (e) {
+      console.warn("Could not register session:", e);
+    }
+  };
+
+  const validateSession = async (userId: string, token: string): Promise<boolean> => {
+    try {
+      const { data } = await (supabase as any)
+        .from("active_sessions")
+        .select("session_token")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (data && data.session_token !== token) {
+        // Another device took over — sign out
+        console.warn("Session invalidated: another device logged in.");
+        await supabase.auth.signOut();
+        setProfile(null);
+        setUser(null);
+        setSession(null);
+        alert("Tu sesión fue cerrada porque se inició sesión en otro dispositivo.");
+        return false;
+      }
+      return true;
+    } catch {
+      // Table might not exist yet — ignore
+      return true;
+    }
+  };
+
+  const removeSession = async (userId: string) => {
+    try {
+      await (supabase as any)
+        .from("active_sessions")
+        .delete()
+        .eq("user_id", userId);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
@@ -77,6 +133,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
+        // Validate that this session is still the active one
+        validateSession(session.user.id, session.access_token);
       } else {
         setLoading(false);
       }
@@ -86,7 +144,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (!error && data?.session) {
+      // Register this device as the active session (kicks out others)
+      await registerSession(data.session.user.id, data.session.access_token);
+    }
     return { error };
   };
 
@@ -105,6 +167,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    if (user) {
+      await removeSession(user.id);
+    }
     await supabase.auth.signOut();
     setProfile(null);
   };

@@ -4,11 +4,10 @@ import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import TicketPrint from "@/components/pos/TicketPrint";
-import { todayStartISO, formatTimeNI } from "@/utils/timezone";
+import { niStartOfDay, niFormatTime } from "@/utils/niDate";
 
 interface Stats {
   totalSalesNIO: number;
-  totalSalesUSD: number;
   payNIO: number;
   payUSD: number;
   ticketCount: number;
@@ -22,14 +21,14 @@ export default function Dashboard() {
   const { profile, isAdmin, isOwner } = useAuth();
   const canDelete = isAdmin || isOwner || profile?.role === "cajero";
 
-  const [stats, setStats] = useState<Stats>({ totalSalesNIO: 0, totalSalesUSD: 0, payNIO: 0, payUSD: 0, ticketCount: 0, topServices: [], topVehicles: [], recentTickets: [] });
+  const [stats, setStats] = useState<Stats>({ totalSalesNIO: 0, payNIO: 0, payUSD: 0, ticketCount: 0, topServices: [], topVehicles: [], recentTickets: [] });
   const [loading, setLoading] = useState(true);
   const [printTicket, setPrintTicket] = useState<any>(null);
   const [loadingPrint, setLoadingPrint] = useState<number | null>(null);
 
   const loadStats = async () => {
     setLoading(true);
-    const todayISO = todayStartISO();
+    const todayISO = niStartOfDay();
 
     // Fetch tickets with vehicle_types and payments
     const { data: tickets } = await supabase
@@ -50,34 +49,36 @@ export default function Dashboard() {
 
     const rate = settings?.exchange_rate || 36.5;
     let totalNIO = 0;
-    let pNIO = 0;
-    let pUSD = 0;
     const svcCount: Record<string, number> = {};
     const vehCount: Record<string, number> = {};
 
     tickets.forEach((t: any) => {
       totalNIO += Number(t.total);
 
-      // Payment currency breakdown
-      t.payments?.forEach((p: any) => {
-        if (p.currency === "USD") pUSD += Number(p.amount);
-        else pNIO += Number(p.amount);
-      });
-
+      // By vehicle
       const vn = (t.vehicle_types as any)?.name || "N/A";
       vehCount[vn] = (vehCount[vn] || 0) + 1;
     });
 
+    // By service from ticket_items
     ticketItems?.forEach((ti: any) => {
       const svcName = ti.services?.name || "Otro";
       svcCount[svcName] = (svcCount[svcName] || 0) + 1;
     });
 
+    // Payment currency breakdown
+    let payNIO = 0, payUSD = 0;
+    tickets.forEach((t: any) => {
+      t.payments?.forEach((p: any) => {
+        if (p.currency === "USD") payUSD += Number(p.amount);
+        else payNIO += Number(p.amount);
+      });
+    });
+
     setStats({
       totalSalesNIO: totalNIO,
-      totalSalesUSD: +(totalNIO / rate).toFixed(2),
-      payNIO: pNIO,
-      payUSD: pUSD,
+      payNIO,
+      payUSD,
       ticketCount: tickets.length,
       topServices: Object.entries(svcCount).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
       topVehicles: Object.entries(vehCount).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
@@ -185,7 +186,7 @@ export default function Dashboard() {
     return <div className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
   }
 
-  const formatTime = (iso: string) => formatTimeNI(iso);
+  const formatTime = (iso: string) => niFormatTime(iso);
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
@@ -201,7 +202,7 @@ export default function Dashboard() {
           <p className="text-3xl font-bold text-foreground">C${stats.totalSalesNIO.toFixed(0)}</p>
           <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
             {stats.payNIO > 0 && <p>NIO: C${stats.payNIO.toFixed(2)}</p>}
-            {stats.payUSD > 0 && <p className="text-green-500 font-semibold">+${stats.payUSD.toFixed(2)} USD</p>}
+            {stats.payUSD > 0 && <p className="text-green-500">+ USD: ${stats.payUSD.toFixed(2)}</p>}
           </div>
         </div>
         <div className="pos-card p-6 text-center">

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { printTicketBluetooth } from "@/utils/bluetoothPrinter";
+import { niFormatDate, niFormatTime } from "@/utils/niDate";
 
 interface Props {
   ticket: any;
@@ -77,8 +78,8 @@ export default function TicketPrint({ ticket, onClose }: Props) {
 
     // 3) Fecha/hora
     const dt = new Date(ticket.created_at || Date.now());
-    const dateStr = dt.toLocaleDateString("es-NI");
-    const timeStr = dt.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
+    const dateStr = niFormatDate(dt);
+    const timeStr = niFormatTime(dt);
 
     // 4) Texto (emojis OK) + separador "seguro"
     const businessName = ticket.settings?.business_name || "EL RAPIDO AUTOLAVADO";

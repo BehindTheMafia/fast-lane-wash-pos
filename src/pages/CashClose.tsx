@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
-import { todayStartISO, formatDateNI, formatTimeNI, NI_TIMEZONE } from "@/utils/timezone";
+import { niStartOfDay, niFormatTime, niFormatLongDate, niFormatShortDate } from "@/utils/niDate";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TicketDetail {
@@ -69,7 +69,7 @@ export default function CashClose() {
   };
 
   const loadDayStats = async () => {
-    const todayISO = todayStartISO();
+    const todayISO = niStartOfDay();
 
     const { data: payments } = await supabase
       .from("payments")
@@ -177,8 +177,7 @@ export default function CashClose() {
     const { data } = await supabase
       .from("cash_closures")
       .select("*")
-      .order("closed_at", { ascending: false })
-      .limit(8);
+      .order("closed_at", { ascending: false });
     if (data) setHistory(data);
   };
 
@@ -255,8 +254,8 @@ export default function CashClose() {
         ? "bg-blue-100 text-blue-700"
         : "bg-violet-100 text-violet-700";
 
-  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("es-NI", { day: "2-digit", month: "short" });
-  const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit", hour12: true });
+  const fmtDate = (iso: string) => niFormatShortDate(iso);
+  const fmtTime = (iso: string) => niFormatTime(iso);
 
   const toggleMethodFilter = (m: MethodFilter) => {
     setMethodFilter(methodFilter === m ? null : m);
@@ -281,7 +280,7 @@ export default function CashClose() {
             <span className="text-4xl">🏦</span> Cierre de Caja
           </h2>
           <p className="text-muted-foreground mt-1">
-            {new Date().toLocaleDateString("es-NI", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+            {niFormatLongDate()}
             {" · "}{profile?.full_name || "—"}
           </p>
         </div>
@@ -307,6 +306,7 @@ export default function CashClose() {
               {history.map((h: any) => {
                 const diff = Number(h.difference);
                 const cashNIO = Number(h.total_cash_nio || 0);
+                const cashUSD = Number(h.total_cash_usd || 0);
                 const card = Number(h.total_card || 0);
                 const transfer = Number(h.total_transfer || 0);
                 const totalDayH = cashNIO + card + transfer;
@@ -314,9 +314,9 @@ export default function CashClose() {
                   <div key={h.id} className="p-4 rounded-xl bg-background border border-border text-sm space-y-2">
                     <div className="flex items-center justify-between">
                       <p className="font-bold text-foreground">
-                        {new Date(h.closed_at).toLocaleDateString("es-NI", { day: "2-digit", month: "short", year: "numeric" })}
+                        {niFormatShortDate(h.closed_at)}
                         {" · "}
-                        {new Date(h.closed_at).toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                        {niFormatTime(h.closed_at)}
                       </p>
                       <span className={`text-sm font-black px-3 py-1 rounded-full ${Math.abs(diff) < 0.01
                         ? "bg-emerald-100 text-emerald-700"
@@ -329,6 +329,7 @@ export default function CashClose() {
                       <div className="text-center">
                         <p className="text-xs text-emerald-600 font-semibold"><i className="fa-solid fa-money-bills mr-1" />Efectivo</p>
                         <p className="font-black text-foreground">C${cashNIO.toFixed(0)}</p>
+                        {cashUSD > 0 && <p className="text-[10px] text-green-500">+${cashUSD.toFixed(2)} USD</p>}
                       </div>
                       <div className="text-center border-x border-border">
                         <p className="text-xs text-violet-600 font-semibold"><i className="fa-solid fa-building-columns mr-1" />Transfer.</p>
@@ -424,9 +425,9 @@ export default function CashClose() {
               <span className="font-bold text-foreground text-base">TOTAL GENERAL</span>
               {methodFilter === "all" && <i className="fa-solid fa-chevron-down text-xs text-foreground/60 ml-auto" />}
             </div>
-            <p className="text-4xl font-black text-foreground">C${(dayStats.cashNIO + dayStats.card + dayStats.transfer).toFixed(0)}</p>
+            <p className="text-4xl font-black text-foreground">C${totalDay.toFixed(0)}</p>
             <p className="text-xs text-muted-foreground mt-1">{dayStats.totalTickets} factura{dayStats.totalTickets !== 1 ? "s" : ""}</p>
-            {dayStats.cashUSD > 0 && <p className="text-xs text-green-500 font-semibold mt-0.5">+${dayStats.cashUSD.toFixed(2)} USD</p>}
+            {dayStats.cashUSD > 0 && <p className="text-xs text-green-500 mt-0.5">+ ${dayStats.cashUSD.toFixed(2)} USD</p>}
           </button>
         </div>
 
@@ -716,124 +717,130 @@ export default function CashClose() {
         CERRAR CAJA
       </button>
 
-      {!hasCounted && (
-        <p className="text-center text-muted-foreground text-sm -mt-4">
-          👆 Primero ingresa el efectivo contado
-        </p>
-      )}
+      {
+        !hasCounted && (
+          <p className="text-center text-muted-foreground text-sm -mt-4">
+            👆 Primero ingresa el efectivo contado
+          </p>
+        )
+      }
 
       {/* ─── CONFIRM MODAL ────────────────────────────────── */}
-      {showConfirm && (
-        <div className="modal-overlay" onClick={() => !saving && setShowConfirm(false)}>
-          <div className="modal-content animate-scale-in max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-2xl font-black text-foreground flex items-center gap-2">
-                <i className="fa-solid fa-vault text-secondary" /> Confirmar Cierre
-              </h2>
-              {!saving && (
-                <button onClick={() => setShowConfirm(false)} className="touch-btn p-2 text-muted-foreground">
-                  <i className="fa-solid fa-xmark text-xl" />
-                </button>
-              )}
-            </div>
-
-            <div className="space-y-3 mb-5">
-              <div className={`rounded-2xl p-4 text-center border-2 ${cuadra ? "bg-emerald-50 border-emerald-300" : sobra ? "bg-blue-50 border-blue-300" : "bg-red-50 border-red-300"}`}>
-                <p className="text-2xl mb-1">{cuadra ? "✅" : "⚠️"}</p>
-                <p className={`text-xl font-black ${cuadra ? "text-emerald-700" : sobra ? "text-blue-700" : "text-red-700"}`}>
-                  {cuadra ? "¡Cuadra!" : sobra ? `Sobra C$${difference.toFixed(2)}` : `Falta C$${Math.abs(difference).toFixed(2)}`}
-                </p>
+      {
+        showConfirm && (
+          <div className="modal-overlay" onClick={() => !saving && setShowConfirm(false)}>
+            <div className="modal-content animate-scale-in max-w-lg" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-2xl font-black text-foreground flex items-center gap-2">
+                  <i className="fa-solid fa-vault text-secondary" /> Confirmar Cierre
+                </h2>
+                {!saving && (
+                  <button onClick={() => setShowConfirm(false)} className="touch-btn p-2 text-muted-foreground">
+                    <i className="fa-solid fa-xmark text-xl" />
+                  </button>
+                )}
               </div>
 
-              <div className="pos-card p-4 space-y-3 text-sm">
-                <p className="font-bold text-foreground text-base">Resumen del cierre:</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="text-center p-3 rounded-xl bg-emerald-50 border border-emerald-200">
-                    <i className="fa-solid fa-money-bills text-emerald-600 text-lg mb-1 block" />
-                    <p className="text-xs text-emerald-600 font-semibold">Efectivo</p>
-                    <p className="font-black text-emerald-700">C${dayStats.cashNIO.toFixed(0)}</p>
-                  </div>
-                  <div className="text-center p-3 rounded-xl bg-violet-50 border border-violet-200">
-                    <i className="fa-solid fa-building-columns text-violet-600 text-lg mb-1 block" />
-                    <p className="text-xs text-violet-600 font-semibold">Transfer.</p>
-                    <p className="font-black text-violet-700">C${dayStats.transfer.toFixed(0)}</p>
-                  </div>
-                  <div className="text-center p-3 rounded-xl bg-blue-50 border border-blue-200">
-                    <i className="fa-solid fa-credit-card text-blue-600 text-lg mb-1 block" />
-                    <p className="text-xs text-blue-600 font-semibold">Tarjeta</p>
-                    <p className="font-black text-blue-700">C${dayStats.card.toFixed(0)}</p>
-                  </div>
+              <div className="space-y-3 mb-5">
+                <div className={`rounded-2xl p-4 text-center border-2 ${cuadra ? "bg-emerald-50 border-emerald-300" : sobra ? "bg-blue-50 border-blue-300" : "bg-red-50 border-red-300"}`}>
+                  <p className="text-2xl mb-1">{cuadra ? "✅" : "⚠️"}</p>
+                  <p className={`text-xl font-black ${cuadra ? "text-emerald-700" : sobra ? "text-blue-700" : "text-red-700"}`}>
+                    {cuadra ? "¡Cuadra!" : sobra ? `Sobra C$${difference.toFixed(2)}` : `Falta C$${Math.abs(difference).toFixed(2)}`}
+                  </p>
                 </div>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Ventas en efectivo:</span>
-                    <span className="font-semibold">C${dayStats.cashNIO.toFixed(2)}</span>
+
+                <div className="pos-card p-4 space-y-3 text-sm">
+                  <p className="font-bold text-foreground text-base">Resumen del cierre:</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="text-center p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                      <i className="fa-solid fa-money-bills text-emerald-600 text-lg mb-1 block" />
+                      <p className="text-xs text-emerald-600 font-semibold">Efectivo</p>
+                      <p className="font-black text-emerald-700">C${dayStats.cashNIO.toFixed(0)}</p>
+                    </div>
+                    <div className="text-center p-3 rounded-xl bg-violet-50 border border-violet-200">
+                      <i className="fa-solid fa-building-columns text-violet-600 text-lg mb-1 block" />
+                      <p className="text-xs text-violet-600 font-semibold">Transfer.</p>
+                      <p className="font-black text-violet-700">C${dayStats.transfer.toFixed(0)}</p>
+                    </div>
+                    <div className="text-center p-3 rounded-xl bg-blue-50 border border-blue-200">
+                      <i className="fa-solid fa-credit-card text-blue-600 text-lg mb-1 block" />
+                      <p className="text-xs text-blue-600 font-semibold">Tarjeta</p>
+                      <p className="font-black text-blue-700">C${dayStats.card.toFixed(0)}</p>
+                    </div>
                   </div>
-                  {totalEgresos > 0 && (
+                  <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Egresos / Retiros:</span>
-                      <span className="font-semibold text-destructive">− C${totalEgresos.toFixed(2)}</span>
+                      <span className="text-muted-foreground">Ventas en efectivo:</span>
+                      <span className="font-semibold">C${dayStats.cashNIO.toFixed(2)}</span>
+                    </div>
+                    {totalEgresos > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Egresos / Retiros:</span>
+                        <span className="font-semibold text-destructive">− C${totalEgresos.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between pt-1 border-t border-border">
+                      <span className="text-muted-foreground">Efectivo esperado:</span>
+                      <span className="font-semibold">C${expectedCash.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Efectivo contado:</span>
+                      <span className="font-semibold">C${counted.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-black text-base pt-1 border-t border-border">
+                      <span>Diferencia:</span>
+                      <span className={cuadra ? "text-emerald-600" : sobra ? "text-blue-600" : "text-destructive"}>
+                        {difference >= 0 ? "+" : ""}C${difference.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                  {note && (
+                    <div className="text-xs pt-1 border-t border-border">
+                      <span className="text-muted-foreground">Nota: </span>
+                      <span className="text-foreground">{note}</span>
                     </div>
                   )}
-                  <div className="flex justify-between pt-1 border-t border-border">
-                    <span className="text-muted-foreground">Efectivo esperado:</span>
-                    <span className="font-semibold">C${expectedCash.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Efectivo contado:</span>
-                    <span className="font-semibold">C${counted.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between font-black text-base pt-1 border-t border-border">
-                    <span>Diferencia:</span>
-                    <span className={cuadra ? "text-emerald-600" : sobra ? "text-blue-600" : "text-destructive"}>
-                      {difference >= 0 ? "+" : ""}C${difference.toFixed(2)}
-                    </span>
-                  </div>
                 </div>
-                {note && (
-                  <div className="text-xs pt-1 border-t border-border">
-                    <span className="text-muted-foreground">Nota: </span>
-                    <span className="text-foreground">{note}</span>
-                  </div>
-                )}
+
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-200">
+                  <i className="fa-solid fa-triangle-exclamation mr-2" />
+                  Una vez guardado, el cierre <strong>no puede modificarse</strong>.
+                </div>
               </div>
 
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-200">
-                <i className="fa-solid fa-triangle-exclamation mr-2" />
-                Una vez guardado, el cierre <strong>no puede modificarse</strong>.
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowConfirm(false)}
+                  disabled={saving}
+                  className="touch-btn flex-1 py-4 rounded-2xl border-2 border-border text-foreground font-bold text-base disabled:opacity-50"
+                >
+                  <i className="fa-solid fa-arrow-left mr-2" /> Revisar
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="flex-1 py-4 rounded-2xl bg-accent text-accent-foreground font-black text-base disabled:opacity-70 flex items-center justify-center gap-2 transition-all hover:bg-accent/90"
+                >
+                  {saving ? (
+                    <><i className="fa-solid fa-spinner fa-spin" /> Guardando...</>
+                  ) : (
+                    <><i className="fa-solid fa-check" /> SÍ, CERRAR CAJA</>
+                  )}
+                </button>
               </div>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowConfirm(false)}
-                disabled={saving}
-                className="touch-btn flex-1 py-4 rounded-2xl border-2 border-border text-foreground font-bold text-base disabled:opacity-50"
-              >
-                <i className="fa-solid fa-arrow-left mr-2" /> Revisar
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex-1 py-4 rounded-2xl bg-accent text-accent-foreground font-black text-base disabled:opacity-70 flex items-center justify-center gap-2 transition-all hover:bg-accent/90"
-              >
-                {saving ? (
-                  <><i className="fa-solid fa-spinner fa-spin" /> Guardando...</>
-                ) : (
-                  <><i className="fa-solid fa-check" /> SÍ, CERRAR CAJA</>
-                )}
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       {/* ─── TOAST ────────────────────────────────────────── */}
-      {toast && (
-        <div className={toast.type === "success" ? "toast-success" : "toast-error"}>
-          {toast.msg}
-        </div>
-      )}
-    </div>
+      {
+        toast && (
+          <div className={toast.type === "success" ? "toast-success" : "toast-error"}>
+            {toast.msg}
+          </div>
+        )
+      }
+    </div >
   );
 }
