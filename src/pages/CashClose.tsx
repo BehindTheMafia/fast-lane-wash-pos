@@ -152,7 +152,7 @@ export default function CashClose() {
       }
 
       if (p.payment_method === "cash") {
-        if (p.currency === "USD") cashUSD += Number(p.amount);
+        if (p.currency === "USD") { cashUSD += Number(p.amount); cashTickets++; }
         else { cashNIO += Number(p.amount); cashTickets++; }
       } else if (p.payment_method === "card") {
         card += Number(p.amount); cardTickets++;
@@ -183,15 +183,17 @@ export default function CashClose() {
   };
 
   // ── Calculations ──────────────────────────────── 
+  const rate = settings?.exchange_rate || 36.5;
+  const cashUSDinNIO = dayStats.cashUSD * rate;   // USD convertido a NIO
   const totalEgresos = egresos.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const expectedCash = dayStats.cashNIO - totalEgresos;
+  const expectedCash = dayStats.cashNIO + cashUSDinNIO - totalEgresos;
   const counted = parseFloat(cashCounted) || 0;
   const difference = counted - expectedCash;
   const hasCounted = cashCounted.trim() !== "";
   const cuadra = hasCounted && Math.abs(difference) < 0.01;
   const sobra = hasCounted && difference > 0.01;
   const falta = hasCounted && difference < -0.01;
-  const totalDay = dayStats.cashNIO + dayStats.card + dayStats.transfer;
+  const totalDay = dayStats.cashNIO + cashUSDinNIO + dayStats.card + dayStats.transfer;
 
   // ── Save ───────────────────────────────────────
   const showToast = (msg: string, type: "success" | "error" = "success") => {
