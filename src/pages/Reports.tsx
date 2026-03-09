@@ -2,25 +2,14 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import TicketPrint from "@/components/pos/TicketPrint";
+import { todayNI, formatDateNI, formatTimeNI } from "@/utils/timezone";
 
 const methodLabels: Record<string, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia", mixed: "Mixto" };
 
 export default function Reports() {
   const { data: settings } = useBusinessSettings();
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  });
-  const [dateTo, setDateTo] = useState(() => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  });
+  const [dateFrom, setDateFrom] = useState(() => todayNI());
+  const [dateTo, setDateTo] = useState(() => todayNI());
   const [tickets, setTickets] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
@@ -365,15 +354,8 @@ export default function Reports() {
     return name.includes(searchTerm.toLowerCase());
   });
 
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleDateString("es-NI", { day: "2-digit", month: "2-digit", year: "numeric" });
-  };
-
-  const formatTime = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit", hour12: true });
-  };
+  const formatDate = (iso: string) => formatDateNI(iso);
+  const formatTime = (iso: string) => formatTimeNI(iso);
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
@@ -555,7 +537,15 @@ export default function Reports() {
                           </div>
                         </td>
                         <td className="px-4 py-3 text-foreground">{cashierName}</td>
-                        <td className="px-4 py-3 text-right font-bold text-primary whitespace-nowrap">C${Number(t.total).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-bold whitespace-nowrap">
+                          {(() => {
+                            const hasPay = t.payments?.length > 0;
+                            const isUSD = hasPay && t.payments[0].currency === "USD";
+                            return isUSD
+                              ? <span className="text-green-600">${Number(t.payments[0].amount).toFixed(2)}</span>
+                              : <span className="text-primary">C${Number(t.total).toFixed(2)}</span>;
+                          })()}
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-center gap-2">
                             <button
@@ -589,7 +579,12 @@ export default function Reports() {
                   <tfoot>
                     <tr className="bg-muted/50 border-t-2 border-border">
                       <td colSpan={9} className="px-4 py-3 font-bold text-foreground text-right">TOTAL:</td>
-                      <td className="px-4 py-3 text-right font-bold text-primary text-lg">C${totalNIO.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-primary text-lg">
+                        C${payTotalNIO.toFixed(2)}
+                        {payTotalUSD > 0 && (
+                          <span className="block text-sm text-green-500 font-semibold">+${payTotalUSD.toFixed(2)} USD</span>
+                        )}
+                      </td>
                       <td></td>
                     </tr>
                   </tfoot>

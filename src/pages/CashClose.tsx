@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
+import { todayStartISO, formatDateNI, formatTimeNI, NI_TIMEZONE } from "@/utils/timezone";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TicketDetail {
@@ -68,8 +69,7 @@ export default function CashClose() {
   };
 
   const loadDayStats = async () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayISO = todayStartISO();
 
     const { data: payments } = await supabase
       .from("payments")
@@ -81,7 +81,7 @@ export default function CashClose() {
           ticket_items(services(name))
         )
       `)
-      .gte("created_at", today.toISOString());
+      .gte("created_at", todayISO);
 
     if (!payments) return;
 
@@ -424,8 +424,9 @@ export default function CashClose() {
               <span className="font-bold text-foreground text-base">TOTAL GENERAL</span>
               {methodFilter === "all" && <i className="fa-solid fa-chevron-down text-xs text-foreground/60 ml-auto" />}
             </div>
-            <p className="text-4xl font-black text-foreground">C${totalDay.toFixed(0)}</p>
+            <p className="text-4xl font-black text-foreground">C${(dayStats.cashNIO + dayStats.card + dayStats.transfer).toFixed(0)}</p>
             <p className="text-xs text-muted-foreground mt-1">{dayStats.totalTickets} factura{dayStats.totalTickets !== 1 ? "s" : ""}</p>
+            {dayStats.cashUSD > 0 && <p className="text-xs text-green-500 font-semibold mt-0.5">+${dayStats.cashUSD.toFixed(2)} USD</p>}
           </button>
         </div>
 

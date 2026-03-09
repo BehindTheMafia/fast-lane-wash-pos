@@ -4,10 +4,13 @@ import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import TicketPrint from "@/components/pos/TicketPrint";
+import { todayStartISO, formatTimeNI } from "@/utils/timezone";
 
 interface Stats {
   totalSalesNIO: number;
   totalSalesUSD: number;
+  payNIO: number;
+  payUSD: number;
   ticketCount: number;
   topServices: { name: string; count: number }[];
   topVehicles: { type: string; count: number }[];
@@ -19,21 +22,20 @@ export default function Dashboard() {
   const { profile, isAdmin, isOwner } = useAuth();
   const canDelete = isAdmin || isOwner || profile?.role === "cajero";
 
-  const [stats, setStats] = useState<Stats>({ totalSalesNIO: 0, totalSalesUSD: 0, ticketCount: 0, topServices: [], topVehicles: [], recentTickets: [] });
+  const [stats, setStats] = useState<Stats>({ totalSalesNIO: 0, totalSalesUSD: 0, payNIO: 0, payUSD: 0, ticketCount: 0, topServices: [], topVehicles: [], recentTickets: [] });
   const [loading, setLoading] = useState(true);
   const [printTicket, setPrintTicket] = useState<any>(null);
   const [loadingPrint, setLoadingPrint] = useState<number | null>(null);
 
   const loadStats = async () => {
     setLoading(true);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayISO = todayStartISO();
 
     // Fetch tickets with vehicle_types and payments
     const { data: tickets } = await supabase
       .from("tickets")
       .select("*, vehicle_types(name), payments(*)")
-      .gte("created_at", today.toISOString())
+      .gte("created_at", todayISO)
       .eq("status", "paid")
       .order("created_at", { ascending: false });
 
@@ -41,25 +43,31 @@ export default function Dashboard() {
     const { data: ticketItems } = await (supabase as any)
       .from("ticket_items")
       .select("*, services(name), tickets(created_at, status)")
-      .gte("tickets.created_at", today.toISOString())
+      .gte("tickets.created_at", todayISO)
       .eq("tickets.status", "paid");
 
     if (!tickets) { setLoading(false); return; }
 
     const rate = settings?.exchange_rate || 36.5;
     let totalNIO = 0;
+    let pNIO = 0;
+    let pUSD = 0;
     const svcCount: Record<string, number> = {};
     const vehCount: Record<string, number> = {};
 
     tickets.forEach((t: any) => {
       totalNIO += Number(t.total);
 
-      // By vehicle
+      // Payment currency breakdown
+      t.payments?.forEach((p: any) => {
+        if (p.currency === "USD") pUSD += Number(p.amount);
+        else pNIO += Number(p.amount);
+      });
+
       const vn = (t.vehicle_types as any)?.name || "N/A";
       vehCount[vn] = (vehCount[vn] || 0) + 1;
     });
 
-    // By service from ticket_items
     ticketItems?.forEach((ti: any) => {
       const svcName = ti.services?.name || "Otro";
       svcCount[svcName] = (svcCount[svcName] || 0) + 1;
@@ -68,6 +76,8 @@ export default function Dashboard() {
     setStats({
       totalSalesNIO: totalNIO,
       totalSalesUSD: +(totalNIO / rate).toFixed(2),
+      payNIO: pNIO,
+      payUSD: pUSD,
       ticketCount: tickets.length,
       topServices: Object.entries(svcCount).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
       topVehicles: Object.entries(vehCount).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
@@ -175,10 +185,7 @@ export default function Dashboard() {
     return <div className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
   }
 
-  const formatTime = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit", hour12: true });
-  };
+  const formatTime = (iso: string) => formatTimeNI(iso);
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
@@ -192,7 +199,10 @@ export default function Dashboard() {
           <i className="fa-solid fa-money-bill-trend-up text-3xl text-primary mb-2" />
           <p className="text-sm text-secondary">Ventas del día</p>
           <p className="text-3xl font-bold text-foreground">C${stats.totalSalesNIO.toFixed(0)}</p>
-          <p className="text-sm text-muted-foreground">~${stats.totalSalesUSD.toFixed(2)} USD</p>
+          <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+            {stats.payNIO > 0 && <p>NIO: C${stats.payNIO.toFixed(2)}</p>}
+            {stats.payUSD > 0 && <p className="text-green-500 font-semibold">+${stats.payUSD.toFixed(2)} USD</p>}
+          </div>
         </div>
         <div className="pos-card p-6 text-center">
           <i className="fa-solid fa-ticket text-3xl text-secondary mb-2" />
