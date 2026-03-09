@@ -145,10 +145,10 @@ export default function Reports() {
       const { error: ticketErr } = await supabase
         .from("tickets")
         .update({
-          vehicle_plate: editingTicket.vehicle_plate,
+          plate: editingTicket.vehicle_plate || editingTicket.plate, // Fix: use 'plate' instead of 'vehicle_plate'
           total: Number(editingTicket.total),
           customer_id: editingTicket._editCustomerId ?? editingTicket.customer_id,
-          vehicle_type_id: editingTicket._editVehicleTypeId ?? editingTicket.vehicle_type_id,
+          vehicle_type: editingTicket._editVehicleTypeId ?? editingTicket.vehicle_type, // Fix: use 'vehicle_type' instead of 'vehicle_type_id'
         })
         .eq("id", editingTicket.id);
 
@@ -156,17 +156,22 @@ export default function Reports() {
 
       // 2. Update ticket_item service if changed
       if (editingTicket._editServiceId && editingTicket.ticket_items?.length > 0) {
+        // Find the first service item and update it
+        const itemId = editingTicket.ticket_items[0].id;
         await supabase
           .from("ticket_items")
-          .update({ service_id: editingTicket._editServiceId, price: Number(editingTicket.total) })
-          .eq("id", editingTicket.ticket_items[0].id);
+          .update({
+            service_id: editingTicket._editServiceId,
+            price: Number(editingTicket.total)
+          })
+          .eq("id", itemId);
       }
 
       const method = editingTicket._editPaymentMethod ?? editingTicket.payments?.[0]?.payment_method ?? "cash";
       const currency = editingTicket._editCurrency ?? editingTicket.payments?.[0]?.currency ?? "NIO";
       const amount = Number(editingTicket.total);
 
-      // We use ticket_id to ensure we update the correct associated payment
+      // We use ticket_id to ensure we update the correct associated payment record
       if (!editingTicket.payments || editingTicket.payments.length === 0) {
         const { error: payErr } = await supabase.from("payments").insert({
           ticket_id: editingTicket.id,
@@ -189,7 +194,7 @@ export default function Reports() {
             change_amount: 0,
             exchange_rate: exRate,
           })
-          .eq("ticket_id", editingTicket.id); // Fixed: using ticket_id instead of payments[0].id
+          .eq("ticket_id", editingTicket.id);
         if (payErr) throw payErr;
       }
 
@@ -200,7 +205,7 @@ export default function Reports() {
       console.error("Error in handleEditSave:", err);
       let errMsg = err.message || JSON.stringify(err);
       if (errMsg.includes("permission denied") || errMsg.includes("403") || errMsg.includes("row-level security")) {
-        errMsg = "Error de permisos: El usuario no tiene autorización para editar este pago o ticket (RLS). Favor contactar al administrador.";
+        errMsg = "Error de permisos (RLS): El usuario no tiene autorización para editar este pago o ticket. Favor contactar al administrador para habilitar las políticas de edición.";
       }
       showToast("Error al actualizar ticket: " + errMsg);
     }
