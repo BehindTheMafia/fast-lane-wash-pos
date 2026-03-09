@@ -141,15 +141,6 @@ export default function Reports() {
     if (!editingTicket) return;
     const exRate = settings?.exchange_rate || 36.5;
     try {
-      console.log("Saving edit for ticket:", editingTicket.id);
-      console.log("Draft state:", {
-        vehicle_plate: editingTicket.vehicle_plate,
-        total: editingTicket.total,
-        _editCurrency: editingTicket._editCurrency,
-        _editPaymentMethod: editingTicket._editPaymentMethod,
-        existingPayments: editingTicket.payments
-      });
-
       // 1. Update ticket fields
       const { error: ticketErr } = await supabase
         .from("tickets")
@@ -161,28 +152,22 @@ export default function Reports() {
         })
         .eq("id", editingTicket.id);
 
-      if (ticketErr) {
-        console.error("Error updating ticket:", ticketErr);
-        throw ticketErr;
-      }
+      if (ticketErr) throw ticketErr;
 
       // 2. Update ticket_item service if changed
       if (editingTicket._editServiceId && editingTicket.ticket_items?.length > 0) {
-        const { error: itemErr } = await supabase
+        await supabase
           .from("ticket_items")
           .update({ service_id: editingTicket._editServiceId, price: Number(editingTicket.total) })
           .eq("id", editingTicket.ticket_items[0].id);
-        if (itemErr) console.error("Error updating ticket_item:", itemErr);
       }
 
       const method = editingTicket._editPaymentMethod ?? editingTicket.payments?.[0]?.payment_method ?? "cash";
       const currency = editingTicket._editCurrency ?? editingTicket.payments?.[0]?.currency ?? "NIO";
       const amount = Number(editingTicket.total);
 
-      console.log("Calculated payment data:", { method, currency, amount });
-
+      // We use ticket_id to ensure we update the correct associated payment
       if (!editingTicket.payments || editingTicket.payments.length === 0) {
-        console.log("No payments found, performing INSERT...");
         const { error: payErr } = await supabase.from("payments").insert({
           ticket_id: editingTicket.id,
           amount,
@@ -192,12 +177,8 @@ export default function Reports() {
           change_amount: 0,
           exchange_rate: exRate,
         } as any);
-        if (payErr) {
-          console.error("Error inserting payment:", payErr);
-          throw payErr;
-        }
+        if (payErr) throw payErr;
       } else {
-        console.log("Payment found, performing UPDATE for ID:", editingTicket.payments[0].id);
         const { error: payErr } = await supabase
           .from("payments")
           .update({
@@ -208,11 +189,8 @@ export default function Reports() {
             change_amount: 0,
             exchange_rate: exRate,
           })
-          .eq("id", editingTicket.payments[0].id);
-        if (payErr) {
-          console.error("Error updating payment:", payErr);
-          throw payErr;
-        }
+          .eq("ticket_id", editingTicket.id); // Fixed: using ticket_id instead of payments[0].id
+        if (payErr) throw payErr;
       }
 
       showToast("Ticket actualizado correctamente");
