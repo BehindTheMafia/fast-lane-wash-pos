@@ -209,7 +209,12 @@ export default function Reports() {
       setEditingTicket(null);
       loadReport();
     } catch (err: any) {
-      showToast("Error al actualizar ticket: " + (err.message || JSON.stringify(err)));
+      console.error("Error in handleEditSave:", err);
+      let errMsg = err.message || JSON.stringify(err);
+      if (errMsg.includes("permission denied") || errMsg.includes("403") || errMsg.includes("row-level security")) {
+        errMsg = "Error de permisos: El usuario no tiene autorización para editar este pago o ticket (RLS). Favor contactar al administrador.";
+      }
+      showToast("Error al actualizar ticket: " + errMsg);
     }
   };
 
