@@ -303,6 +303,19 @@ export default function Reports() {
   const rate = settings?.exchange_rate || 36.5;
   const totalNIO = tickets.reduce((s, t) => s + Number(t.total), 0);
 
+  // Calculate actual payment totals by currency
+  let payTotalNIO = 0;
+  let payTotalUSD = 0;
+  tickets.forEach((t: any) => {
+    t.payments?.forEach((p: any) => {
+      if (p.currency === "USD") {
+        payTotalUSD += Number(p.amount);
+      } else {
+        payTotalNIO += Number(p.amount);
+      }
+    });
+  });
+
   // Membership-specific metrics
   const membershipSalesTotal = tickets
     .filter((t: any) => t.is_membership_sale)
@@ -392,7 +405,10 @@ export default function Reports() {
             <div className="pos-card p-6 text-center">
               <p className="text-sm text-secondary">Total ventas</p>
               <p className="text-2xl font-bold text-foreground">C${totalNIO.toFixed(2)}</p>
-              <p className="text-sm text-muted-foreground">~${(totalNIO / rate).toFixed(2)} USD</p>
+              <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                {payTotalNIO > 0 && <p>NIO: C${payTotalNIO.toFixed(2)}</p>}
+                {payTotalUSD > 0 && <p className="text-green-500">+ USD: ${payTotalUSD.toFixed(2)}</p>}
+              </div>
             </div>
             <div className="pos-card p-6 text-center">
               <p className="text-sm text-secondary">Ventas Membresías</p>
@@ -531,15 +547,10 @@ export default function Reports() {
                         <td className="px-4 py-3">
                           <div className="flex flex-col gap-1">
                             {t.payments?.map((p: any, pi: number) => (
-                              <div key={pi} className="flex items-center gap-1">
-                                <span className="px-2 py-0.5 rounded-full text-xs bg-accent/20 text-accent whitespace-nowrap">
-                                  {methodLabels[p.payment_method] || p.payment_method}
-                                </span>
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${p.currency === "USD" ? "bg-green-500/20 text-green-600" : "bg-blue-500/20 text-blue-600"
-                                  }`}>
-                                  {p.currency === "USD" ? `$${Number(p.amount).toFixed(2)} USD` : `C$${Number(p.amount).toFixed(2)}`}
-                                </span>
-                              </div>
+                              <span key={pi} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${p.currency === "USD" ? "bg-green-500/20 text-green-600" : "bg-accent/20 text-accent"}`}>
+                                {methodLabels[p.payment_method] || p.payment_method}
+                                <span className="font-bold">· {p.currency || "NIO"}</span>
+                              </span>
                             )) || <span className="text-muted-foreground text-xs">—</span>}
                           </div>
                         </td>
