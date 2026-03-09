@@ -143,7 +143,7 @@ export default function Reports() {
 
     try {
       // 1. Update ticket fields
-      await supabase
+      const { error: ticketErr } = await supabase
         .from("tickets")
         .update({
           vehicle_plate: editingTicket.vehicle_plate,
@@ -153,51 +153,63 @@ export default function Reports() {
         })
         .eq("id", editingTicket.id);
 
+      if (ticketErr) {
+        console.error("Error updating ticket:", ticketErr);
+        throw ticketErr;
+      }
+
       // 2. Update ticket_item service if changed
       if (editingTicket._editServiceId && editingTicket.ticket_items?.length > 0) {
-        await supabase
+        const { error: itemErr } = await supabase
           .from("ticket_items")
           .update({ service_id: editingTicket._editServiceId, price: Number(editingTicket.total) })
           .eq("id", editingTicket.ticket_items[0].id);
+        if (itemErr) console.error("Error updating ticket_item:", itemErr);
       }
 
       const method = editingTicket._editPaymentMethod ?? editingTicket.payments?.[0]?.payment_method ?? "cash";
       const currency = editingTicket._editCurrency ?? editingTicket.payments?.[0]?.currency ?? "NIO";
       const amount = Number(editingTicket.total);
-      // Amount received: if USD, convert total NIO to USD for display
-      const amountReceived = currency === "USD" ? +(amount / exRate).toFixed(2) : amount;
 
       if (!editingTicket.payments || editingTicket.payments.length === 0) {
         // No payment → INSERT
-        await supabase.from("payments").insert({
+        const { error: payErr } = await supabase.from("payments").insert({
           ticket_id: editingTicket.id,
-          amount: currency === "USD" ? +(amount / exRate).toFixed(2) : amount,
+          amount,
           currency,
           payment_method: method,
-          amount_received: amountReceived,
+          amount_received: amount,
           change_amount: 0,
           exchange_rate: exRate,
         } as any);
+        if (payErr) {
+          console.error("Error inserting payment:", payErr);
+          throw payErr;
+        }
       } else {
         // Has payment → UPDATE
-        await supabase
+        const { error: payErr } = await supabase
           .from("payments")
           .update({
-            amount: currency === "USD" ? +(amount / exRate).toFixed(2) : amount,
+            amount,
             currency,
             payment_method: method,
-            amount_received: amountReceived,
+            amount_received: amount,
             change_amount: 0,
             exchange_rate: exRate,
           })
           .eq("id", editingTicket.payments[0].id);
+        if (payErr) {
+          console.error("Error updating payment:", payErr);
+          throw payErr;
+        }
       }
 
       showToast("Ticket actualizado correctamente");
       setEditingTicket(null);
       loadReport();
     } catch (err: any) {
-      showToast("Error al actualizar ticket: " + err.message);
+      showToast("Error al actualizar ticket: " + (err.message || JSON.stringify(err)));
     }
   };
 
@@ -290,6 +302,7 @@ export default function Reports() {
 
 
   const rate = settings?.exchange_rate || 36.5;
+  const totalNIO = tickets.reduce((s, t) => s + Number(t.total), 0);
 
   // Calculate actual payment totals by currency
   let payTotalNIO = 0;
@@ -297,16 +310,12 @@ export default function Reports() {
   tickets.forEach((t: any) => {
     t.payments?.forEach((p: any) => {
       if (p.currency === "USD") {
-        // amount_received stores the actual USD amount entered by cashier
-        payTotalUSD += Number(p.amount_received || 0);
+        payTotalUSD += Number(p.amount);
       } else {
         payTotalNIO += Number(p.amount);
       }
     });
   });
-
-  // True total in NIO: NIO payments + USD converted at exchange rate
-  const totalNIO = payTotalNIO + payTotalUSD * rate;
 
   // Membership-specific metrics
   const membershipSalesTotal = tickets
@@ -324,32 +333,25 @@ export default function Reports() {
   const cashBreakdown = { nio: 0, usd: 0 };
 
   tickets.forEach((t: any) => {
-    // By service from ticket_items — use NIO-equivalent for USD tickets
-    const ticketNIOValue = t.payments?.[0]?.currency === "USD"
-      ? Number(t.payments[0].amount_received || 0) * (Number(t.payments[0].exchange_rate) || rate)
-      : Number(t.total);
-
+    // By service from ticket_items
     t.ticket_items?.forEach((ti: any) => {
       const sn = ti.services?.name || "Otro";
       byService[sn] = byService[sn] || { count: 0, total: 0 };
       byService[sn].count++;
-      byService[sn].total += ticketNIOValue;
+      byService[sn].total += Number(ti.price);
     });
 
     // By vehicle
     const vn = (t.vehicle_types as any)?.name || "N/A";
     byVehicle[vn] = byVehicle[vn] || { count: 0, total: 0 };
     byVehicle[vn].count++;
-    byVehicle[vn].total += ticketNIOValue;
+    byVehicle[vn].total += Number(t.total);
 
     // By method with currency awareness
     t.payments?.forEach((p: any) => {
-      let amountNIO = Number(p.amount);
+      const amountNIO = Number(p.amount);
       if (p.currency === "USD") {
-        const paymentRate = Number(p.exchange_rate) || rate;
-        const usdAmount = Number(p.amount_received || 0);
-        amountNIO = usdAmount * paymentRate;
-        if (p.payment_method === "cash") cashBreakdown.usd += Number(p.amount_received || 0);
+        if (p.payment_method === "cash") cashBreakdown.usd += Number(p.amount);
       } else {
         if (p.payment_method === "cash") cashBreakdown.nio += Number(p.amount);
       }

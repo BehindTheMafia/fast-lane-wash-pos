@@ -201,7 +201,8 @@ export default function CashClose() {
   const cuadra = hasCounted && Math.abs(difference) < 0.01;
   const sobra = hasCounted && difference > 0.01;
   const falta = hasCounted && difference < -0.01;
-  const totalDay = dayStats.cashNIO + cashUSDinNIO + dayStats.card + dayStats.transfer;
+  const totalUSD = dayStats.cashUSD + dayStats.cardUSD + dayStats.transferUSD;
+  const totalDay = dayStats.cashNIO + dayStats.cashUSD + dayStats.card + dayStats.cardUSD + dayStats.transfer + dayStats.transferUSD;
 
   // ── Save ───────────────────────────────────────
   const showToast = (msg: string, type: "success" | "error" = "success") => {
@@ -439,7 +440,7 @@ export default function CashClose() {
             </div>
             <p className="text-4xl font-black text-foreground">C${totalDay.toFixed(0)}</p>
             <p className="text-xs text-muted-foreground mt-1">{dayStats.totalTickets} factura{dayStats.totalTickets !== 1 ? "s" : ""}</p>
-            {dayStats.cashUSD > 0 && <p className="text-xs text-green-500 mt-0.5">+ ${dayStats.cashUSD.toFixed(2)} USD</p>}
+            {totalUSD > 0 && <p className="text-xs text-green-500 mt-0.5">+ ${totalUSD.toFixed(2)} USD</p>}
           </button>
         </div>
 
