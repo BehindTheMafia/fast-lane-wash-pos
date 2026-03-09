@@ -302,7 +302,6 @@ export default function Reports() {
 
 
   const rate = settings?.exchange_rate || 36.5;
-  const totalNIO = tickets.reduce((s, t) => s + Number(t.total), 0);
 
   // Calculate actual payment totals by currency
   let payTotalNIO = 0;
@@ -316,6 +315,8 @@ export default function Reports() {
       }
     });
   });
+
+  const totalNIO = payTotalNIO + (payTotalUSD * rate);
 
   // Membership-specific metrics
   const membershipSalesTotal = tickets
@@ -587,10 +588,22 @@ export default function Reports() {
                     <tr className="bg-muted/50 border-t-2 border-border">
                       <td colSpan={9} className="px-4 py-3 font-bold text-foreground text-right">TOTAL:</td>
                       <td className="px-4 py-3 text-right font-bold text-primary text-lg space-y-1">
-                        <div>C${payTotalNIO.toFixed(2)}</div>
-                        {payTotalUSD > 0 && (
-                          <div className="text-green-500 text-sm">+ ${payTotalUSD.toFixed(2)} USD</div>
-                        )}
+                        {(() => {
+                          let nio = 0, usd = 0;
+                          filteredTickets.forEach((t: any) => {
+                            const p = t.payments?.[0];
+                            if (p?.currency === "USD") usd += Number(t.total);
+                            else nio += Number(t.total);
+                          });
+                          return (
+                            <>
+                              <div>C${nio.toFixed(2)}</div>
+                              {usd > 0 && (
+                                <div className="text-green-500 text-sm">+ ${usd.toFixed(2)} USD</div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </td>
                       <td></td>
                     </tr>
