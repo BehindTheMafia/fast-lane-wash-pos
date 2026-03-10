@@ -22,11 +22,11 @@ export default function Reminders() {
         setLoading(true);
         const { data } = await supabase
             .from("customers")
-            .select("id, name, phone, plate, is_general, loyalty_last_visit")
+            .select("*")
             .eq("is_general", false)
             .order("loyalty_last_visit", { ascending: true });
 
-        setCustomers((data || []) as Customer[]);
+        setCustomers((data || []) as any[]);
         setLoading(false);
     };
 
@@ -60,22 +60,12 @@ export default function Reminders() {
 
     return (
         <div className="p-6 space-y-6 animate-fade-in">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <h2 className="text-2xl font-bold text-foreground">
-                    <i className="fa-solid fa-bell mr-3 text-secondary" />Recordatorios
-                </h2>
-                <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-                    <div className="relative w-full max-w-sm">
-                        <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                        <input
-                            type="text"
-                            placeholder="Buscar por nombre o teléfono..."
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            className="input-touch pl-11 w-full"
-                        />
-                    </div>
-                    <div className="flex bg-muted p-1 rounded-xl self-end md:self-auto">
+            <div className="flex flex-col gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <h2 className="text-2xl font-bold text-foreground">
+                        <i className="fa-solid fa-bell mr-3 text-secondary" />Recordatorios
+                    </h2>
+                    <div className="flex bg-muted p-1 rounded-xl w-fit">
                         <button
                             onClick={() => setFilterActive(true)}
                             className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${filterActive ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
@@ -89,6 +79,17 @@ export default function Reminders() {
                             Todos
                         </button>
                     </div>
+                </div>
+
+                <div className="relative w-full max-w-md">
+                    <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                        type="text"
+                        placeholder="Buscar por nombre o teléfono..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="input-touch pl-11 w-full"
+                    />
                 </div>
             </div>
 
