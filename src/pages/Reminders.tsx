@@ -16,6 +16,7 @@ export default function Reminders() {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [loading, setLoading] = useState(true);
     const [filterActive, setFilterActive] = useState(true);
+    const [search, setSearch] = useState("");
 
     const load = async () => {
         setLoading(true);
@@ -46,6 +47,12 @@ export default function Reminders() {
     };
 
     const filteredCustomers = customers.filter(c => {
+        const matchesSearch = !search.trim() ||
+            c.name.toLowerCase().includes(search.toLowerCase()) ||
+            (c.phone && c.phone.includes(search));
+
+        if (!matchesSearch) return false;
+
         if (!c.loyalty_last_visit) return !filterActive; // If no visit, only show in "All"
         const days = differenceInDays(new Date(), new Date(c.loyalty_last_visit));
         return filterActive ? days >= 15 : true;
@@ -57,19 +64,31 @@ export default function Reminders() {
                 <h2 className="text-2xl font-bold text-foreground">
                     <i className="fa-solid fa-bell mr-3 text-secondary" />Recordatorios
                 </h2>
-                <div className="flex bg-muted p-1 rounded-xl">
-                    <button
-                        onClick={() => setFilterActive(true)}
-                        className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${filterActive ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                        Inactivos (15+ días)
-                    </button>
-                    <button
-                        onClick={() => setFilterActive(false)}
-                        className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${!filterActive ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                        Todos
-                    </button>
+                <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+                    <div className="relative w-full max-w-sm">
+                        <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                            type="text"
+                            placeholder="Buscar por nombre o teléfono..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className="input-touch pl-11 w-full"
+                        />
+                    </div>
+                    <div className="flex bg-muted p-1 rounded-xl self-end md:self-auto">
+                        <button
+                            onClick={() => setFilterActive(true)}
+                            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${filterActive ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                        >
+                            Inactivos (15+ días)
+                        </button>
+                        <button
+                            onClick={() => setFilterActive(false)}
+                            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${!filterActive ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                        >
+                            Todos
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -114,8 +133,8 @@ export default function Reminders() {
                                                 disabled={!c.phone}
                                                 onClick={() => handleWhatsApp(c, days)}
                                                 className={`touch-btn inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${c.phone
-                                                        ? "bg-[#25D366] text-white hover:scale-105 active:scale-95 shadow-sm"
-                                                        : "bg-muted text-muted-foreground cursor-not-allowed"
+                                                    ? "bg-[#25D366] text-white hover:scale-105 active:scale-95 shadow-sm"
+                                                    : "bg-muted text-muted-foreground cursor-not-allowed"
                                                     }`}
                                             >
                                                 <i className="fa-brands fa-whatsapp text-sm" />
