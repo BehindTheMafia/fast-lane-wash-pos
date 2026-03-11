@@ -282,10 +282,10 @@ export default function Dashboard() {
                   <td className="px-4 py-3 text-foreground">{(t.vehicle_types as any)?.name || "—"}</td>
                   <td className="px-4 py-3 text-foreground font-mono">{t.vehicle_plate || "—"}</td>
                   <td className="px-4 py-3 text-right font-bold text-primary">
-                    {t.payments?.[0]?.currency === "USD"
-                      ? `$${Number(t.total).toFixed(2)}`
-                      : `C$${Number(t.total).toFixed(2)}`
-                    }
+                    <div>C${Number(t.total).toFixed(0)}</div>
+                    {t.payments?.[0]?.currency === "USD" && (
+                      <div className="text-xs font-normal text-green-500">USD: ${Number(t.payments[0].amount).toFixed(2)}</div>
+                    )}
                   </td>
                   {canDelete && (
                     <td className="px-4 py-3 text-center">

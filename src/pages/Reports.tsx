@@ -545,12 +545,10 @@ export default function Reports() {
                         </td>
                         <td className="px-4 py-3 text-foreground">{cashierName}</td>
                         <td className="px-4 py-3 text-right font-bold text-primary whitespace-nowrap">
-                          {(() => {
-                            const p = t.payments?.[0];
-                            const symbol = p?.currency === "USD" ? "$" : "C$";
-                            const amt = p ? Number(p.amount) : Number(t.total);
-                            return `${symbol}${amt.toFixed(2)}`;
-                          })()}
+                          <div>C${Number(t.total).toFixed(2)}</div>
+                          {t.payments?.[0]?.currency === "USD" && (
+                            <div className="text-xs font-normal text-green-500">USD: ${Number(t.payments[0].amount).toFixed(2)}</div>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-center gap-2">
