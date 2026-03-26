@@ -11,27 +11,14 @@ export default function TicketPrint({ ticket, onClose }: Props) {
   const [isPrintingBT, setIsPrintingBT] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [copyLabel, setCopyLabel] = useState<string | null>(null);
 
   const doublePrint = ticket.settings?.double_print_ticket ?? true;
+  const printerWidth = ticket.settings?.printer_width_mm || 80;
+  const date = new Date(ticket.created_at || Date.now());
 
-  const handlePrint = async () => {
-    if (doublePrint) {
-      // First copy: NEGOCIO
-      setCopyLabel("NEGOCIO");
-      await new Promise(r => setTimeout(r, 150));
-      window.print();
-      // Wait for print dialog to close before printing second copy
-      await new Promise(r => setTimeout(r, 1200));
-      // Second copy: CLIENTE
-      setCopyLabel("CLIENTE");
-      await new Promise(r => setTimeout(r, 150));
-      window.print();
-      await new Promise(r => setTimeout(r, 500));
-      setCopyLabel(null);
-    } else {
-      window.print();
-    }
+  const handlePrint = () => {
+    // Un solo click, un solo diálogo — el CSS maneja el salto de página para las 2 copias
+    window.print();
   };
 
   const handlePrintBluetooth = async () => {
@@ -53,11 +40,9 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     const rawPhone = ticket.customer?.phone;
     if (!rawPhone) return;
 
-    // 1) Normalizar teléfono (Nicaragua: 8 dígitos -> +505)
     let phone = String(rawPhone).replace(/\D/g, "");
     if (phone.length === 8) phone = "505" + phone;
 
-    // 2) Helpers numéricos (evita NaN)
     const toNumber = (v: any) => {
       const n = typeof v === "string" ? v.replace(/,/g, "").trim() : v;
       const out = Number(n);
@@ -65,30 +50,24 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     };
 
     const items = Array.isArray(ticket.items) ? ticket.items : [];
-
     const computedSubtotal = items.reduce((sum: number, item: any) => {
-      const price = toNumber(item?.price);
-      const qty = toNumber(item?.qty ?? 1);
-      return sum + price * qty;
+      return sum + toNumber(item?.price) * toNumber(item?.qty ?? 1);
     }, 0);
 
     const subtotal = toNumber(ticket.subtotal) || computedSubtotal;
     const discount = toNumber(ticket.discount);
     const total = toNumber(ticket.total) || Math.max(0, subtotal - discount);
 
-    // 3) Fecha/hora
     const dt = new Date(ticket.created_at || Date.now());
     const dateStr = niFormatDate(dt);
     const timeStr = niFormatTime(dt);
 
-    // 4) Texto (emojis OK) + separador "seguro"
     const businessName = ticket.settings?.business_name || "EL RAPIDO AUTOLAVADO";
     const ticketNum = ticket.ticket_number || "----";
     const clientName = ticket.customer?.name || "Cliente";
     const plate = ticket.customer?.plate ? String(ticket.customer.plate).toUpperCase() : "";
-
     const symbol = ticket.payment?.currency === "USD" ? "$" : "C$";
-    const line = "------------------------------"; // evita ───── (a veces rompe)
+    const line = "------------------------------";
 
     let message = `✨ *${businessName}* ✨\n`;
     message += `🧾 *TICKET:* ${ticketNum}\n`;
@@ -102,8 +81,6 @@ export default function TicketPrint({ ticket, onClose }: Props) {
       const name = item?.serviceName ?? "Servicio";
       const price = toNumber(item?.price);
       const qty = toNumber(item?.qty ?? 1);
-
-      // Bullets seguros (evita "•⁠  ⁠" con caracteres invisibles)
       message += `🔹 ${name}${qty > 1 ? ` (x${qty})` : ""}\n`;
       message += `   💰 ${symbol}${(price * qty).toFixed(2)}\n`;
     });
@@ -119,212 +96,221 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     message += `${line}\n`;
     message += `🙏 _${ticket.settings?.receipt_footer || "¡Gracias por su visita!"}_`;
 
-    // 5) Usar endpoint según dispositivo (más estable)
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const base = isMobile ? "https://api.whatsapp.com/send" : "https://web.whatsapp.com/send";
-
     const url = `${base}?phone=${phone}&text=${encodeURIComponent(message)}`;
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
+  // ─── Contenido del ticket (reutilizable para 1ª y 2ª copia) ───────────────
+  const renderTicketContent = () => (
+    <div className="bg-white p-6 rounded-xl text-foreground print:p-4 print:rounded-none print:shadow-none print:text-black">
+      {/* Logo */}
+      {ticket.settings?.logo_url && (
+        <div className="flex justify-center mb-3 print:mb-2 text-center">
+          <img
+            src={ticket.settings.logo_url}
+            alt="Logo"
+            className="max-h-20 object-contain print:max-h-16 inline-block"
+          />
+        </div>
+      )}
 
-  const date = new Date(ticket.created_at || Date.now());
-  const printerWidth = ticket.settings?.printer_width_mm || 80;
+      {/* Business Header */}
+      <div className="text-center mb-4 print:mb-3">
+        <h2 className="text-xl font-black uppercase tracking-wider mb-1 print:text-lg">
+          {ticket.settings?.business_name || "EL RAPIDO AUTOLAVADO"}
+        </h2>
+        {ticket.settings?.address && (
+          <p className="text-[10px] text-muted-foreground print:text-black leading-tight px-2">
+            {ticket.settings.address}
+          </p>
+        )}
+        <div className="flex justify-center gap-3 mt-1 text-[10px] text-muted-foreground print:text-black">
+          {ticket.settings?.phone && (
+            <span><i className="fa-solid fa-phone text-[8px]" /> {ticket.settings.phone}</span>
+          )}
+          {ticket.settings?.ruc && (
+            <span>RUC: {ticket.settings.ruc}</span>
+          )}
+        </div>
+        {ticket.settings?.social_media && (
+          <p className="text-[10px] mt-1 font-semibold text-muted-foreground print:text-black">
+            <i className="fa-brands fa-instagram text-[8px]" /> {ticket.settings.social_media}
+          </p>
+        )}
+      </div>
+
+      <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
+
+      {/* Ticket Info */}
+      <div className="text-xs space-y-1 mb-3 print:mb-2">
+        <div className="flex justify-between font-bold">
+          <span>TICKET #:</span>
+          <span>{ticket.ticket_number}</span>
+        </div>
+        <div className="flex justify-between text-[10px]">
+          <span>Fecha:</span>
+          <span>{date.toLocaleDateString("es-NI")} {date.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" })}</span>
+        </div>
+        <div className="flex justify-between text-[10px]">
+          <span>Cliente:</span>
+          <span className="font-semibold">{ticket.customer?.name || "Cliente General"}</span>
+        </div>
+        {ticket.customer?.plate && (
+          <div className="flex justify-between text-[10px]">
+            <span>Placa:</span>
+            <span className="font-bold uppercase">{ticket.customer.plate}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
+
+      {/* Items */}
+      <div className="mb-3 print:mb-2">
+        <div className="text-xs font-bold mb-2 uppercase">Servicios</div>
+        <div className="space-y-1.5">
+          {ticket.items?.map((item: any, i: number) => {
+            const itemPrice = Number(item.price) || 0;
+            const discPct = Number(item.discountPercent) || 0;
+            const itemDiscountAmt = itemPrice * discPct / 100;
+            const symbol = ticket.payment?.currency === "USD" ? "$" : "C$";
+            return (
+              <div key={i} className="text-[11px]">
+                <div className="flex justify-between font-semibold">
+                  <span>{item.serviceName}{discPct > 0 ? ` – ${discPct}% desc.` : ''}</span>
+                  <span>{symbol}{itemPrice.toFixed(2)}</span>
+                </div>
+                <div className="text-[9px] text-muted-foreground print:text-gray-600 pl-2">
+                  {item.vehicleLabel}
+                </div>
+                {discPct > 0 && (
+                  <div className="text-[9px] text-destructive print:text-black pl-2 font-semibold">
+                    Descuento: -{symbol}{itemDiscountAmt.toFixed(2)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
+
+      {/* Totals */}
+      {(() => {
+        const items = Array.isArray(ticket.items) ? ticket.items : [];
+        const computedSubtotal = items.reduce((s: number, i: any) => s + (Number(i.price) || 0), 0);
+        const computedDiscount = items.reduce((s: number, i: any) => {
+          const p = Number(i.price) || 0;
+          const d = Number(i.discountPercent) || 0;
+          return s + (p * d / 100);
+        }, 0);
+        const displaySubtotal = Number(ticket.subtotal) || computedSubtotal;
+        const displayDiscount = Number(ticket.discount) || computedDiscount;
+        const displayTotal = Number(ticket.total) || (displaySubtotal - displayDiscount);
+        const rate = Number(ticket.settings?.exchange_rate || 36.5);
+        const totalUSD = displayTotal / rate;
+
+        return (
+          <div className="text-xs space-y-1 mb-3 print:mb-2">
+            <div className="flex justify-between">
+              <span>Subtotal:</span>
+              <span>C${displaySubtotal.toFixed(2)}</span>
+            </div>
+            {displayDiscount > 0 && (
+              <div className="flex justify-between text-destructive print:text-black font-semibold">
+                <span>Descuento:</span>
+                <span>-C${displayDiscount.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex flex-col border-t border-border print:border-black pt-1">
+              <div className="flex justify-between font-black text-base">
+                <span>TOTAL:</span>
+                <span>C${displayTotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between font-bold text-sm text-muted-foreground print:text-black italic">
+                <span>TOTAL USD:</span>
+                <span>${totalUSD.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Payment Info */}
+      {ticket.payment && (
+        <>
+          <div className="border-t border-dashed border-border print:border-black my-2" />
+          <div className="text-xs space-y-1">
+            <div className="flex justify-between">
+              <span>Pago ({ticket.payment.method}):</span>
+              <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.received.toFixed(2)}</span>
+            </div>
+            {ticket.payment.change > 0 && (
+              <div className="flex justify-between font-semibold">
+                <span>Vuelto:</span>
+                <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.change.toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
+
+      {/* Footer */}
+      <div className="text-center text-[11px] text-muted-foreground print:text-black space-y-1">
+        <p className="font-semibold">
+          {ticket.settings?.receipt_footer || "¡Gracias por su visita!"}
+        </p>
+        <p className="text-[9px]">Vuelva pronto</p>
+        <div className="mt-2 print:mt-1">
+          <p className="text-[8px]">★ ★ ★ ★ ★</p>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content animate-scale-in max-w-sm" onClick={(e) => e.stopPropagation()}>
 
-        {/* Print-friendly ticket */}
+        {/* ── Área de impresión ── */}
         <div
           id="ticket-print"
-          className="bg-white p-6 rounded-xl text-foreground print:p-4 print:rounded-none print:shadow-none print:text-black"
           style={{ '--printer-width': `${printerWidth}mm` } as React.CSSProperties}
         >
-          {/* Copy label (double print) */}
-          {copyLabel && (
-            <div className="text-center font-black text-sm uppercase tracking-widest border-2 border-dashed border-gray-400 rounded-lg py-1 mb-3 print:border-black">
-              *** COPIA {copyLabel} ***
-            </div>
-          )}
-
-          {/* Logo */}
-          {ticket.settings?.logo_url && (
-            <div className="flex justify-center mb-3 print:mb-2">
-              <img
-                src={ticket.settings.logo_url}
-                alt="Logo"
-                className="max-h-20 object-contain print:max-h-16"
-              />
-            </div>
-          )}
-
-          {/* Business Header */}
-          <div className="text-center mb-4 print:mb-3">
-            <h2 className="text-xl font-black uppercase tracking-wider mb-1 print:text-lg">
-              {ticket.settings?.business_name || "EL RAPIDO AUTOLAVADO"}
-            </h2>
-            {ticket.settings?.address && (
-              <p className="text-[10px] text-muted-foreground print:text-black leading-tight px-2">
-                {ticket.settings.address}
-              </p>
-            )}
-            <div className="flex justify-center gap-3 mt-1 text-[10px] text-muted-foreground print:text-black">
-              {ticket.settings?.phone && (
-                <span><i className="fa-solid fa-phone text-[8px]" /> {ticket.settings.phone}</span>
-              )}
-              {ticket.settings?.ruc && (
-                <span>RUC: {ticket.settings.ruc}</span>
-              )}
-            </div>
-            {ticket.settings?.social_media && (
-              <p className="text-[10px] mt-1 font-semibold text-muted-foreground print:text-black">
-                <i className="fa-brands fa-instagram text-[8px]" /> {ticket.settings.social_media}
+          {/* PANTALLA: solo muestra 1 preview */}
+          <div className="print:hidden">
+            {renderTicketContent()}
+            {doublePrint && (
+              <p className="mt-4 text-center text-[10px] text-muted-foreground bg-accent/5 p-3 rounded-lg border border-dashed border-accent/20">
+                <i className="fa-solid fa-copy mr-2" /> Se imprimirán 2 copias con corte automático
               </p>
             )}
           </div>
 
-          <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
-
-          {/* Ticket Info */}
-          <div className="text-xs space-y-1 mb-3 print:mb-2">
-            <div className="flex justify-between font-bold">
-              <span>TICKET #:</span>
-              <span>{ticket.ticket_number}</span>
-            </div>
-            <div className="flex justify-between text-[10px]">
-              <span>Fecha:</span>
-              <span>{date.toLocaleDateString("es-NI")} {date.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" })}</span>
-            </div>
-            <div className="flex justify-between text-[10px]">
-              <span>Cliente:</span>
-              <span className="font-semibold">{ticket.customer?.name || "Cliente General"}</span>
-            </div>
-            {ticket.customer?.plate && (
-              <div className="flex justify-between text-[10px]">
-                <span>Placa:</span>
-                <span className="font-bold uppercase">{ticket.customer.plate}</span>
-              </div>
+          {/* IMPRESIÓN: 2 copias apiladas con salto de página entre ellas */}
+          <div className="hidden print:block">
+            {doublePrint ? (
+              <>
+                <div className="print-copy-block">{renderTicketContent()}</div>
+                <div className="print-page-break" />
+                <div className="print-copy-block">{renderTicketContent()}</div>
+              </>
+            ) : (
+              <div className="print-copy-block">{renderTicketContent()}</div>
             )}
-          </div>
-
-          <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
-
-          {/* Items */}
-          <div className="mb-3 print:mb-2">
-            <div className="text-xs font-bold mb-2 uppercase">Servicios</div>
-            <div className="space-y-1.5">
-              {ticket.items?.map((item: any, i: number) => {
-                const itemPrice = Number(item.price) || 0;
-                const discPct = Number(item.discountPercent) || 0;
-                const itemDiscountAmt = itemPrice * discPct / 100;
-                const symbol = ticket.payment?.currency === "USD" ? "$" : "C$";
-                return (
-                  <div key={i} className="text-[11px]">
-                    <div className="flex justify-between font-semibold">
-                      <span>{item.serviceName}{discPct > 0 ? ` – ${discPct}% desc.` : ''}</span>
-                      <span>{symbol}{itemPrice.toFixed(2)}</span>
-                    </div>
-                    <div className="text-[9px] text-muted-foreground print:text-gray-600 pl-2">
-                      {item.vehicleLabel}
-                    </div>
-                    {discPct > 0 && (
-                      <div className="text-[9px] text-destructive print:text-black pl-2 font-semibold">
-                        Descuento: -{symbol}{itemDiscountAmt.toFixed(2)}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
-
-          {/* Totals */}
-          {(() => {
-            const items = Array.isArray(ticket.items) ? ticket.items : [];
-            const computedSubtotal = items.reduce((s: number, i: any) => s + (Number(i.price) || 0), 0);
-            const computedDiscount = items.reduce((s: number, i: any) => {
-              const p = Number(i.price) || 0;
-              const d = Number(i.discountPercent) || 0;
-              return s + (p * d / 100);
-            }, 0);
-            const displaySubtotal = Number(ticket.subtotal) || computedSubtotal;
-            const displayDiscount = Number(ticket.discount) || computedDiscount;
-            const displayTotal = Number(ticket.total) || (displaySubtotal - displayDiscount);
-            const rate = Number(ticket.settings?.exchange_rate || 36.5);
-            const totalUSD = displayTotal / rate;
-
-            return (
-              <div className="text-xs space-y-1 mb-3 print:mb-2">
-                <div className="flex justify-between">
-                  <span>Subtotal:</span>
-                  <span>C${displaySubtotal.toFixed(2)}</span>
-                </div>
-                {displayDiscount > 0 && (
-                  <div className="flex justify-between text-destructive print:text-black font-semibold">
-                    <span>Descuento:</span>
-                    <span>-C${displayDiscount.toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="flex flex-col border-t border-border print:border-black pt-1">
-                  <div className="flex justify-between font-black text-base">
-                    <span>TOTAL:</span>
-                    <span>C${displayTotal.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between font-bold text-sm text-muted-foreground print:text-black italic">
-                    <span>TOTAL USD:</span>
-                    <span>${totalUSD.toFixed(2)}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Payment Info */}
-          {ticket.payment && (
-            <>
-              <div className="border-t border-dashed border-border print:border-black my-2" />
-              <div className="text-xs space-y-1">
-                <div className="flex justify-between">
-                  <span>Pago ({ticket.payment.method}):</span>
-                  <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.received.toFixed(2)}</span>
-                </div>
-                {ticket.payment.change > 0 && (
-                  <div className="flex justify-between font-semibold">
-                    <span>Vuelto:</span>
-                    <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.change.toFixed(2)}</span>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
-
-          {/* Footer */}
-          <div className="text-center text-[11px] text-muted-foreground print:text-black space-y-1">
-            <p className="font-semibold">
-              {ticket.settings?.receipt_footer || "¡Gracias por su visita!"}
-            </p>
-            <p className="text-[9px]">Vuelva pronto</p>
-            <div className="mt-2 print:mt-1">
-              <p className="text-[8px]">★ ★ ★ ★ ★</p>
-            </div>
           </div>
         </div>
 
+        {/* ── Botones de acción ── */}
         <div className="flex flex-col gap-2 mt-4 print:hidden">
-          {doublePrint && (
-            <div className="flex items-center gap-2 text-[11px] text-muted-foreground bg-accent/5 border border-accent/20 rounded-lg px-3 py-2">
-              <i className="fa-solid fa-copy text-accent" />
-              <span>Modo <strong>doble ticket</strong> activado — se imprimirán 2 copias</span>
-            </div>
-          )}
           <div className="flex gap-2">
             <button onClick={handlePrint} className="touch-btn flex-1 bg-brick-red text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2">
-              <i className="fa-solid fa-print" />{doublePrint ? "Browser (×2)" : "Browser"}
+              <i className="fa-solid fa-print" />{doublePrint ? "Imprimir (×2)" : "Imprimir"}
             </button>
             <button
               onClick={handlePrintBluetooth}
@@ -332,7 +318,7 @@ export default function TicketPrint({ ticket, onClose }: Props) {
               className={`touch-btn flex-1 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50 ${isSuccess ? 'bg-green-600 text-white' : 'bg-secondary text-white'}`}
             >
               <i className={`fa-solid ${isPrintingBT ? "fa-spinner fa-spin" : isSuccess ? "fa-check" : "fa-bluetooth"}`} />
-              {isPrintingBT ? "..." : isSuccess ? "¡Enviado!" : "Ticket BT"}
+              {isPrintingBT ? "..." : isSuccess ? "¡Enviado!" : "BT (×2)"}
             </button>
           </div>
           {printError && (

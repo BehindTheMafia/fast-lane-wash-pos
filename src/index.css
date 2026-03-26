@@ -134,14 +134,11 @@
   }
 
   #ticket-print {
-    position: absolute;
-    left: 0;
-    top: 0;
+    position: static !important;
     width: var(--printer-width, 80mm);
-    /* Dynamic width from settings */
     max-width: 100%;
-    margin: 0;
-    padding: 8px !important;
+    margin: 0 auto;
+    padding: 0 !important;
     box-shadow: none;
     border: none;
     background: white !important;
@@ -151,6 +148,30 @@
   @page {
     size: var(--printer-width, 80mm) auto;
     margin: 0mm;
+  }
+
+  /* Forzar visibilidad del bloque de impresión */
+  .hidden.print\:block {
+    display: block !important;
+  }
+
+  /* Cada copia ocupa su propio bloque, sin corte interno */
+  .print-copy-block {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    display: block !important;
+    width: 100% !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Salto de página entre copias = corte físico en la térmica */
+  .print-page-break {
+    display: block !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    height: 0 !important;
+    visibility: hidden !important;
   }
 
   /* Ensure all text is black for thermal printing */

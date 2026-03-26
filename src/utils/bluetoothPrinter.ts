@@ -29,15 +29,11 @@ export async function printTicketBluetooth(ticket: any) {
 
         const logoImg = ticket.settings?.logo_url ? await loadImage(ticket.settings.logo_url).catch(() => null) : null;
         const doublePrint = ticket.settings?.double_print_ticket ?? true;
-        const copies = doublePrint ? ['NEGOCIO', 'CLIENTE'] : [null];
+        const copies = doublePrint ? [1, 2] : [1];
 
-        for (const label of copies) {
-            // 2. Build Recipe
+        for (const _copy of copies) {
+            // Build ticket copy
             encoder.align('center');
-
-            if (label) {
-                encoder.size('normal').bold(true).line(`*** COPIA ${label} ***`).bold(false).newline();
-            }
 
             // Start directly with alignment to avoid potential reset feed from initialize()
             encoder.raw([0x1b, 0x70, 0x00, 0x19, 0xfa]); // Pulso pin 2 (Estándar)
