@@ -4,6 +4,7 @@ import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import TicketPrint from "@/components/pos/TicketPrint";
+import PermissionModal from "@/components/PermissionModal";
 import { niStartOfDay, niFormatTime } from "@/utils/niDate";
 
 interface Stats {
@@ -18,12 +19,14 @@ interface Stats {
 
 export default function Dashboard() {
   const { data: settings } = useBusinessSettings();
-  const { profile, isAdmin, isOwner } = useAuth();
-  const canDelete = isAdmin || isOwner || profile?.role === "cajero";
+  const { profile, isAdmin, isOwner, isCajero } = useAuth();
+  // canDelete affects if the delete button is functional
+  const canDeleteRole = isAdmin || isOwner;
 
   const [stats, setStats] = useState<Stats>({ totalSalesNIO: 0, payNIO: 0, payUSD: 0, ticketCount: 0, topServices: [], topVehicles: [], recentTickets: [] });
   const [loading, setLoading] = useState(true);
   const [printTicket, setPrintTicket] = useState<any>(null);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [loadingPrint, setLoadingPrint] = useState<number | null>(null);
 
   const loadStats = async () => {
@@ -92,6 +95,11 @@ export default function Dashboard() {
   }, [settings]);
 
   const handleDeleteTicket = async (ticketId: number) => {
+    if (isCajero) {
+      setShowPermissionModal(true);
+      return;
+    }
+
     if (!window.confirm("¿Estás seguro de que deseas eliminar este ticket? Esta acción no se puede deshacer.")) {
       return;
     }
@@ -263,31 +271,30 @@ export default function Dashboard() {
                 <th className="text-left px-4 py-3 font-semibold text-secondary">Vehículo</th>
                 <th className="text-left px-4 py-3 font-semibold text-secondary">Placa</th>
                 <th className="text-right px-4 py-3 font-semibold text-secondary">Total</th>
-                {canDelete && <th className="text-center px-4 py-3 font-semibold text-secondary">Acciones</th>}
+                <th className="text-center px-4 py-3 font-semibold text-secondary">Acciones</th>
               </tr>
             </thead>
-            <tbody>
-              {stats.recentTickets.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                    <i className="fa-solid fa-inbox text-2xl mb-2 opacity-30 block" />
-                    No hay tickets hoy
-                  </td>
-                </tr>
-              )}
-              {stats.recentTickets.map((t: any, idx: number) => (
-                <tr key={t.id} className={`border-b border-border/50 hover:bg-muted/30 transition-colors ${idx % 2 === 0 ? "" : "bg-muted/10"}`}>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{t.ticket_number}</td>
-                  <td className="px-4 py-3 text-foreground">{formatTime(t.created_at)}</td>
-                  <td className="px-4 py-3 text-foreground">{(t.vehicle_types as any)?.name || "—"}</td>
-                  <td className="px-4 py-3 text-foreground font-mono">{t.vehicle_plate || "—"}</td>
-                  <td className="px-4 py-3 text-right font-bold text-primary whitespace-nowrap">
-                    <div>C${Number(t.total).toFixed(2)}</div>
-                    {t.payments?.[0]?.currency === "USD" && (
-                      <div className="text-xs font-normal text-green-500">USD: ${Number(t.payments[0].amount).toFixed(2)}</div>
-                    )}
-                  </td>
-                  {canDelete && (
+              <tbody>
+                {stats.recentTickets.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                      <i className="fa-solid fa-inbox text-2xl mb-2 opacity-30 block" />
+                      No hay tickets hoy
+                    </td>
+                  </tr>
+                )}
+                {stats.recentTickets.map((t: any, idx: number) => (
+                  <tr key={t.id} className={`border-b border-border/50 hover:bg-muted/30 transition-colors ${idx % 2 === 0 ? "" : "bg-muted/10"}`}>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{t.ticket_number}</td>
+                    <td className="px-4 py-3 text-foreground">{formatTime(t.created_at)}</td>
+                    <td className="px-4 py-3 text-foreground">{(t.vehicle_types as any)?.name || "—"}</td>
+                    <td className="px-4 py-3 text-foreground font-mono">{t.vehicle_plate || "—"}</td>
+                    <td className="px-4 py-3 text-right font-bold text-primary whitespace-nowrap">
+                      <div>C${Number(t.total).toFixed(2)}</div>
+                      {t.payments?.[0]?.currency === "USD" && (
+                        <div className="text-xs font-normal text-green-500">USD: ${Number(t.payments[0].amount).toFixed(2)}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-center">
                       <div className="flex items-center justify-center gap-1">
                         <button
@@ -307,7 +314,6 @@ export default function Dashboard() {
                         </button>
                       </div>
                     </td>
-                  )}
                 </tr>
               ))}
             </tbody>
@@ -322,6 +328,10 @@ export default function Dashboard() {
           onClose={() => setPrintTicket(null)}
         />
       )}
+      <PermissionModal 
+        isOpen={showPermissionModal} 
+        onClose={() => setShowPermissionModal(false)} 
+      />
     </div>
   );
 }

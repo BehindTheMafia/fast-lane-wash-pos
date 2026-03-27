@@ -9,7 +9,7 @@ import CustomerModal from "@/components/pos/CustomerModal";
 import TicketPrint from "@/components/pos/TicketPrint";
 import MembershipSelector from "@/components/pos/MembershipSelector";
 import { useMemberships } from "@/hooks/useMemberships";
-import { isServiceEligible } from "@/lib/membershipUtils";
+import { isServiceEligible, ELIGIBLE_SERVICE_NAMES } from "@/lib/membershipUtils";
 
 // Vehicle type mapping: key -> vehicle_type_id in DB
 const vehicleTypes = [
@@ -56,6 +56,11 @@ export default function POS() {
   const [selectedMembershipId, setSelectedMembershipId] = useState<number | null>(null);
   const [selectedMembership, setSelectedMembership] = useState<any>(null);
 
+  // Loyalty program v2 states
+  const [loyaltyFreeWashes, setLoyaltyFreeWashes] = useState(0);
+  const [usingLoyaltyWash, setUsingLoyaltyWash] = useState(false);
+  const [loyaltyProgress, setLoyaltyProgress] = useState(0);
+
   const { memberships, recordWash, getMembershipWithStatus } = useMemberships(customer?.id?.toString());
 
   // Filter active memberships with remaining washes
@@ -82,6 +87,27 @@ export default function POS() {
       if (data) setCustomer(data as any as Customer);
     });
   }, []);
+
+  // Load loyalty data whenever customer changes
+  useEffect(() => {
+    if (customer && !customer.is_general) {
+      supabase.from("customers")
+        .select("loyalty_visits, loyalty_free_washes_earned, loyalty_free_washes_used")
+        .eq("id", customer.id)
+        .single()
+        .then(({ data }: any) => {
+          if (data) {
+            const available = (data.loyalty_free_washes_earned || 0) - (data.loyalty_free_washes_used || 0);
+            setLoyaltyFreeWashes(available);
+            setLoyaltyProgress((data.loyalty_visits || 0) % 8);
+          }
+        });
+    } else {
+      setLoyaltyFreeWashes(0);
+      setLoyaltyProgress(0);
+    }
+    setUsingLoyaltyWash(false);
+  }, [customer?.id]);
 
   // Load recent tickets on demand
   const loadRecent = useCallback(async () => {
@@ -137,9 +163,34 @@ export default function POS() {
     setSelectedVehicleId(0);
     setSelectedMembershipId(null);
     setSelectedMembership(null);
+    setUsingLoyaltyWash(false);
     supabase.from("customers").select("*").eq("is_general", true).maybeSingle().then(({ data }) => {
       if (data) setCustomer(data as any as Customer);
     });
+  };
+
+  // Toggle loyalty free wash redemption
+  const toggleLoyaltyWash = () => {
+    if (usingLoyaltyWash) {
+      // Remove the loyalty item
+      setTicketItems(prev => prev.filter(i => i.serviceName !== "Pasteado (Lealtad)"));
+      setUsingLoyaltyWash(false);
+    } else {
+      // Add loyalty pasteado as free item
+      setTicketItems(prev => [
+        ...prev,
+        {
+          serviceId: 'loyalty-free',
+          serviceName: "Pasteado (Lealtad)",
+          vehicleTypeId: selectedVehicleId || 0,
+          vehicleLabel: "🎁 Gratis",
+          price: 0,
+          discountPercent: 0,
+        },
+      ]);
+      setUsingLoyaltyWash(true);
+      showToast("🎁 Pasteado gratis aplicado al ticket");
+    }
   };
 
   // Auto-select vehicle type when customer with a SINGLE membership is selected
@@ -242,25 +293,37 @@ export default function POS() {
         }
       }
 
-      // Increment loyalty visit for ALL washes of non-general customers
-      // (both regular purchases AND membership usage count as a visit)
-      if (customer && !customer.is_general && ticketItems.length > 0) {
+      // Use loyalty free wash if applicable
+      if (usingLoyaltyWash && customer && !customer.is_general) {
+        try {
+          await (supabase.rpc as any)('use_loyalty_free_wash', {
+            p_customer_id: customer.id
+          });
+          console.log('Loyalty free wash redeemed');
+        } catch (err) {
+          console.error('Error redeeming loyalty wash:', err);
+        }
+      }
+
+      // Increment loyalty counter by number of REAL services (exclude loyalty-free items)
+      const realServices = ticketItems.filter(i => i.serviceId !== 'loyalty-free');
+      if (customer && !customer.is_general && realServices.length > 0) {
         try {
           const { data: loyaltyData, error: loyaltyError } = await (supabase.rpc as any)('increment_loyalty_visit', {
             p_customer_id: customer.id,
             p_ticket_id: (ticket as any).id,
-            p_service_id: ticketItems[0].serviceId
+            p_service_id: realServices[0].serviceId,
+            p_services_count: realServices.length
           });
 
           if (loyaltyError) {
-            console.error('Error incrementing loyalty visit:', loyaltyError);
+            console.error('Error incrementing loyalty:', loyaltyError);
           } else if (loyaltyData) {
-            console.log('Loyalty visit recorded:', loyaltyData);
+            console.log('Loyalty recorded:', loyaltyData);
 
-            // Show congratulations message if customer earned a free wash
             if (loyaltyData.earned_free_wash) {
               setTimeout(() => {
-                showToast(`🎉 ¡Felicidades ${customer.name}! Has ganado un lavado Pasteado GRATIS. Total disponibles: ${loyaltyData.free_washes_available}`, "success");
+                showToast(`🎉 ¡Felicidades ${customer.name}! Has ganado un Pasteado GRATIS. Disponibles: ${loyaltyData.free_washes_available}`, "success");
               }, 1000);
             }
           }
@@ -390,19 +453,24 @@ export default function POS() {
                   if (!priceEntry) return null;
                   const isSelected = selectedServiceId === svc.id;
 
-                  // Debug: log service IDs to verify
                   const eligible = isServiceEligible(svc.id, svc.name);
-                  console.log('Service:', svc.name, 'ID:', svc.id, 'Is eligible:', eligible);
 
-                  // Only block services if customer has membership AND service is not eligible
+                  // Block services if customer has membership AND service is not eligible
                   const isServiceNotEligible = hasActiveMembership && !customer?.is_general && !eligible;
+
+                  // Block Nítido when customer has free pasteado available
+                  // (Nítido already includes pasteado, so the reward wouldn't make sense)
+                  const isNitido = svc.name?.includes('Nítido');
+                  const isBlockedByLoyalty = isNitido && loyaltyFreeWashes > 0 && !customer?.is_general;
+
+                  const isDisabled = isServiceNotEligible || isBlockedByLoyalty;
 
                   return (
                     <button
                       key={svc.id}
-                      onClick={() => !isServiceNotEligible && setSelectedServiceId(svc.id)}
-                      disabled={isServiceNotEligible}
-                      className={`service-card text-left min-h-[120px] transition-all duration-200 ${!isServiceNotEligible ? 'hover:scale-[1.02] active:scale-95 hover:shadow-lg' : 'opacity-40 cursor-not-allowed'} ${isSelected ? "service-card-active ring-2 ring-primary" : ""}`}
+                      onClick={() => !isDisabled && setSelectedServiceId(svc.id)}
+                      disabled={isDisabled}
+                      className={`service-card text-left min-h-[120px] transition-all duration-200 ${!isDisabled ? 'hover:scale-[1.02] active:scale-95 hover:shadow-lg' : 'opacity-40 cursor-not-allowed'} ${isSelected ? "service-card-active ring-2 ring-primary" : ""}`}
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -412,6 +480,12 @@ export default function POS() {
                             <p className="text-xs text-destructive mt-2 flex items-center">
                               <i className="fa-solid fa-lock mr-1" />
                               Solo para membresías: Lavado Breve o Nítido
+                            </p>
+                          )}
+                          {isBlockedByLoyalty && (
+                            <p className="text-xs text-amber-600 mt-2 flex items-center">
+                              <i className="fa-solid fa-gift mr-1" />
+                              Nítido ya incluye pasteado. Usa tu pasteado gratis con Breve.
                             </p>
                           )}
                         </div>
@@ -528,36 +602,68 @@ export default function POS() {
             </div>
           )}
           {ticketItems.map((item, idx) => (
-            <div key={idx} className="pos-card p-3 space-y-2 animate-scale-in">
+            <div key={idx} className={`pos-card p-3 space-y-2 animate-scale-in ${item.serviceId === 'loyalty-free' ? 'border-2 border-green-500/40 bg-green-50/30' : ''}`}>
               <div className="flex items-center gap-3">
                 <div className="flex-1">
-                  <p className="font-semibold text-sm text-foreground">{item.serviceName}</p>
+                  <p className="font-semibold text-sm text-foreground">
+                    {item.serviceId === 'loyalty-free' && <i className="fa-solid fa-gift text-green-600 mr-1" />}
+                    {item.serviceName}
+                  </p>
                   <p className="text-xs text-secondary">{item.vehicleLabel}</p>
                 </div>
-                <p className="font-bold text-foreground">C${item.price.toFixed(0)}</p>
-                <button onClick={() => removeItem(idx)} className="touch-btn p-1 text-destructive hover:bg-destructive/10 rounded">
+                <p className={`font-bold ${item.serviceId === 'loyalty-free' ? 'text-green-600' : 'text-foreground'}`}>
+                  {item.serviceId === 'loyalty-free' ? 'GRATIS' : `C$${item.price.toFixed(0)}`}
+                </p>
+                <button onClick={() => {
+                  if (item.serviceId === 'loyalty-free') {
+                    setUsingLoyaltyWash(false);
+                  }
+                  removeItem(idx);
+                }} className="touch-btn p-1 text-destructive hover:bg-destructive/10 rounded">
                   <i className="fa-solid fa-trash-can text-sm" />
                 </button>
               </div>
-              {/* Discount input */}
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-muted-foreground flex-1">Descuento:</label>
-                <input
-                  type="number"
-                  value={item.discountPercent || 0}
-                  onChange={(e) => {
-                    const newDiscountPercent = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                    setTicketItems(prev => prev.map((it, i) => i === idx ? { ...it, discountPercent: newDiscountPercent } : it));
-                  }}
-                  className="w-24 px-2 py-1 bg-background border border-border rounded text-xs text-right"
-                  min={0}
-                  max={100}
-                  step={1}
-                />
-                <span className="text-xs text-muted-foreground">%</span>
-              </div>
+              {/* Discount input - only for real services */}
+              {item.serviceId !== 'loyalty-free' && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground flex-1">Descuento:</label>
+                  <input
+                    type="number"
+                    value={item.discountPercent || 0}
+                    onChange={(e) => {
+                      const newDiscountPercent = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                      setTicketItems(prev => prev.map((it, i) => i === idx ? { ...it, discountPercent: newDiscountPercent } : it));
+                    }}
+                    className="w-24 px-2 py-1 bg-background border border-border rounded text-xs text-right"
+                    min={0}
+                    max={100}
+                    step={1}
+                  />
+                  <span className="text-xs text-muted-foreground">%</span>
+                </div>
+              )}
             </div>
           ))}
+
+          {/* Loyalty Free Wash Button */}
+          {loyaltyFreeWashes > 0 && !usingLoyaltyWash && ticketItems.length > 0 && !selectedMembership && !customer?.is_general && (
+            <button
+              onClick={toggleLoyaltyWash}
+              className="w-full touch-btn p-3 rounded-xl border-2 border-dashed border-green-500/50 bg-green-500/10 text-green-700 font-semibold flex items-center justify-center gap-2 hover:bg-green-500/20 transition-all"
+            >
+              <i className="fa-solid fa-gift text-lg" />
+              Aplicar Pasteado Gratis ({loyaltyFreeWashes} disponible{loyaltyFreeWashes > 1 ? 's' : ''})
+            </button>
+          )}
+
+          {/* Loyalty progress indicator */}
+          {customer && !customer.is_general && !selectedMembership && ticketItems.length > 0 && (
+            <div className="text-center text-xs text-muted-foreground bg-muted/30 rounded-lg p-2 mt-2">
+              <i className="fa-solid fa-star mr-1" />
+              Progreso lealtad: {loyaltyProgress}/8 servicios
+              {loyaltyFreeWashes > 0 && <span className="ml-2 font-bold text-green-600">🎁 {loyaltyFreeWashes} pasteado{loyaltyFreeWashes > 1 ? 's' : ''} gratis</span>}
+            </div>
+          )}
         </div>
 
         {/* Totals + Cobrar */}

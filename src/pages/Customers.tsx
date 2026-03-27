@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import PermissionModal from "@/components/PermissionModal";
 import CustomerFormModal from "@/components/customers/CustomerFormModal";
 
 interface Customer {
@@ -19,6 +20,7 @@ interface Customer {
 
 export default function Customers() {
   const { isAdmin, isOwner, isOperator } = useAuth();
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -125,8 +127,8 @@ export default function Customers() {
               {customers.map((c) => {
                 const visits = c.loyalty_visits || 0;
                 const freeWashesAvailable = (c.loyalty_free_washes_earned || 0) - (c.loyalty_free_washes_used || 0);
-                const progressToNextFree = visits % 9;
-                const progressPercent = (progressToNextFree / 9) * 100;
+                const progressToNextFree = visits % 8;
+                const progressPercent = (progressToNextFree / 8) * 100;
 
                 return (
                   <tr key={c.id} className="border-b border-border last:border-0 hover:bg-muted/30">
@@ -140,7 +142,7 @@ export default function Customers() {
                       {!c.is_general && (
                         <div className="flex flex-col items-center gap-1">
                           <div className="flex items-center gap-2 text-xs">
-                            <span className="font-semibold text-primary">{visits} visitas</span>
+                            <span className="font-semibold text-primary">{visits} servicios</span>
                             {freeWashesAvailable > 0 && (
                               <span className="px-2 py-0.5 rounded-full bg-accent/20 text-accent font-bold">
                                 <i className="fa-solid fa-gift mr-1" />
@@ -155,7 +157,7 @@ export default function Customers() {
                             />
                           </div>
                           <span className="text-xs text-muted-foreground">
-                            {9 - progressToNextFree} lavados para pasteado gratis
+                            {8 - progressToNextFree} servicios para pasteado gratis
                           </span>
                         </div>
                       )}
@@ -170,15 +172,19 @@ export default function Customers() {
                           >
                             <i className="fa-solid fa-pen" />
                           </button>
-                          {canDelete && (
-                            <button
-                              onClick={() => setDeletingCustomer(c)}
-                              className="touch-btn p-2 text-destructive hover:text-red-600"
-                              title="Eliminar"
-                            >
-                              <i className="fa-solid fa-trash-can" />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => {
+                              if (isOperator) {
+                                setShowPermissionModal(true);
+                              } else {
+                                setDeletingCustomer(c);
+                              }
+                            }}
+                            className="touch-btn p-2 text-destructive hover:text-red-600"
+                            title="Eliminar"
+                          >
+                            <i className="fa-solid fa-trash-can" />
+                          </button>
                         </div>
                       )}
                     </td>
@@ -238,6 +244,10 @@ export default function Customers() {
 
       {/* Toast */}
       {toast && <div className="toast-success"><i className="fa-solid fa-circle-check mr-2" />{toast}</div>}
+      <PermissionModal 
+        isOpen={showPermissionModal} 
+        onClose={() => setShowPermissionModal(false)} 
+      />
     </div>
   );
 }

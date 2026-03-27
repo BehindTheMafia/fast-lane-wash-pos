@@ -1,13 +1,16 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
+import { useAuth } from "@/hooks/useAuth";
 import TicketPrint from "@/components/pos/TicketPrint";
+import PermissionModal from "@/components/PermissionModal";
 import { niToday, niFormatDate, niFormatTime } from "@/utils/niDate";
 
 const methodLabels: Record<string, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia", mixed: "Mixto" };
 
 export default function Reports() {
   const { data: settings } = useBusinessSettings();
+  const { isCajero } = useAuth();
   const [dateFrom, setDateFrom] = useState(() => niToday());
   const [dateTo, setDateTo] = useState(() => niToday());
   const [tickets, setTickets] = useState<any[]>([]);
@@ -18,6 +21,7 @@ export default function Reports() {
   const [deletingTicket, setDeletingTicket] = useState<any>(null);
   const [reprintTicket, setReprintTicket] = useState<any>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
   const showToast = (msg: string) => {
@@ -116,6 +120,10 @@ export default function Reports() {
   };
 
   const handleDeleteConfirm = async () => {
+    if (isCajero) {
+      setShowPermissionModal(true);
+      return;
+    }
     if (!deletingTicket) return;
 
     try {
@@ -802,6 +810,10 @@ export default function Reports() {
 
       {/* Toast */}
       {toast && <div className="toast-success"><i className="fa-solid fa-circle-check mr-2" />{toast}</div>}
+      <PermissionModal 
+        isOpen={showPermissionModal} 
+        onClose={() => setShowPermissionModal(false)} 
+      />
     </div>
   );
 }
