@@ -1,0 +1,9 @@
+# index.html nunca se guarda en caché → siempre carga el JS más nuevo
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# Los archivos JS/CSS tienen hash en su nombre → se pueden cachear para siempre
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
