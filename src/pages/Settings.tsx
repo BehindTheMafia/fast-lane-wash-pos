@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useBusinessSettings, useUpdateBusinessSettings } from "@/hooks/useBusinessSettings";
+import { niFormatDate } from "@/utils/niDate";
+import { FULL_DATABASE_SCHEMA } from "@/utils/backupSchema";
 import { supabase } from "@/integrations/supabase/client";
 
 // ─── Danger Zone Modal ──────────────────────────────────────────────────────
@@ -231,6 +233,71 @@ export default function Settings() {
     }
   };
 
+  const exportFullDatabaseSQL = async () => {
+    showToast("Generando respaldo SQL...", "success");
+    try {
+      const tables = [
+        "business_settings",
+        "services",
+        "vehicle_types",
+        "service_prices",
+        "customers",
+        "tickets",
+        "ticket_items",
+        "payments",
+        "cash_closures",
+        "cash_expenses",
+        "membership_plans",
+        "customer_memberships",
+        "membership_washes"
+      ];
+
+      let sqlDump = `-- BACKUP COMPLETO AUTOLAVADO EL RAPIDO\n`;
+      sqlDump += `-- Generado: ${new Date().toLocaleString()}\n`;
+      sqlDump += `-- Este archivo contiene la ESTRUCTURA y los DATOS\n\n`;
+      
+      sqlDump += FULL_DATABASE_SCHEMA;
+      sqlDump += `\n\n-- ── COMIENZO DE DATOS ──\n\n`;
+      sqlDump += `SET statement_timeout = 0;\nSET client_encoding = 'UTF8';\n\n`;
+
+      for (const table of tables) {
+        const { data, error } = await supabase.from(table as any).select("*");
+        if (error) {
+          console.error(`Error exportando ${table}:`, error);
+          continue;
+        }
+
+        if (data && data.length > 0) {
+          sqlDump += `-- Datos para la tabla: ${table}\n`;
+          const columns = Object.keys(data[0]);
+          
+          for (const row of data) {
+            const values = columns.map(col => {
+              const val = row[col];
+              if (val === null) return "NULL";
+              if (typeof val === "string") return `'${val.replace(/'/g, "''")}'`;
+              if (typeof val === "object") return `'${JSON.stringify(val).replace(/'/g, "''")}'`;
+              return val;
+            });
+            sqlDump += `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${values.join(", ")});\n`;
+          }
+          sqlDump += `\n`;
+        }
+      }
+
+      const blob = new Blob([sqlDump], { type: "text/plain;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `backup_elrapido_${new Date().toISOString().split('T')[0]}.sql`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Respaldo SQL descargado");
+    } catch (err) {
+      showToast("Error al generar el SQL", "error");
+    }
+  };
+
   const downloadCSV = (filename: string, rows: any[][]) => {
     const csv = rows.map(r => r.map((v: any) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
@@ -456,6 +523,18 @@ export default function Settings() {
             <div className="text-left">
               <p className="text-sm font-semibold">Exportar Clientes</p>
               <p className="text-xs text-muted-foreground">Base de clientes en CSV</p>
+            </div>
+          </button>
+          <button
+            onClick={exportFullDatabaseSQL}
+            className="touch-btn flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-accent/30 text-foreground hover:bg-accent/5 transition-all font-medium sm:col-span-2"
+          >
+            <div className="w-9 h-9 rounded-lg bg-accent/20 flex items-center justify-center flex-shrink-0">
+              <i className="fa-solid fa-database text-accent" />
+            </div>
+            <div className="text-left">
+              <p className="text-sm font-bold">Generar Respaldo Completo (SQL)</p>
+              <p className="text-xs text-muted-foreground">Descarga toda la base de datos lista para restaurar</p>
             </div>
           </button>
         </div>

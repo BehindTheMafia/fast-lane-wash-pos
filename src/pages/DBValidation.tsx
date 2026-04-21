@@ -11,6 +11,7 @@ interface ValidationResult {
 export default function DBValidation() {
     const [results, setResults] = useState<ValidationResult[]>([]);
     const [loading, setLoading] = useState(true);
+    const [storageStats, setStorageStats] = useState({ totalRows: 0, estimatedBytes: 0 });
 
     useEffect(() => {
         validateDatabase();
@@ -19,10 +20,18 @@ export default function DBValidation() {
     const validateDatabase = async () => {
         const validationResults: ValidationResult[] = [];
 
+        // Variables para conteo total
+        let totalRows = 0;
+        let estimatedBytes = 0;
+
         // Test 1: business_settings
         try {
-            const { data, error } = await supabase.from('business_settings').select('*').limit(1);
+            const { data, count, error } = await supabase.from('business_settings').select('*', { count: 'exact' }).limit(1);
             if (error) throw error;
+            const rowsCount = count || 0;
+            totalRows += rowsCount;
+            estimatedBytes += rowsCount * 1024; // ~1KB per row
+            
             validationResults.push({
                 table: 'business_settings',
                 status: 'success',
@@ -39,8 +48,12 @@ export default function DBValidation() {
 
         // Test 2: customers
         try {
-            const { data, error } = await supabase.from('customers').select('*').limit(1);
+            const { data, count, error } = await supabase.from('customers').select('*', { count: 'exact' }).limit(1);
             if (error) throw error;
+            const rowsCount = count || 0;
+            totalRows += rowsCount;
+            estimatedBytes += rowsCount * 512; // ~512 bytes per customer
+
             validationResults.push({
                 table: 'customers',
                 status: 'success',
@@ -78,8 +91,13 @@ export default function DBValidation() {
 
         // Test 4: tickets
         try {
-            const { data, error } = await supabase.from('tickets').select('*').limit(1);
+            const { data, count, error } = await supabase.from('tickets').select('*', { count: 'exact' }).limit(1);
             if (error) throw error;
+            
+            const rowsCount = count || 0;
+            totalRows += rowsCount;
+            estimatedBytes += rowsCount * 1500; // ~1.5KB per ticket (including relations mapping)
+
             validationResults.push({
                 table: 'tickets',
                 status: 'success',
@@ -96,8 +114,13 @@ export default function DBValidation() {
 
         // Test 5: payments
         try {
-            const { data, error } = await supabase.from('payments').select('*').limit(1);
+            const { data, count, error } = await supabase.from('payments').select('*', { count: 'exact' }).limit(1);
             if (error) throw error;
+            
+            const rowsCount = count || 0;
+            totalRows += rowsCount;
+            estimatedBytes += rowsCount * 512; // ~512 bytes per payment
+
             validationResults.push({
                 table: 'payments',
                 status: 'success',
@@ -166,6 +189,19 @@ export default function DBValidation() {
             });
         }
 
+        // Count additional heavy tables for storage accuracy
+        try {
+            const [{ count: itemsCount }, { count: expensesCount }, { count: membershipsCount }] = await Promise.all([
+                supabase.from('ticket_items').select('*', { count: 'exact', head: true }),
+                supabase.from('cash_expenses').select('*', { count: 'exact', head: true }),
+                supabase.from('customer_memberships').select('*', { count: 'exact', head: true })
+            ]);
+            
+            totalRows += (itemsCount || 0) + (expensesCount || 0) + (membershipsCount || 0);
+            estimatedBytes += ((itemsCount || 0) * 300) + ((expensesCount || 0) * 400) + ((membershipsCount || 0) * 400); 
+        } catch(e) {}
+
+        setStorageStats({ totalRows, estimatedBytes });
         setResults(validationResults);
         setLoading(false);
     };
@@ -205,6 +241,40 @@ export default function DBValidation() {
                             <div className="bg-card border border-border rounded-xl p-6">
                                 <div className="text-3xl font-bold text-red-500">{failedCount}</div>
                                 <div className="text-sm text-muted-foreground">Failed</div>
+                            </div>
+                        </div>
+
+                        {/* Database Storage Stats */}
+                        <div className="bg-card border border-border rounded-xl p-6 mb-8">
+                            <h2 className="text-xl font-bold text-foreground mb-4">
+                                <i className="fa-solid fa-hard-drive mr-2 text-secondary" /> 
+                                Uso y Almacenamiento Estimado
+                            </h2>
+                            <div className="space-y-4">
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="font-semibold text-foreground">Total de Registros en DB</span>
+                                        <span className="font-bold text-accent">{storageStats.totalRows.toLocaleString()} filas</span>
+                                    </div>
+                                    <div className="w-full bg-accent/10 rounded-full h-2">
+                                        <div className="bg-accent h-2 rounded-full" style={{ width: `${Math.min(100, (storageStats.totalRows / 100000) * 100)}%` }}></div>
+                                    </div>
+                                    <p className="text-[10px] text-muted-foreground mt-1 text-right">Límite seguro sugerido (Gratis): ~100,000</p>
+                                </div>
+                                
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="font-semibold text-foreground">Tamaño Estimado (Solo Datos SQL)</span>
+                                        <span className="font-bold text-blue-500">{(storageStats.estimatedBytes / 1024 / 1024).toFixed(3)} MB</span>
+                                    </div>
+                                    <div className="w-full bg-blue-500/10 rounded-full h-2">
+                                        <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${Math.min(100, (storageStats.estimatedBytes / (500 * 1024 * 1024)) * 100)}%` }}></div>
+                                    </div>
+                                    <p className="text-[10px] text-muted-foreground mt-1 text-right">Plan Gratis Supabase Límite Datos: 500 MB</p>
+                                </div>
+                                <p className="text-xs text-muted-foreground italic mt-3">
+                                    * Nota: Este tamaño es un cálculo aproximado solo sobre los registros de texto puro en la base de datos SQL. No incluye el peso de imágenes guardadas en el Storage (como logos o QR), ni los índices internos del motor PostgreSQL.
+                                </p>
                             </div>
                         </div>
 
