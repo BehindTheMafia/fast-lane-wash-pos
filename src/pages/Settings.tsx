@@ -76,6 +76,7 @@ export default function Settings() {
   const [form, setForm] = useState<any>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadingQr, setUploadingQr] = useState(false);
 
   // Danger zone state
   const [dangerModal, setDangerModal] = useState<null | "tickets" | "tickets_range" | "customers_inactive" | "cash_closures" | "all_data">(null);
@@ -105,6 +106,8 @@ export default function Settings() {
       printer_width_mm: String(settings.printer_width_mm || 80),
       exchange_rate: String(settings.exchange_rate),
       double_print_ticket: settings.double_print_ticket ?? true,
+      qr_image_url: settings.qr_image_url || "",
+      qr_text: settings.qr_text || "Tu opinión es importante para nosotros",
     }), 0);
   }
 
@@ -131,6 +134,29 @@ export default function Settings() {
     }
   };
 
+  const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { showToast("Por favor selecciona una imagen válida", "error"); return; }
+    if (file.size > 2 * 1024 * 1024) { showToast("La imagen debe ser menor a 2MB", "error"); return; }
+
+    setUploadingQr(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `qr-${Date.now()}.${fileExt}`;
+      const filePath = `qr/${fileName}`;
+      const { error: uploadError } = await supabase.storage.from('business-assets').upload(filePath, file, { upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from('business-assets').getPublicUrl(filePath);
+      setForm({ ...form, qr_image_url: publicUrl });
+      showToast("QR subido exitosamente");
+    } catch (error) {
+      showToast("Error al subir el QR", "error");
+    } finally {
+      setUploadingQr(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!form) return;
     await updateSettings.mutateAsync({
@@ -144,6 +170,8 @@ export default function Settings() {
       printer_width_mm: parseInt(form.printer_width_mm),
       exchange_rate: parseFloat(form.exchange_rate),
       double_print_ticket: form.double_print_ticket,
+      qr_image_url: form.qr_image_url || null,
+      qr_text: form.qr_text || null,
     });
     showToast("Configuración guardada");
   };
@@ -353,6 +381,36 @@ export default function Settings() {
             >
               <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${form.double_print_ticket ? 'translate-x-6' : ''}`} />
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Código QR del ticket ── */}
+      <div className="pos-card p-6 space-y-4">
+        <h3 className="font-bold text-foreground"><i className="fa-solid fa-qrcode mr-2 text-secondary" />Código QR del ticket</h3>
+        <p className="text-xs text-muted-foreground">Sube una imagen de código QR que aparecerá al final de cada ticket impreso. Ideal para encuestas de satisfacción o redes sociales.</p>
+        <div className="space-y-3">
+          {form.qr_image_url && (
+            <div className="flex flex-col items-center gap-2">
+              <img src={form.qr_image_url} alt="QR" className="max-h-32 object-contain rounded-lg border border-border p-2 bg-white" />
+              <button
+                onClick={() => setForm({ ...form, qr_image_url: "" })}
+                className="text-xs text-destructive hover:underline flex items-center gap-1"
+              >
+                <i className="fa-solid fa-trash-can" />Quitar QR
+              </button>
+            </div>
+          )}
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-1 block">Subir imagen QR (máx 2MB)</label>
+            <input
+              type="file" accept="image/*" onChange={handleQrUpload} disabled={uploadingQr}
+              className="input-touch file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-accent file:text-accent-foreground hover:file:opacity-90"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-1 block">Texto debajo del QR</label>
+            <input value={form.qr_text} onChange={(e) => setForm({ ...form, qr_text: e.target.value })} className="input-touch" placeholder="Tu opinión es importante para nosotros" />
           </div>
         </div>
       </div>

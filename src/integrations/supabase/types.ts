@@ -19,6 +19,8 @@ export type Database = {
                     logo_url: string | null
                     phone: string | null
                     printer_width_mm: number
+                    qr_image_url: string | null
+                    qr_text: string | null
                     receipt_footer: string | null
                     ruc: string | null
                     social_media: string | null
@@ -34,6 +36,8 @@ export type Database = {
                     logo_url?: string | null
                     phone?: string | null
                     printer_width_mm?: number
+                    qr_image_url?: string | null
+                    qr_text?: string | null
                     receipt_footer?: string | null
                     ruc?: string | null
                     social_media?: string | null
@@ -49,6 +53,8 @@ export type Database = {
                     logo_url?: string | null
                     phone?: string | null
                     printer_width_mm?: number
+                    qr_image_url?: string | null
+                    qr_text?: string | null
                     receipt_footer?: string | null
                     ruc?: string | null
                     social_media?: string | null

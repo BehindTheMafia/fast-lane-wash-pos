@@ -266,9 +266,29 @@ export default function TicketPrint({ ticket, onClose }: Props) {
           {ticket.settings?.receipt_footer || "¡Gracias por su visita!"}
         </p>
         <p className="text-[9px]">Vuelva pronto</p>
-        <div className="mt-2 print:mt-1">
-          <p className="text-[8px]">★ ★ ★ ★ ★</p>
-        </div>
+      </div>
+
+      {/* QR Code */}
+      {ticket.settings?.qr_image_url && (
+        <>
+          <div className="border-t border-dashed border-border print:border-black my-3 print:my-2" />
+          <div className="flex flex-col items-center text-center">
+            <img
+              src={ticket.settings.qr_image_url}
+              alt="QR"
+              className="w-24 h-24 object-contain print:w-20 print:h-20 inline-block"
+            />
+            {ticket.settings?.qr_text && (
+              <p className="text-[9px] text-muted-foreground print:text-black mt-1 font-medium leading-tight px-4">
+                {ticket.settings.qr_text}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+
+      <div className="mt-2 print:mt-1 text-center">
+        <p className="text-[8px] text-muted-foreground print:text-black">★ ★ ★ ★ ★</p>
       </div>
     </div>
   );
