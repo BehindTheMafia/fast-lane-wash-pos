@@ -94,7 +94,10 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     message += `💵 *TOTAL:* C$${total.toFixed(2)}\n`;
     message += `🌎 *TOTAL USD:* $${totalUSD.toFixed(2)}\n`;
     message += `${line}\n`;
-    message += `🙏 _${ticket.settings?.receipt_footer || "¡Gracias por su visita!"}_`;
+    message += `🙏 _${ticket.settings?.receipt_footer || "¡Gracias por su visita!"}_\n\n`;
+    message += `⭐ *Tu opinión es importante para nosotros* ⭐\n`;
+    message += `📝 Dejanos tu recomendación aquí:\n`;
+    message += `👉 https://forms.gle/ZLqzSWJPxrK1Wsum7`;
 
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const base = isMobile ? "https://api.whatsapp.com/send" : "https://web.whatsapp.com/send";
