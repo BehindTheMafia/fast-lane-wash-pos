@@ -105,6 +105,43 @@ export default function Dashboard() {
     }
 
     try {
+      // 1. Check if this ticket has membership wash records
+      const { data: washRecords } = await supabase
+        .from("membership_washes")
+        .select("id, membership_id")
+        .eq("ticket_id", ticketId);
+
+      // 2. If membership usage exists, revert the washes_used counter
+      if (washRecords && washRecords.length > 0) {
+        const washCountByMembership: Record<number, number> = {};
+        washRecords.forEach((w: any) => {
+          washCountByMembership[w.membership_id] = (washCountByMembership[w.membership_id] || 0) + 1;
+        });
+
+        for (const [membershipId, count] of Object.entries(washCountByMembership)) {
+          const { data: membership } = await supabase
+            .from("customer_memberships")
+            .select("washes_used")
+            .eq("id", Number(membershipId))
+            .single();
+
+          if (membership) {
+            const newCount = Math.max(0, (membership.washes_used || 0) - count);
+            await supabase
+              .from("customer_memberships")
+              .update({ washes_used: newCount })
+              .eq("id", Number(membershipId));
+          }
+        }
+
+        // Delete the membership_washes records
+        await supabase
+          .from("membership_washes")
+          .delete()
+          .eq("ticket_id", ticketId);
+      }
+
+      // 3. Delete ticket (cascade handles ticket_items and payments)
       const { error } = await supabase
         .from("tickets")
         .delete()
@@ -113,7 +150,7 @@ export default function Dashboard() {
       if (error) throw error;
 
       toast.success("Ticket eliminado correctamente");
-      loadStats(); // Refresh data
+      loadStats();
     } catch (error: any) {
       console.error("Error deleting ticket:", error);
       toast.error("Error al eliminar el ticket: " + (error.message || "Permisos insuficientes"));
