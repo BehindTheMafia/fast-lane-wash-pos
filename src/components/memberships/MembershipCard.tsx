@@ -5,9 +5,11 @@ import { getStatusBadgeClass, getStatusLabel, getDaysRemaining } from "@/lib/mem
 interface MembershipCardProps {
     membership: Membership;
     onRenew?: (membershipId: string) => void;
+    onEdit?: (membership: Membership) => void;
+    onDelete?: (membership: Membership) => void;
 }
 
-export default function MembershipCard({ membership, onRenew }: MembershipCardProps) {
+export default function MembershipCard({ membership, onRenew, onEdit, onDelete }: MembershipCardProps) {
     const { getMembershipWithStatus } = useMemberships();
     const membershipWithStatus = getMembershipWithStatus(membership);
     const { days_remaining, status } = membershipWithStatus;
@@ -30,9 +32,11 @@ export default function MembershipCard({ membership, onRenew }: MembershipCardPr
                         </p>
                     )}
                 </div>
-                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(status)}`}>
-                    {getStatusLabel(status)}
-                </span>
+                <div className="flex items-center gap-1">
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(status)}`}>
+                        {getStatusLabel(status)}
+                    </span>
+                </div>
             </div>
 
             {/* Wash Progress */}
@@ -63,7 +67,7 @@ export default function MembershipCard({ membership, onRenew }: MembershipCardPr
             </div>
 
             {/* Discount Badge */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between mb-3">
                 <span className="px-3 py-1 rounded-full bg-accent/10 text-accent text-xs font-semibold">
                     <i className="fa-solid fa-tag mr-1" />
                     {membership.membership_plans?.discount_percent}% descuento
@@ -72,11 +76,33 @@ export default function MembershipCard({ membership, onRenew }: MembershipCardPr
                 {/* Renew Button */}
                 {isExpired && onRenew && (
                     <button
-                        onClick={() => onRenew(membership.id)}
+                        onClick={() => onRenew(String(membership.id))}
                         className="touch-btn px-3 py-1 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90"
                     >
                         <i className="fa-solid fa-rotate-right mr-1" />
                         Renovar
+                    </button>
+                )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 pt-3 border-t border-border">
+                {onEdit && (
+                    <button
+                        onClick={() => onEdit(membership)}
+                        className="touch-btn flex-1 py-2 rounded-lg bg-secondary/10 text-secondary text-xs font-semibold hover:bg-secondary/20 flex items-center justify-center gap-1"
+                    >
+                        <i className="fa-solid fa-pen-to-square" />
+                        Editar
+                    </button>
+                )}
+                {onDelete && (
+                    <button
+                        onClick={() => onDelete(membership)}
+                        className="touch-btn flex-1 py-2 rounded-lg bg-destructive/10 text-destructive text-xs font-semibold hover:bg-destructive/20 flex items-center justify-center gap-1"
+                    >
+                        <i className="fa-solid fa-trash-can" />
+                        Eliminar
                     </button>
                 )}
             </div>

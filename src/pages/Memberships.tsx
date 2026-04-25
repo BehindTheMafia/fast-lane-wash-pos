@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { useMemberships } from "@/hooks/useMemberships";
+import { useMemberships, type Membership } from "@/hooks/useMemberships";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { niFormatDate, niFormatLongDate, niNow } from "@/utils/niDate";
 import MembershipCard from "@/components/memberships/MembershipCard";
 import MembershipRenewalModal from "@/components/memberships/MembershipRenewalModal";
 import PaymentModal from "@/components/pos/PaymentModal";
 import TicketPrint from "@/components/pos/TicketPrint";
+import PermissionModal from "@/components/PermissionModal";
 
 type FilterType = 'all' | 'active' | 'expired';
 
@@ -38,9 +39,12 @@ export default function Memberships() {
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [filter, setFilter] = useState<FilterType>('active');
   const [renewingMembership, setRenewingMembership] = useState<any>(null);
+  const [editingMembership, setEditingMembership] = useState<any>(null);
+  const [deletingMembership, setDeletingMembership] = useState<Membership | null>(null);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  const { user } = useAuth();
+  const { user, isCajero } = useAuth();
   const { data: settings } = useBusinessSettings();
   const { memberships: allMemberships, renewMembership, createMembership, isRenewing, getMembershipWithStatus } = useMemberships();
 
@@ -298,6 +302,81 @@ export default function Memberships() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  // ─── Edit membership handler ─────────────────────────────────
+  const handleEditMembership = (membership: Membership) => {
+    if (isCajero) {
+      setShowPermissionModal(true);
+      return;
+    }
+    setEditingMembership({
+      id: membership.id,
+      customer_name: membership.customers?.name || '',
+      plan_name: membership.membership_plans?.name || '',
+      washes_used: membership.washes_used,
+      total_washes_allowed: membership.total_washes_allowed,
+      expires_at: membership.expires_at ? membership.expires_at.slice(0, 10) : '',
+      active: membership.active,
+    });
+  };
+
+  const handleEditSave = async () => {
+    if (!editingMembership) return;
+    try {
+      const { error } = await supabase
+        .from('customer_memberships')
+        .update({
+          washes_used: Number(editingMembership.washes_used),
+          total_washes_allowed: Number(editingMembership.total_washes_allowed),
+          expires_at: editingMembership.expires_at ? new Date(editingMembership.expires_at + 'T23:59:59').toISOString() : null,
+          active: editingMembership.active,
+        })
+        .eq('id', editingMembership.id);
+
+      if (error) throw error;
+
+      showToastMsg('Membresía actualizada correctamente');
+      setEditingMembership(null);
+      // Force refresh
+      window.location.reload();
+    } catch (err: any) {
+      showToastMsg('Error al actualizar: ' + err.message);
+    }
+  };
+
+  // ─── Delete membership handler ───────────────────────────────
+  const handleDeleteMembership = (membership: Membership) => {
+    if (isCajero) {
+      setShowPermissionModal(true);
+      return;
+    }
+    setDeletingMembership(membership);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deletingMembership) return;
+    try {
+      // Delete wash records first
+      await supabase
+        .from('membership_washes')
+        .delete()
+        .eq('membership_id', deletingMembership.id);
+
+      // Delete the membership
+      const { error } = await supabase
+        .from('customer_memberships')
+        .delete()
+        .eq('id', deletingMembership.id);
+
+      if (error) throw error;
+
+      showToastMsg('Membresía eliminada correctamente');
+      setDeletingMembership(null);
+      window.location.reload();
+    } catch (err: any) {
+      showToastMsg('Error al eliminar: ' + err.message);
+    }
+  };
+
   // Filter memberships based on selected filter
   const filteredMemberships = allMemberships?.filter((m) => {
     const { status } = getMembershipWithStatus(m);
@@ -399,6 +478,8 @@ export default function Memberships() {
                   });
                 }
               }}
+              onEdit={handleEditMembership}
+              onDelete={handleDeleteMembership}
             />
           ))}
           {filteredMemberships.length === 0 && (
@@ -636,6 +717,182 @@ export default function Memberships() {
           isLoading={isRenewing}
         />
       )}
+
+      {/* Edit Membership Modal */}
+      {editingMembership && (
+        <div className="modal-overlay" onClick={() => setEditingMembership(null)}>
+          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-foreground">
+                <i className="fa-solid fa-pen-to-square mr-2 text-secondary" />
+                Editar Membresía
+              </h2>
+              <button onClick={() => setEditingMembership(null)} className="touch-btn p-2 text-muted-foreground">
+                <i className="fa-solid fa-xmark text-xl" />
+              </button>
+            </div>
+
+            <div className="mb-4 p-3 bg-muted/30 rounded-lg">
+              <p className="text-sm font-bold text-foreground">{editingMembership.customer_name}</p>
+              <p className="text-xs text-secondary">{editingMembership.plan_name}</p>
+            </div>
+
+            <div className="space-y-4">
+              {/* Washes Used */}
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1">
+                  <i className="fa-solid fa-droplet mr-1 text-primary" />
+                  Lavados usados
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setEditingMembership({ ...editingMembership, washes_used: Math.max(0, editingMembership.washes_used - 1) })}
+                    className="touch-btn w-10 h-10 rounded-lg bg-destructive/10 text-destructive font-bold text-lg flex items-center justify-center"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    value={editingMembership.washes_used}
+                    onChange={(e) => setEditingMembership({ ...editingMembership, washes_used: Math.max(0, parseInt(e.target.value) || 0) })}
+                    className="input-touch text-center text-lg font-bold flex-1"
+                    min={0}
+                  />
+                  <button
+                    onClick={() => setEditingMembership({ ...editingMembership, washes_used: editingMembership.washes_used + 1 })}
+                    className="touch-btn w-10 h-10 rounded-lg bg-primary/10 text-primary font-bold text-lg flex items-center justify-center"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* Total Washes Allowed */}
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1">
+                  <i className="fa-solid fa-hashtag mr-1 text-accent" />
+                  Total de lavados permitidos
+                </label>
+                <input
+                  type="number"
+                  value={editingMembership.total_washes_allowed}
+                  onChange={(e) => setEditingMembership({ ...editingMembership, total_washes_allowed: Math.max(1, parseInt(e.target.value) || 1) })}
+                  className="input-touch w-full text-center text-lg font-bold"
+                  min={1}
+                />
+              </div>
+
+              {/* Expiration Date */}
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1">
+                  <i className="fa-solid fa-calendar-days mr-1 text-secondary" />
+                  Fecha de expiración
+                </label>
+                <input
+                  type="date"
+                  value={editingMembership.expires_at}
+                  onChange={(e) => setEditingMembership({ ...editingMembership, expires_at: e.target.value })}
+                  className="input-touch w-full"
+                />
+              </div>
+
+              {/* Active Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                <span className="text-sm font-semibold text-foreground">
+                  <i className="fa-solid fa-toggle-on mr-2 text-accent" />
+                  Estado activo
+                </span>
+                <button
+                  onClick={() => setEditingMembership({ ...editingMembership, active: !editingMembership.active })}
+                  className={`w-14 h-7 rounded-full transition-colors relative ${
+                    editingMembership.active ? 'bg-primary' : 'bg-muted'
+                  }`}
+                >
+                  <div className={`w-5 h-5 rounded-full bg-white shadow-md absolute top-1 transition-transform ${
+                    editingMembership.active ? 'translate-x-8' : 'translate-x-1'
+                  }`} />
+                </button>
+              </div>
+
+              {/* Progress Preview */}
+              <div className="p-3 bg-accent/5 rounded-lg border border-accent/20">
+                <p className="text-xs text-muted-foreground text-center">
+                  <i className="fa-solid fa-eye mr-1" />
+                  Vista previa: {editingMembership.washes_used}/{editingMembership.total_washes_allowed} lavados usados
+                </p>
+                <div className="w-full h-2 bg-muted rounded-full overflow-hidden mt-2">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all"
+                    style={{ width: `${Math.min(100, (editingMembership.washes_used / editingMembership.total_washes_allowed) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-6">
+              <button
+                onClick={() => setEditingMembership(null)}
+                className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleEditSave}
+                className="flex-1 py-3 rounded-xl bg-accent text-accent-foreground font-semibold hover:bg-accent/90 transition-colors"
+              >
+                <i className="fa-solid fa-save mr-2" />Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deletingMembership && (
+        <div className="modal-overlay" onClick={() => setDeletingMembership(null)}>
+          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-foreground">
+                <i className="fa-solid fa-triangle-exclamation mr-2 text-destructive" />
+                Confirmar eliminación
+              </h2>
+              <button onClick={() => setDeletingMembership(null)} className="touch-btn p-2 text-muted-foreground">
+                <i className="fa-solid fa-xmark text-xl" />
+              </button>
+            </div>
+            <p className="text-foreground mb-2">
+              ¿Estás seguro de que deseas eliminar la membresía de <strong>{deletingMembership.customers?.name}</strong>?
+            </p>
+            <p className="text-sm text-muted-foreground mb-4">
+              Plan: {deletingMembership.membership_plans?.name} — Lavados: {deletingMembership.washes_used}/{deletingMembership.total_washes_allowed}
+            </p>
+            <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-xs text-destructive mb-6">
+              <i className="fa-solid fa-triangle-exclamation mr-1" />
+              Esta acción eliminará la membresía y sus registros de lavados. No se puede deshacer.
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDeletingMembership(null)}
+                className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                className="flex-1 py-3 rounded-xl bg-destructive text-white font-semibold hover:bg-red-600 transition-colors"
+              >
+                <i className="fa-solid fa-trash-can mr-2" />
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <PermissionModal
+        isOpen={showPermissionModal}
+        onClose={() => setShowPermissionModal(false)}
+      />
 
       {toast && <div className="toast-success"><i className="fa-solid fa-circle-check mr-2" />{toast}</div>}
     </div>
