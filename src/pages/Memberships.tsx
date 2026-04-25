@@ -29,6 +29,7 @@ export default function Memberships() {
   const [showAssign, setShowAssign] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
+  const [isProcessingSale, setIsProcessingSale] = useState(false);
   const [lastTicket, setLastTicket] = useState<any>(null);
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
@@ -116,6 +117,10 @@ export default function Memberships() {
   };
 
   const handlePaymentComplete = async (paymentData: any) => {
+    // Prevent double submission
+    if (isProcessingSale) return;
+    setIsProcessingSale(true);
+
     try {
       if (!user) {
         showToastMsg("Usuario no autenticado");
@@ -283,6 +288,8 @@ export default function Memberships() {
     } catch (error: any) {
       console.error('Error completing membership sale:', error);
       showToastMsg(error.message || "Error al procesar la venta");
+    } finally {
+      setIsProcessingSale(false);
     }
   };
 

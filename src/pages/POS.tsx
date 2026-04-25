@@ -53,6 +53,7 @@ export default function POS() {
   const [lastTicket, setLastTicket] = useState<any>(null);
   const [recentTickets, setRecentTickets] = useState<any[]>([]);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const [isProcessingSale, setIsProcessingSale] = useState(false);
   const [selectedMembershipId, setSelectedMembershipId] = useState<number | null>(null);
   const [selectedMembership, setSelectedMembership] = useState<any>(null);
 
@@ -202,6 +203,10 @@ export default function POS() {
   }, [hasActiveMembership, activeMembershipVehicleTypeIds.length]);
 
   const handlePaymentComplete = async (paymentData: any) => {
+    // Prevent double submission
+    if (isProcessingSale) return;
+    setIsProcessingSale(true);
+
     console.log("[POS] handlePaymentComplete:", paymentData, "Exchange Rate:", exchangeRate);
     try {
       if (ticketItems.length === 0 || !user) return;
@@ -340,6 +345,8 @@ export default function POS() {
       newTicket();
     } catch (err: any) {
       showToast(err.message || "Error al registrar venta", "error");
+    } finally {
+      setIsProcessingSale(false);
     }
   };
 
