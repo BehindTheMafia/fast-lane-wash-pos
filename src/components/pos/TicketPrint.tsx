@@ -94,10 +94,18 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     message += `💵 *TOTAL:* C$${total.toFixed(2)}\n`;
     message += `🌎 *TOTAL USD:* $${totalUSD.toFixed(2)}\n`;
     message += `${line}\n`;
-    message += `🙏 _${ticket.settings?.receipt_footer || "¡Gracias por su visita!"}_\n\n`;
-    message += `⭐ *Tu opinión es importante para nosotros* ⭐\n`;
-    message += `📝 Dejanos tu recomendación aquí:\n`;
-    message += `👉 https://forms.gle/ZLqzSWJPxrK1Wsum7`;
+    const waGreeting = ticket.settings?.whatsapp_greeting || ticket.settings?.receipt_footer || "¡Gracias por su visita!";
+    message += `🙏 _${waGreeting}_\n`;
+
+    const feedbackEnabled = ticket.settings?.whatsapp_feedback_enabled ?? true;
+    if (feedbackEnabled) {
+      const feedbackText = ticket.settings?.whatsapp_feedback_text || "Tu opinión es importante para nosotros";
+      const linkLabel = ticket.settings?.whatsapp_link_label || "Dejanos tu recomendación aquí:";
+      const feedbackLink = ticket.settings?.whatsapp_feedback_link || "https://forms.gle/ZLqzSWJPxrK1Wsum7";
+      message += `\n⭐ *${feedbackText}* ⭐\n`;
+      message += `📝 ${linkLabel}\n`;
+      message += `👉 ${feedbackLink}`;
+    }
 
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const base = isMobile ? "https://api.whatsapp.com/send" : "https://web.whatsapp.com/send";

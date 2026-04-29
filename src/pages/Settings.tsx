@@ -110,6 +110,11 @@ export default function Settings() {
       double_print_ticket: settings.double_print_ticket ?? true,
       qr_image_url: settings.qr_image_url || "",
       qr_text: settings.qr_text || "Tu opinión es importante para nosotros",
+      whatsapp_feedback_enabled: (settings as any).whatsapp_feedback_enabled ?? true,
+      whatsapp_feedback_text: (settings as any).whatsapp_feedback_text || "Tu opinión es importante para nosotros",
+      whatsapp_feedback_link: (settings as any).whatsapp_feedback_link || "https://forms.gle/ZLqzSWJPxrK1Wsum7",
+      whatsapp_greeting: (settings as any).whatsapp_greeting || "¡Gracias por su visita!",
+      whatsapp_link_label: (settings as any).whatsapp_link_label || "Dejanos tu recomendación aquí:",
     }), 0);
   }
 
@@ -174,6 +179,11 @@ export default function Settings() {
       double_print_ticket: form.double_print_ticket,
       qr_image_url: form.qr_image_url || null,
       qr_text: form.qr_text || null,
+      whatsapp_feedback_enabled: form.whatsapp_feedback_enabled,
+      whatsapp_feedback_text: form.whatsapp_feedback_text || "",
+      whatsapp_feedback_link: form.whatsapp_feedback_link || "",
+      whatsapp_greeting: form.whatsapp_greeting || "",
+      whatsapp_link_label: form.whatsapp_link_label || "",
     });
     showToast("Configuración guardada");
   };
@@ -478,6 +488,69 @@ export default function Settings() {
           <div>
             <label className="text-xs font-semibold text-foreground mb-1 block">Texto debajo del QR</label>
             <input value={form.qr_text} onChange={(e) => setForm({ ...form, qr_text: e.target.value })} className="input-touch" placeholder="Tu opinión es importante para nosotros" />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Mensaje de WhatsApp ── */}
+      <div className="pos-card p-6 space-y-4">
+        <h3 className="font-bold text-foreground"><i className="fa-brands fa-whatsapp mr-2 text-[#25D366]" />Mensaje de WhatsApp</h3>
+        <p className="text-xs text-muted-foreground">Personaliza el contenido del mensaje que se envía por WhatsApp al cliente después de cada venta.</p>
+        <div className="space-y-3">
+          {/* Toggle activar/desactivar sección feedback */}
+          <div className="flex items-center justify-between p-3 rounded-xl bg-[#25D366]/5 border border-[#25D366]/10">
+            <div className="space-y-0.5">
+              <label className="text-sm font-semibold text-foreground block">Incluir sección de opinión</label>
+              <p className="text-xs text-muted-foreground">Agrega un enlace de encuesta/recomendación al final del mensaje.</p>
+            </div>
+            <button
+              onClick={() => setForm({ ...form, whatsapp_feedback_enabled: !form.whatsapp_feedback_enabled })}
+              className={`w-12 h-6 rounded-full transition-colors relative ${form.whatsapp_feedback_enabled ? 'bg-[#25D366]' : 'bg-muted'}`}
+            >
+              <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${form.whatsapp_feedback_enabled ? 'translate-x-6' : ''}`} />
+            </button>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-1 block">Mensaje de despedida (WhatsApp)</label>
+            <input value={form.whatsapp_greeting} onChange={(e) => setForm({ ...form, whatsapp_greeting: e.target.value })} className="input-touch" placeholder="¡Gracias por su visita!" />
+            <p className="text-[10px] text-muted-foreground mt-1">Aparece antes de la sección de opinión. Ej: "¡Gracias por su visita!"</p>
+          </div>
+
+          {form.whatsapp_feedback_enabled && (
+            <>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">Título de la sección ⭐</label>
+                <input value={form.whatsapp_feedback_text} onChange={(e) => setForm({ ...form, whatsapp_feedback_text: e.target.value })} className="input-touch" placeholder="Tu opinión es importante para nosotros" />
+                <p className="text-[10px] text-muted-foreground mt-1">Ej: "Tu opinión es importante para nosotros"</p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">Texto antes del enlace 📝</label>
+                <input value={form.whatsapp_link_label} onChange={(e) => setForm({ ...form, whatsapp_link_label: e.target.value })} className="input-touch" placeholder="Dejanos tu recomendación aquí:" />
+                <p className="text-[10px] text-muted-foreground mt-1">Ej: "Dejanos tu recomendación aquí:"</p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">Enlace (URL) 👉</label>
+                <input value={form.whatsapp_feedback_link} onChange={(e) => setForm({ ...form, whatsapp_feedback_link: e.target.value })} className="input-touch" placeholder="https://forms.gle/..." />
+                <p className="text-[10px] text-muted-foreground mt-1">Puede ser un formulario de Google, encuesta, etc.</p>
+              </div>
+            </>
+          )}
+
+          {/* Preview */}
+          <div className="bg-[#E5DDD5] rounded-xl p-4 border border-[#25D366]/20">
+            <p className="text-[10px] text-muted-foreground mb-2 font-semibold"><i className="fa-solid fa-eye mr-1" />Vista previa del final del mensaje:</p>
+            <div className="bg-white rounded-lg p-3 shadow-sm text-xs space-y-1 font-mono">
+              <p>🙏 <em>{form.whatsapp_greeting || "¡Gracias por su visita!"}</em></p>
+              {form.whatsapp_feedback_enabled && (
+                <>
+                  <p></p>
+                  <p>⭐ <strong>{form.whatsapp_feedback_text || "Tu opinión es importante"}</strong> ⭐</p>
+                  <p>📝 {form.whatsapp_link_label || "Dejanos tu recomendación aquí:"}</p>
+                  <p className="text-blue-600">👉 {form.whatsapp_feedback_link || "https://..."}</p>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
