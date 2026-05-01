@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 
 interface PaymentModalProps {
   total: number;
@@ -23,6 +23,9 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
   const [currency, setCurrency] = useState<"NIO" | "USD">("NIO");
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [received, setReceived] = useState("");
+  // Guarda local para deshabilitar el botón inmediatamente (segunda capa de protección)
+  const isSubmittingRef = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const totalInCurrency = currency === "NIO" ? total : +(total / exchangeRate).toFixed(2);
   const symbol = currency === "NIO" ? "C$" : "$";
@@ -38,8 +41,10 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
       : true; // transfer and card: total is confirmed directly
 
   const handleConfirm = () => {
+    if (isSubmittingRef.current || !canConfirm) return;
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
     console.log("[PaymentModal] totalInCurrency:", totalInCurrency, "currency:", currency, "exchangeRate:", exchangeRate);
-    if (!canConfirm) return;
 
     if (method === "cash") {
       onConfirm({ currency, method, amount: totalInCurrency, received: receivedNum, change });
@@ -214,7 +219,7 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
 
         <button
           onClick={handleConfirm}
-          disabled={!canConfirm}
+          disabled={!canConfirm || isSubmitting}
           className="btn-cobrar w-full flex items-center justify-center gap-2 disabled:opacity-50"
         >
           <i className="fa-solid fa-check-circle" />

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useServices } from "@/hooks/useServices";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useAuth } from "@/hooks/useAuth";
@@ -53,6 +53,8 @@ export default function POS() {
   const [lastTicket, setLastTicket] = useState<any>(null);
   const [recentTickets, setRecentTickets] = useState<any[]>([]);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  // useRef para guarda sincrónica (evita race condition con useState que es async)
+  const isProcessingSaleRef = useRef(false);
   const [isProcessingSale, setIsProcessingSale] = useState(false);
   const [selectedMembershipId, setSelectedMembershipId] = useState<number | null>(null);
   const [selectedMembership, setSelectedMembership] = useState<any>(null);
@@ -203,8 +205,9 @@ export default function POS() {
   }, [hasActiveMembership, activeMembershipVehicleTypeIds.length]);
 
   const handlePaymentComplete = async (paymentData: any) => {
-    // Prevent double submission
-    if (isProcessingSale) return;
+    // Guarda sincrónica con ref (previene race condition de doble-click)
+    if (isProcessingSaleRef.current) return;
+    isProcessingSaleRef.current = true;
     setIsProcessingSale(true);
 
     console.log("[POS] handlePaymentComplete:", paymentData, "Exchange Rate:", exchangeRate);
@@ -346,6 +349,7 @@ export default function POS() {
     } catch (err: any) {
       showToast(err.message || "Error al registrar venta", "error");
     } finally {
+      isProcessingSaleRef.current = false;
       setIsProcessingSale(false);
     }
   };

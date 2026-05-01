@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useMemberships, type Membership } from "@/hooks/useMemberships";
@@ -29,6 +29,8 @@ export default function Memberships() {
   const [showAssign, setShowAssign] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
+  // useRef para guarda sincrónica (evita race condition con useState que es async)
+  const isProcessingSaleRef = useRef(false);
   const [isProcessingSale, setIsProcessingSale] = useState(false);
   const [lastTicket, setLastTicket] = useState<any>(null);
   const [selectedCustomer, setSelectedCustomer] = useState("");
@@ -117,8 +119,9 @@ export default function Memberships() {
   };
 
   const handlePaymentComplete = async (paymentData: any) => {
-    // Prevent double submission
-    if (isProcessingSale) return;
+    // Guarda sincrónica con ref (previene race condition de doble-click)
+    if (isProcessingSaleRef.current) return;
+    isProcessingSaleRef.current = true;
     setIsProcessingSale(true);
 
     try {
@@ -289,6 +292,7 @@ export default function Memberships() {
       console.error('Error completing membership sale:', error);
       showToastMsg(error.message || "Error al procesar la venta");
     } finally {
+      isProcessingSaleRef.current = false;
       setIsProcessingSale(false);
     }
   };
