@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useMemberships, type Membership } from "@/hooks/useMemberships";
+import { useVehicleTypes } from "@/hooks/useVehicleTypes";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { niFormatDate, niFormatLongDate, niNow } from "@/utils/niDate";
 import MembershipCard from "@/components/memberships/MembershipCard";
@@ -10,18 +11,12 @@ import PaymentModal from "@/components/pos/PaymentModal";
 import TicketPrint from "@/components/pos/TicketPrint";
 import PermissionModal from "@/components/PermissionModal";
 
+
+
 type FilterType = 'all' | 'active' | 'expired';
 
-const vehicleTypes = [
-  { id: 1, label: "Moto", icon: "fa-motorcycle" },
-  { id: 2, label: "Sedán", icon: "fa-car" },
-  { id: 3, label: "SUV", icon: "fa-car-side" },
-  { id: 4, label: "Pick up", icon: "fa-truck-pickup" },
-  { id: 5, label: "Microbús", icon: "fa-van-shuttle" },
-  { id: 6, label: "Taxi", icon: "fa-taxi" },
-];
-
 export default function Memberships() {
+  const { data: vehicleTypes } = useVehicleTypes();
   const [plans, setPlans] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
@@ -42,6 +37,9 @@ export default function Memberships() {
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [filter, setFilter] = useState<FilterType>('active');
   const [renewingMembership, setRenewingMembership] = useState<any>(null);
+  const [showRenewalPayment, setShowRenewalPayment] = useState(false);
+  const [renewalVehicleTypeId, setRenewalVehicleTypeId] = useState<number>(2);
+  const [renewalPrice, setRenewalPrice] = useState<number>(0);
   const [editingMembership, setEditingMembership] = useState<any>(null);
   const [deletingMembership, setDeletingMembership] = useState<Membership | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
@@ -49,7 +47,7 @@ export default function Memberships() {
 
   const { user, isCajero } = useAuth();
   const { data: settings } = useBusinessSettings();
-  const { memberships: allMemberships, renewMembership, createMembership, isRenewing, getMembershipWithStatus } = useMemberships();
+  const { memberships: allMemberships, renewMembership, createMembership, isRenewing, getMembershipWithStatus, checkAndActivatePending } = useMemberships();
 
   const exchangeRate = settings?.exchange_rate || 36.5;
 
@@ -96,6 +94,37 @@ export default function Memberships() {
 
     setLoading(false);
   };
+
+  // Auto-activate pending memberships when the page loads and expired/exhausted ones are detected
+  useEffect(() => {
+    if (!allMemberships || allMemberships.length === 0) return;
+
+    const customerIds = [...new Set(allMemberships.map(m => m.customer_id))];
+    
+    customerIds.forEach(async (customerId) => {
+      const customerMemberships = allMemberships.filter(m => m.customer_id === customerId);
+      
+      // Check if there's an expired/exhausted membership (getMembershipWithStatus handles both)
+      const hasFinishedMembership = customerMemberships.some(m => {
+        const { status } = getMembershipWithStatus(m);
+        return status === 'expired';
+      });
+
+      // Check if there's a pending membership
+      const hasPending = customerMemberships.some(m => {
+        const { status } = getMembershipWithStatus(m);
+        return status === 'pending';
+      });
+
+      if (hasFinishedMembership && hasPending) {
+        try {
+          await checkAndActivatePending(customerId);
+        } catch (err) {
+          console.error('[Memberships] Error auto-activating pending for customer', customerId, err);
+        }
+      }
+    });
+  }, [allMemberships]);
 
   // Calculate membership price when service, vehicle type, or plan changes
   useEffect(() => {
@@ -167,8 +196,8 @@ export default function Memberships() {
       // Get service and vehicle type names
       const serviceObj = services.find(s => s.id === selectedService);
       const serviceName = serviceObj?.name || "Servicio";
-      const vehicleObj = vehicleTypes.find(v => v.id === selectedVehicleType);
-      const vehicleLabel = vehicleObj?.label || "Vehículo";
+      const vehicleObj = vehicleTypes?.find(v => v.id === selectedVehicleType);
+      const vehicleLabel = vehicleObj?.name || "Vehículo";
 
       // Get plan details dynamically
       const planName = selectedPlan.name;
@@ -220,6 +249,8 @@ export default function Memberships() {
         ticket_id: (ticket as any).id,
         service_id: selectedService,
         price: membershipBasePrice,
+        service_name_snapshot: `MEMBRESÍA: ${serviceName}`,
+        price_snapshot: membershipBasePrice,
       } as any);
 
       if (ticketItemErr) {
@@ -297,14 +328,165 @@ export default function Memberships() {
     }
   };
 
+  // When MembershipRenewalModal confirms → calculate price and show PaymentModal
   const handleRenew = async (membershipId: string, vehicleTypeId: number) => {
+    // Calculate renewal price from membership's service + vehicle type + plan discount
+    const membership = allMemberships?.find(mem => mem.id === Number(membershipId));
+    if (!membership) return;
+
+    const serviceId = membership.service_id;
+    const service = services.find((s: any) => s.id === serviceId);
+    const priceEntry = service?.service_prices?.find((p: any) => p.vehicle_type_id === vehicleTypeId);
+    const basePrice = priceEntry ? Number(priceEntry.price) : 0;
+    const washCount = membership.membership_plans?.wash_count || 8;
+    const planDiscount = membership.membership_plans?.discount_percent || 0;
+    const packagePrice = (basePrice * washCount) * (1 - planDiscount / 100);
+
+    if (packagePrice <= 0) {
+      showToastMsg("No se pudo calcular el precio de la renovación");
+      return;
+    }
+
+    // Store the vehicle type and price, then open PaymentModal
+    setRenewalVehicleTypeId(vehicleTypeId);
+    setRenewalPrice(packagePrice);
+    setShowRenewalPayment(true);
+  };
+
+  // After PaymentModal confirms → create ticket, payment, ticket_item, then renew membership
+  const handleRenewalPaymentComplete = async (paymentData: any) => {
+    if (isProcessingSaleRef.current || !renewingMembership) return;
+    isProcessingSaleRef.current = true;
+    setIsProcessingSale(true);
+
     try {
-      await renewMembership({ membershipId: Number(membershipId), vehicleTypeId });
+      if (!user) {
+        showToastMsg("Usuario no autenticado");
+        return;
+      }
+
+      const membership = allMemberships?.find(mem => mem.id === renewingMembership.id);
+      if (!membership) throw new Error('Membresía no encontrada');
+
+      const ticketNumber = `MR-${Date.now().toString(36).toUpperCase()}`;
+      const customerName = renewingMembership.customer_name;
+      const customerId = renewingMembership.customer_id;
+      const customerObj = customers.find(c => c.id === customerId);
+      const customerPhone = customerObj?.phone || '';
+      const customerPlate = customerObj?.plate || '';
+
+      const serviceId = renewingMembership.service_id;
+      const serviceObj = services.find((s: any) => s.id === serviceId);
+      const serviceName = serviceObj?.name || 'Servicio';
+      const vehicleObj = vehicleTypes?.find(v => v.id === renewalVehicleTypeId);
+      const vehicleLabel = vehicleObj?.name || 'Vehículo';
+
+      const planName = renewingMembership.plan_name;
+      const washCount = renewingMembership.wash_count;
+      const durationDays = renewingMembership.duration_days;
+      const durationWeeks = Math.round(durationDays / 7);
+
+      // Check if current membership is still active (will be queued)
+      const isStillActive = membership.active && 
+        membership.washes_used < membership.total_washes_allowed &&
+        membership.expires_at && new Date(membership.expires_at) > new Date();
+
+      // Create ticket
+      const { data: ticket, error: ticketErr } = await supabase
+        .from('tickets')
+        .insert({
+          ticket_number: ticketNumber,
+          user_id: user.id,
+          customer_id: customerId,
+          vehicle_type_id: renewalVehicleTypeId,
+          vehicle_plate: customerPlate,
+          total: renewalPrice,
+          status: 'paid',
+          created_at: niNow(),
+        } as any)
+        .select()
+        .single();
+
+      if (ticketErr) throw ticketErr;
+
+      // Create payment record
+      const { error: paymentErr } = await supabase.from('payments').insert({
+        ticket_id: (ticket as any).id,
+        amount: paymentData.amount,
+        currency: paymentData.currency,
+        payment_method: paymentData.method,
+        amount_received: paymentData.received,
+        change_amount: paymentData.change,
+        exchange_rate: exchangeRate,
+      } as any);
+
+      if (paymentErr) throw paymentErr;
+
+      // Create ticket_item with snapshot
+      const { error: ticketItemErr } = await supabase.from('ticket_items').insert({
+        ticket_id: (ticket as any).id,
+        service_id: serviceId,
+        price: renewalPrice,
+        service_name_snapshot: `RENOVACIÓN: ${serviceName}`,
+        price_snapshot: renewalPrice,
+      } as any);
+
+      if (ticketItemErr) throw ticketItemErr;
+
+      // Renew the membership
+      await renewMembership({ membershipId: renewingMembership.id, vehicleTypeId: renewalVehicleTypeId });
+
+      // Build ticket for printing
+      const ticketForPrint = {
+        ...(ticket as any),
+        ticket_number: ticketNumber,
+        created_at: (ticket as any).created_at || niNow(),
+        customer: {
+          name: customerName,
+          plate: customerPlate,
+          phone: customerPhone,
+          is_general: false,
+        },
+        items: [
+          {
+            serviceName: `RENOVACIÓN: ${planName}`,
+            vehicleLabel: `${vehicleLabel} - ${serviceName}`,
+            price: renewalPrice,
+          },
+        ],
+        subtotal: renewalPrice,
+        discount: 0,
+        total: renewalPrice,
+        payment: paymentData,
+        settings,
+        membershipInfo: {
+          planName,
+          washCount,
+          serviceName,
+          vehicleLabel,
+          discountPercent: 0,
+          planDiscountPercent: renewingMembership.discount_percent,
+          durationDays,
+          durationWeeks,
+        },
+      };
+
+      setLastTicket(ticketForPrint);
+      setShowRenewalPayment(false);
       setRenewingMembership(null);
-      showToastMsg("Membresía renovada correctamente");
+      setShowPrint(true);
+
+      if (isStillActive) {
+        showToastMsg('Renovación pagada y en cola — se activará cuando la actual finalice');
+      } else {
+        showToastMsg('Membresía renovada y activada correctamente');
+      }
     } catch (error: any) {
-      console.error('Error renewing membership:', error);
-      showToastMsg(error.message || "Error al renovar membresía");
+      console.error('Error completing renewal payment:', error);
+      showToastMsg(error.message || 'Error al procesar el pago de renovación');
+    } finally {
+      isProcessingSaleRef.current = false;
+      setIsProcessingSale(false);
     }
   };
 
@@ -389,18 +571,30 @@ export default function Memberships() {
   };
 
   // Filter memberships based on selected filter
+  // NEVER show pending memberships as separate cards — they are embedded in the active card
   const filteredMemberships = allMemberships?.filter((m) => {
     const { status } = getMembershipWithStatus(m);
-    const washesExhausted = m.washes_used >= m.total_washes_allowed;
+
+    // Pending memberships are shown inside the active card, skip as separate cards
+    if (status === 'pending') return false;
 
     if (filter === 'active') {
-      return (status === 'active' || status === 'expiring_soon') && !washesExhausted && m.active;
+      return status === 'active' || status === 'expiring_soon';
     }
     if (filter === 'expired') {
-      return status === 'expired' || washesExhausted || !m.active;
+      return status === 'expired';
     }
     return true;
   }) || [];
+
+  // Build a map: customer_id → pending membership (for embedding in the active card)
+  const pendingByCustomer: Record<number, any> = {};
+  allMemberships?.forEach((m) => {
+    const { status } = getMembershipWithStatus(m);
+    if (status === 'pending') {
+      pendingByCustomer[m.customer_id] = m;
+    }
+  });
 
   if (loading) return <div className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
 
@@ -475,13 +669,17 @@ export default function Memberships() {
             <MembershipCard
               key={m.id}
               membership={m}
+              pendingRenewal={pendingByCustomer[m.customer_id]}
               onRenew={(id) => {
                 const membership = allMemberships?.find((mem) => mem.id === Number(id));
                 if (membership) {
                   setRenewingMembership({
                     id: membership.id,
+                    customer_id: membership.customer_id,
                     customer_name: membership.customers?.name || '',
                     plan_name: membership.membership_plans?.name || '',
+                    plan_id: membership.plan_id,
+                    service_id: membership.service_id,
                     vehicle_type_id: membership.vehicle_type_id,
                     wash_count: membership.membership_plans?.wash_count || 8,
                     duration_days: membership.membership_plans?.duration_days || 28,
@@ -491,6 +689,9 @@ export default function Memberships() {
               }}
               onEdit={handleEditMembership}
               onDelete={handleDeleteMembership}
+              onCancelRenewal={(pendingMembership) => {
+                handleDeleteMembership(pendingMembership);
+              }}
             />
           ))}
           {filteredMemberships.length === 0 && (
@@ -602,7 +803,7 @@ export default function Memberships() {
               <div>
                 <label className="text-sm font-semibold text-foreground block mb-2">Tipo de vehículo</label>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {vehicleTypes.map((vt) => (
+                  {(vehicleTypes || []).map((vt) => (
                     <button
                       key={vt.id}
                       onClick={() => setSelectedVehicleType(vt.id)}
@@ -613,7 +814,7 @@ export default function Memberships() {
                     >
                       <i className={`fa-solid ${vt.icon} text-2xl ${selectedVehicleType === vt.id ? 'text-primary' : 'text-secondary'
                         }`} />
-                      <p className="text-xs font-semibold text-foreground mt-1">{vt.label}</p>
+                      <p className="text-xs font-semibold text-foreground mt-1">{vt.name}</p>
                     </button>
                   ))}
                 </div>
@@ -720,12 +921,22 @@ export default function Memberships() {
       )}
 
       {/* Renewal Modal */}
-      {renewingMembership && (
+      {renewingMembership && !showRenewalPayment && (
         <MembershipRenewalModal
           membership={renewingMembership}
           onConfirm={handleRenew}
           onClose={() => setRenewingMembership(null)}
           isLoading={isRenewing}
+        />
+      )}
+
+      {/* Renewal Payment Modal */}
+      {showRenewalPayment && renewingMembership && (
+        <PaymentModal
+          total={renewalPrice}
+          exchangeRate={exchangeRate}
+          onClose={() => { setShowRenewalPayment(false); setRenewingMembership(null); }}
+          onConfirm={handleRenewalPaymentComplete}
         />
       )}
 

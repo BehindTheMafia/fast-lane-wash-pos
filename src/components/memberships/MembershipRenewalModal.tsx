@@ -99,12 +99,25 @@ export default function MembershipRenewalModal({
                             <div className="text-xs text-foreground">
                                 <p className="font-semibold mb-1">Al renovar la membresía:</p>
                                 <ul className="list-disc list-inside space-y-0.5 text-secondary">
-                                    <li>Se reiniciará el contador de lavados (0/{washCount})</li>
-                                    <li>Nueva fecha de expiración: +{durationDays} días ({durationWeeks} semanas)</li>
+                                    <li>Se creará una nueva membresía con {washCount} lavados</li>
+                                    <li>Duración: {durationDays} días ({durationWeeks} semanas)</li>
                                     {discountPercent > 0 && (
                                         <li>Descuento del {discountPercent}% en lavados elegibles</li>
                                     )}
                                 </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Queued renewal explanation */}
+                    <div className="p-3 bg-blue-500/10 border border-blue-400/30 rounded-lg">
+                        <div className="flex gap-2">
+                            <i className="fa-solid fa-clock-rotate-left text-blue-500 mt-0.5" />
+                            <div className="text-xs text-blue-700">
+                                <p className="font-semibold mb-1">Renovación inteligente</p>
+                                <p className="text-blue-600">
+                                    Si la membresía actual aún tiene lavados o días disponibles, la nueva se pondrá <strong>en cola</strong> y se activará automáticamente cuando la actual finalice.
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -126,12 +139,12 @@ export default function MembershipRenewalModal({
                             {isLoading ? (
                                 <>
                                     <i className="fa-solid fa-spinner fa-spin mr-2" />
-                                    Renovando...
+                                    Procesando...
                                 </>
                             ) : (
                                 <>
-                                    <i className="fa-solid fa-check mr-2" />
-                                    Confirmar
+                                    <i className="fa-solid fa-money-bill-wave mr-2" />
+                                    Proceder al Pago
                                 </>
                             )}
                         </button>

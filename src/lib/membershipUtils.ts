@@ -83,7 +83,7 @@ export const isMembershipExpired = (expiresAt: string): boolean => {
  * @returns Tailwind CSS classes for badge
  */
 export const getStatusBadgeClass = (
-    status: 'active' | 'expired' | 'expiring_soon'
+    status: 'active' | 'expired' | 'expiring_soon' | 'pending'
 ): string => {
     switch (status) {
         case 'active':
@@ -92,6 +92,8 @@ export const getStatusBadgeClass = (
             return 'bg-yellow-500/20 text-yellow-600';
         case 'expired':
             return 'bg-red-500/20 text-red-600';
+        case 'pending':
+            return 'bg-blue-500/20 text-blue-600';
         default:
             return 'bg-gray-500/20 text-gray-600';
     }
@@ -103,7 +105,7 @@ export const getStatusBadgeClass = (
  * @returns Localized status label
  */
 export const getStatusLabel = (
-    status: 'active' | 'expired' | 'expiring_soon'
+    status: 'active' | 'expired' | 'expiring_soon' | 'pending'
 ): string => {
     switch (status) {
         case 'active':
@@ -112,6 +114,8 @@ export const getStatusLabel = (
             return 'Por vencer';
         case 'expired':
             return 'Expirada';
+        case 'pending':
+            return 'Pendiente';
         default:
             return 'Desconocido';
     }

@@ -470,25 +470,37 @@ export type Database = {
             }
             services: {
                 Row: {
+                    color: string | null
                     created_at: string
                     description: string | null
+                    icon: string | null
                     id: number
                     is_active: boolean | null
+                    is_extra: boolean
                     name: string
+                    sort_order: number | null
                 }
                 Insert: {
+                    color?: string | null
                     created_at?: string
                     description?: string | null
+                    icon?: string | null
                     id?: number
                     is_active?: boolean | null
+                    is_extra?: boolean
                     name: string
+                    sort_order?: number | null
                 }
                 Update: {
+                    color?: string | null
                     created_at?: string
                     description?: string | null
+                    icon?: string | null
                     id?: number
                     is_active?: boolean | null
+                    is_extra?: boolean
                     name?: string
+                    sort_order?: number | null
                 }
                 Relationships: []
             }
@@ -497,21 +509,27 @@ export type Database = {
                     created_at: string
                     id: number
                     price: number
+                    price_snapshot: number | null
                     service_id: number
+                    service_name_snapshot: string | null
                     ticket_id: number
                 }
                 Insert: {
                     created_at?: string
                     id?: number
                     price: number
+                    price_snapshot?: number | null
                     service_id: number
+                    service_name_snapshot?: string | null
                     ticket_id: number
                 }
                 Update: {
                     created_at?: string
                     id?: number
                     price?: number
+                    price_snapshot?: number | null
                     service_id?: number
+                    service_name_snapshot?: string | null
                     ticket_id?: number
                 }
                 Relationships: [
@@ -578,18 +596,30 @@ export type Database = {
             vehicle_types: {
                 Row: {
                     created_at: string
+                    icon: string | null
                     id: number
+                    is_active: boolean
+                    key: string | null
                     name: string
+                    sort_order: number | null
                 }
                 Insert: {
                     created_at?: string
+                    icon?: string | null
                     id?: number
+                    is_active?: boolean
+                    key?: string | null
                     name: string
+                    sort_order?: number | null
                 }
                 Update: {
                     created_at?: string
+                    icon?: string | null
                     id?: number
+                    is_active?: boolean
+                    key?: string | null
                     name?: string
+                    sort_order?: number | null
                 }
                 Relationships: []
             }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useServices } from "@/hooks/useServices";
+import { useServices, useExtras } from "@/hooks/useServices";
+import { useVehicleTypes } from "@/hooks/useVehicleTypes";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,15 +12,7 @@ import MembershipSelector from "@/components/pos/MembershipSelector";
 import { useMemberships } from "@/hooks/useMemberships";
 import { isServiceEligible, ELIGIBLE_SERVICE_NAMES } from "@/lib/membershipUtils";
 
-// Vehicle type mapping: key -> vehicle_type_id in DB
-const vehicleTypes = [
-  { key: "moto", id: 1, label: "Moto", icon: "fa-motorcycle" },
-  { key: "sedan", id: 2, label: "Sedán", icon: "fa-car" },
-  { key: "suv", id: 3, label: "SUV", icon: "fa-car-side" },
-  { key: "pickup", id: 4, label: "Pick up", icon: "fa-truck-pickup" },
-  { key: "microbus", id: 5, label: "Microbús", icon: "fa-van-shuttle" },
-  { key: "taxi", id: 6, label: "Taxi", icon: "fa-taxi" },
-] as const;
+// Vehicle types are now loaded dynamically from DB via useVehicleTypes()
 
 interface TicketItem {
   serviceId: any;
@@ -40,6 +33,8 @@ interface Customer {
 
 export default function POS() {
   const { data: services } = useServices();
+  const { data: extras } = useExtras();
+  const { data: vehicleTypes } = useVehicleTypes();
   const { data: settings } = useBusinessSettings();
   const { user } = useAuth();
 
@@ -136,7 +131,7 @@ export default function POS() {
     if (!svc) return;
     const priceEntry = (svc as any).service_prices?.find((p: any) => p.vehicle_type_id === selectedVehicleId);
     if (!priceEntry) return;
-    const vt = vehicleTypes.find((v) => v.id === selectedVehicleId);
+    const vt = vehicleTypes?.find((v) => v.id === selectedVehicleId);
 
     setTicketItems((prev) => [
       ...prev,
@@ -144,12 +139,32 @@ export default function POS() {
         serviceId: svc.id,
         serviceName: svc.name || "",
         vehicleTypeId: selectedVehicleId,
-        vehicleLabel: vt?.label || "",
+        vehicleLabel: vt?.name || "",
         price: Number(priceEntry.price),
         discountPercent: 0,
       },
     ]);
     showToast("Servicio agregado");
+  };
+
+  // Add an extra directly to the ticket
+  const addExtraToTicket = (extra: any) => {
+    if (!selectedVehicleId) { showToast("Selecciona un tipo de vehículo primero", "error"); return; }
+    const priceEntry = extra.service_prices?.find((p: any) => p.vehicle_type_id === selectedVehicleId);
+    if (!priceEntry) { showToast("Extra no disponible para este vehículo", "error"); return; }
+    const vt = vehicleTypes?.find((v) => v.id === selectedVehicleId);
+    setTicketItems((prev) => [
+      ...prev,
+      {
+        serviceId: extra.id,
+        serviceName: extra.name || "",
+        vehicleTypeId: selectedVehicleId,
+        vehicleLabel: vt?.name || "",
+        price: Number(priceEntry.price),
+        discountPercent: 0,
+      },
+    ]);
+    showToast(`${extra.name} agregado`);
   };
 
   const removeItem = (idx: number) => {
@@ -237,12 +252,14 @@ export default function POS() {
 
       if (ticketErr) throw ticketErr;
 
-      // Create ticket_items for each service
+      // Create ticket_items for each service (with historical name/price snapshots)
       for (const item of ticketItems) {
         await (supabase as any).from("ticket_items").insert({
           ticket_id: (ticket as any).id,
           service_id: item.serviceId,
           price: item.price,
+          service_name_snapshot: item.serviceName || null,
+          price_snapshot: item.price,
         });
       }
 
@@ -321,7 +338,6 @@ export default function POS() {
             p_customer_id: customer.id,
             p_ticket_id: (ticket as any).id,
             p_service_id: realServices[0].serviceId,
-            p_services_count: realServices.length
           });
 
           if (loyaltyError) {
@@ -396,12 +412,12 @@ export default function POS() {
           <p className="text-sm font-semibold text-foreground mb-3">
             <i className="fa-solid fa-car mr-2 text-secondary" />Tipo de vehículo
           </p>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            {vehicleTypes.map((vt) => {
-              // Only restrict vehicle types if a membership is SELECTED
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+            {!vehicleTypes ? (
+              <div className="col-span-full text-center py-4"><i className="fa-solid fa-spinner fa-spin text-secondary" /></div>
+            ) : vehicleTypes.map((vt) => {
               const isMembershipRestricted = selectedMembership && selectedMembership.vehicle_type_id !== vt.id;
               const isDisabled = isMembershipRestricted;
-
               return (
                 <button
                   key={vt.id}
@@ -410,7 +426,7 @@ export default function POS() {
                   className={`vehicle-card h-24 transition-all duration-200 ${!isDisabled ? 'hover:scale-105 active:scale-95' : 'opacity-40 cursor-not-allowed'} ${selectedVehicleId === vt.id ? "vehicle-card-active ring-2 ring-primary" : ""}`}
                 >
                   <i className={`fa-solid ${vt.icon} text-3xl ${selectedVehicleId === vt.id ? "text-brick-red" : "text-secondary"} mb-2`} />
-                  <p className="text-sm font-semibold text-foreground">{vt.label}</p>
+                  <p className="text-sm font-semibold text-foreground">{vt.name}</p>
                   {selectedVehicleId === vt.id && (
                     <i className="fa-solid fa-circle-check text-brick-red text-base mt-1" />
                   )}
@@ -520,6 +536,35 @@ export default function POS() {
               </button>
             </div>
           )}
+
+          {/* Extras Section */}
+          {selectedVehicleId > 0 && !selectedMembership && extras && extras.length > 0 && (
+            <div className="mt-6">
+              <p className="text-sm font-semibold text-foreground mb-3">
+                <i className="fa-solid fa-star mr-2 text-secondary" />Extras y Servicios Adicionales
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {extras.map((extra: any) => {
+                  const priceEntry = extra.service_prices?.find((p: any) => p.vehicle_type_id === selectedVehicleId);
+                  if (!priceEntry) return null;
+                  return (
+                    <button
+                      key={extra.id}
+                      onClick={() => addExtraToTicket(extra)}
+                      className="service-card text-left p-3 min-h-[80px] transition-all duration-200 hover:scale-[1.02] active:scale-95 hover:shadow-md hover:border-accent/50"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <i className={`fa-solid ${extra.icon || 'fa-plus-circle'} text-accent`} />
+                        <h4 className="font-semibold text-sm text-foreground leading-tight">{extra.name}</h4>
+                      </div>
+                      <p className="text-xs text-secondary mb-1">{extra.description}</p>
+                      <p className="text-base font-bold text-primary">C${Number(priceEntry.price).toFixed(0)}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -574,7 +619,7 @@ export default function POS() {
                   // Auto-add membership service to ticket with C$0 price
                   const membershipService = membership.services;
                   if (membershipService && membership.vehicle_type_id) {
-                    const vt = vehicleTypes.find((v) => v.id === membership.vehicle_type_id);
+                    const vt = vehicleTypes?.find((v) => v.id === membership.vehicle_type_id);
                     // -1: descontamos el lavado que se está usando ahora mismo
                     // El ticket se construye ANTES de que recordWash incremente washes_used
                     const washesRemaining = membership.total_washes_allowed - membership.washes_used - 1;
@@ -584,7 +629,7 @@ export default function POS() {
                       serviceId: membershipService.id,
                       serviceName: `${membershipService.name} (Membresía - ${Math.max(0, washesRemaining)} lavados restantes)`,
                       vehicleTypeId: membership.vehicle_type_id,
-                      vehicleLabel: vt?.label || "",
+                      vehicleLabel: vt?.name || "",
                       price: 0, // Free - already paid in membership
                       discountPercent: 0,
                     }]);

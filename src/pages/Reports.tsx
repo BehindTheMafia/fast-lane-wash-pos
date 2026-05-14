@@ -101,7 +101,7 @@ export default function Reports() {
       customer_data: t.customer_id ? customerMap[t.customer_id] : null,
       customer_name: t.customer_id ? (customerMap[t.customer_id]?.name || "—") : "—",
       is_membership_usage: membershipWashMap[t.id] || false,
-      is_membership_sale: t.ticket_number?.startsWith("M-") || false,
+      is_membership_sale: t.ticket_number?.startsWith("M-") || t.ticket_number?.startsWith("MR-") || false,
     }));
 
     setTickets(enriched);
@@ -258,7 +258,7 @@ export default function Reports() {
   const handleReprint = (ticket: any) => {
     console.log('Reprint ticket data:', ticket);
 
-    const isMembershipSale = ticket.is_membership_sale || ticket.ticket_number?.startsWith("M-");
+    const isMembershipSale = ticket.is_membership_sale || ticket.ticket_number?.startsWith("M-") || ticket.ticket_number?.startsWith("MR-");
 
     // Build items array with proper service names and prices
     const itemsFromDB = ticket.ticket_items?.map((ti: any) => ({
