@@ -359,25 +359,44 @@ export default function CashClose() {
                 const hTotalUSD = cashUSD + cardUSD + transUSD;
                 const totalDayH = cashNIO + transNIO + cardNIO + (hTotalUSD * rate);
 
+                // Parse egresos and notes from observations field
+                const observations: string = h.observations || "";
+                // observations format: "nota | Egresos: motivo1: C$xx | motivo2: C$yy"
+                const egresosMatch = observations.match(/Egresos: (.+)/);
+                const egresosRaw = egresosMatch ? egresosMatch[1] : "";
+                const egresosItems = egresosRaw
+                  ? egresosRaw.split(" | ").map((e: string) => {
+                      const parts = e.split(": C$");
+                      return { reason: parts[0] || "Sin motivo", amount: parseFloat(parts[1] || "0") };
+                    })
+                  : [];
+                const noteText = observations.split(" | Egresos:")[0].trim();
+                const totalExpenses = Number(h.total_expenses || 0);
+
                 return (
-                  <div key={h.id} className="p-4 rounded-xl bg-background border border-border text-sm space-y-2">
-                    <div className="flex flex-col">
-                      <p className="font-bold text-foreground">
-                        {niFormatShortDate(h.closed_at)}
-                        {" · "}
-                        {niFormatTime(h.closed_at)}
-                      </p>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                        <i className="fa-solid fa-user-check text-[10px]" />
-                        {h.profiles?.full_name || "Usuario desconocido"}
-                      </p>
+                  <div key={h.id} className="p-4 rounded-xl bg-background border border-border text-sm space-y-3">
+                    {/* Header row */}
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                      <div>
+                        <p className="font-bold text-foreground">
+                          {niFormatShortDate(h.closed_at)}
+                          {" · "}
+                          {niFormatTime(h.closed_at)}
+                        </p>
+                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                          <i className="fa-solid fa-user-check text-[10px]" />
+                          {h.profiles?.full_name || "Usuario desconocido"}
+                        </p>
+                      </div>
+                      <span className={`text-xs font-black px-3 py-1 rounded-full shrink-0 ${Math.abs(diff) < 0.01
+                        ? "bg-emerald-100 text-emerald-700"
+                        : diff > 0 ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"
+                        }`}>
+                        {Math.abs(diff) < 0.01 ? "✅ Cuadró" : diff > 0 ? `⬆ Sobró C$${diff.toFixed(2)}` : `⬇ Faltó C$${Math.abs(diff).toFixed(2)}`}
+                      </span>
                     </div>
-                    <span className={`text-sm font-black px-3 py-1 rounded-full ${Math.abs(diff) < 0.01
-                      ? "bg-emerald-100 text-emerald-700"
-                      : diff > 0 ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"
-                      }`}>
-                      {Math.abs(diff) < 0.01 ? "✅ Cuadró" : diff > 0 ? `⬆ Sobró C$${diff.toFixed(2)}` : `⬇ Faltó C$${Math.abs(diff).toFixed(2)}`}
-                    </span>
+
+                    {/* Payment method grid */}
                     <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border">
                       <div className="text-center">
                         <p className="text-xs text-emerald-600 font-semibold"><i className="fa-solid fa-money-bills mr-1" />Efectivo</p>
@@ -395,10 +414,42 @@ export default function CashClose() {
                         {cardUSD > 0 && <p className="text-[10px] text-green-600 font-bold leading-none">+${cardUSD.toFixed(2)} USD</p>}
                       </div>
                     </div>
+
+                    {/* Totals row */}
                     <div className="flex justify-between pt-1 border-t border-border text-[10px] text-muted-foreground">
-                      <span>Total: <strong className="text-foreground">C${totalDayH.toFixed(2)}</strong>{hTotalUSD > 0 && <span className="ml-1 text-green-600 font-bold">($${hTotalUSD.toFixed(2)} USD)</span>}</span>
+                      <span>Total: <strong className="text-foreground">C${totalDayH.toFixed(2)}</strong>{hTotalUSD > 0 && <span className="ml-1 text-green-600 font-bold">(${hTotalUSD.toFixed(2)} USD)</span>}</span>
                       <span>Contado: <strong className="text-foreground">C${Number(h.counted_total).toFixed(2)}</strong></span>
                     </div>
+
+                    {/* Egresos del cierre */}
+                    {egresosItems.length > 0 && (
+                      <div className="pt-2 border-t border-border space-y-1.5">
+                        <p className="text-[10px] font-bold text-destructive uppercase tracking-wide flex items-center gap-1">
+                          <i className="fa-solid fa-arrow-trend-down" /> Egresos registrados
+                        </p>
+                        {egresosItems.map((eg: { reason: string; amount: number }, idx: number) => (
+                          <div key={idx} className="flex justify-between items-center px-2 py-1 rounded-lg bg-destructive/10 border border-destructive/15">
+                            <span className="text-[11px] text-foreground truncate mr-2">{eg.reason}</span>
+                            <span className="text-[11px] font-black text-destructive shrink-0">− C${eg.amount.toFixed(2)}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between text-[11px] font-black pt-1">
+                          <span className="text-muted-foreground">Total egresos:</span>
+                          <span className="text-destructive">− C${totalExpenses.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Nota del cierre */}
+                    {noteText && (
+                      <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-secondary/10 border border-secondary/20">
+                        <i className="fa-solid fa-note-sticky text-secondary text-xs mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-[9px] font-bold text-secondary uppercase tracking-wide">Nota</p>
+                          <p className="text-[11px] text-foreground leading-snug">{noteText}</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -669,6 +720,11 @@ export default function CashClose() {
             <label className="flex items-center gap-2 text-sm font-bold text-foreground">
               <i className="fa-solid fa-arrow-trend-down text-destructive" />
               Egresos / Retiros de efectivo
+              {egresos.filter(e => parseFloat(e.amount) > 0).length > 0 && (
+                <span className="ml-1 bg-destructive text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                  {egresos.filter(e => parseFloat(e.amount) > 0).length}
+                </span>
+              )}
             </label>
             <button
               onClick={() => setEgresos([...egresos, { amount: "", reason: "" }])}
@@ -678,16 +734,18 @@ export default function CashClose() {
             </button>
           </div>
           <p className="text-xs text-muted-foreground">
-            ¿Sacaron dinero de la caja hoy? (compras, pagos a proveedores…) Estos montos se restan del esperado.
+            ¿Sacaron dinero de la caja hoy? (compras, pagos a proveedores…) Estos montos se restan del efectivo esperado.
           </p>
 
+          {/* Input rows */}
           {egresos.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center py-2 italic">
-              Sin egresos registrados.
-            </p>
+            <div className="flex flex-col items-center gap-2 py-4 opacity-50">
+              <i className="fa-solid fa-circle-minus text-3xl text-destructive" />
+              <p className="text-xs text-muted-foreground italic">Sin egresos registrados.</p>
+            </div>
           )}
           {egresos.map((eg, i) => (
-            <div key={i} className="flex items-center gap-2">
+            <div key={i} className="flex items-center gap-2 animate-scale-in">
               <div className="flex items-center gap-1 shrink-0">
                 <span className="text-xs font-bold text-muted-foreground">C$</span>
                 <input
@@ -714,34 +772,74 @@ export default function CashClose() {
               </button>
             </div>
           ))}
-          {egresos.length > 0 && (
-            <div className="flex justify-between items-center pt-2 border-t border-destructive/20 text-sm font-bold">
-              <span className="text-foreground">Total egresos:</span>
-              <span className="text-destructive">− C${totalEgresos.toFixed(2)}</span>
+
+          {/* ── Live egreso summary chips ── */}
+          {egresos.filter(e => parseFloat(e.amount) > 0).length > 0 && (
+            <div className="mt-2 space-y-2 pt-3 border-t border-destructive/20">
+              <p className="text-xs font-semibold text-destructive uppercase tracking-wide flex items-center gap-1">
+                <i className="fa-solid fa-receipt" /> Detalle de egresos registrados
+              </p>
+              <div className="space-y-1.5">
+                {egresos.filter(e => parseFloat(e.amount) > 0).map((eg, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-destructive/10 border border-destructive/20"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <i className="fa-solid fa-minus-circle text-destructive text-xs shrink-0" />
+                      <span className="text-sm text-foreground truncate">
+                        {eg.reason.trim() || <span className="italic text-muted-foreground">Sin motivo</span>}
+                      </span>
+                    </div>
+                    <span className="font-black text-destructive text-sm shrink-0">− C${parseFloat(eg.amount).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between items-center pt-2 border-t border-destructive/30 text-sm font-black">
+                <span className="text-foreground flex items-center gap-1">
+                  <i className="fa-solid fa-sigma text-destructive" /> Total egresos:
+                </span>
+                <span className="text-destructive text-base">− C${totalEgresos.toFixed(2)}</span>
+              </div>
             </div>
           )}
         </div>
 
         {/* ── EXPECTED CASH breakdown ─────────────── */}
-        {(totalEgresos > 0) && (
-          <div className="rounded-2xl bg-background border border-border p-4">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Efectivo esperado en caja</p>
-            <div className="space-y-1 text-sm">
+        <div className={`rounded-2xl border p-4 transition-all duration-300 ${
+          totalEgresos > 0
+            ? "bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-700"
+            : "bg-background border-border"
+        }`}>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
+            <i className={`fa-solid fa-calculator ${totalEgresos > 0 ? "text-amber-600" : "text-muted-foreground"}`} />
+            Efectivo esperado en caja
+          </p>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Ventas en efectivo (NIO):</span>
+              <span className="font-semibold">+ C${dayStats.cashNIO.toFixed(2)}</span>
+            </div>
+            {dayStats.cashUSD > 0 && (
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Ventas en efectivo:</span>
-                <span className="font-semibold">+ C${dayStats.cashNIO.toFixed(2)}</span>
+                <span className="text-muted-foreground">Ventas efectivo USD (≈ C${rate}):</span>
+                <span className="font-semibold text-green-600">+ C${cashUSDinNIO.toFixed(2)}</span>
               </div>
+            )}
+            {totalEgresos > 0 && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Egresos / Retiros:</span>
                 <span className="font-semibold text-destructive">− C${totalEgresos.toFixed(2)}</span>
               </div>
-              <div className="flex justify-between pt-2 border-t border-border">
-                <span className="font-bold text-foreground">💵 Total esperado:</span>
-                <span className="font-black text-lg text-foreground">C${expectedCash.toFixed(2)}</span>
-              </div>
+            )}
+            <div className={`flex justify-between pt-2 border-t ${
+              totalEgresos > 0 ? "border-amber-200" : "border-border"
+            }`}>
+              <span className="font-bold text-foreground">💵 Total esperado:</span>
+              <span className="font-black text-lg text-foreground">C${expectedCash.toFixed(2)}</span>
             </div>
           </div>
-        )}
+        </div>
 
         {/* ── RESULTADO INMEDIATO ─────────────────── */}
         {hasCounted && (
@@ -794,7 +892,7 @@ export default function CashClose() {
         )}
 
         {/* Note */}
-        <div>
+        <div className="space-y-2">
           <label className="block text-sm font-semibold text-foreground mb-1">
             <i className="fa-solid fa-note-sticky mr-2 text-secondary" />
             Nota del cierre (opcional)
@@ -806,6 +904,16 @@ export default function CashClose() {
             rows={2}
             placeholder="Ej: Sin novedades, turno normal..."
           />
+          {/* Live note preview */}
+          {note.trim() && (
+            <div className="animate-scale-in flex items-start gap-2 px-3 py-2.5 rounded-xl bg-secondary/10 border border-secondary/30">
+              <i className="fa-solid fa-note-sticky text-secondary mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-0.5">Vista previa de la nota</p>
+                <p className="text-sm text-foreground leading-snug whitespace-pre-wrap break-words">{note}</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
