@@ -11,6 +11,7 @@ import TicketPrint from "@/components/pos/TicketPrint";
 import MembershipSelector from "@/components/pos/MembershipSelector";
 import { useMemberships } from "@/hooks/useMemberships";
 import { isServiceEligible, ELIGIBLE_SERVICE_NAMES } from "@/lib/membershipUtils";
+import { recordTicketPayment } from "@/lib/recordTicketPayment";
 
 // Vehicle types are now loaded dynamically from DB via useVehicleTypes()
 
@@ -263,45 +264,18 @@ export default function POS() {
         });
       }
 
-      // Create payment record(s)
-      if (paymentData.method === "mixed" && paymentData.mixedPayment) {
-        const { cashAmount, cardAmount } = paymentData.mixedPayment;
+      const rollbackTicket = async () => {
+        await supabase.from("ticket_mixed_payments").delete().eq("ticket_id", (ticket as any).id);
+        await supabase.from("payments").delete().eq("ticket_id", (ticket as any).id);
+        await supabase.from("ticket_items").delete().eq("ticket_id", (ticket as any).id);
+        await supabase.from("tickets").delete().eq("id", (ticket as any).id);
+      };
 
-        if (cashAmount > 0) {
-          const finalAmount = paymentData.currency === "USD" ? Number((cashAmount / exchangeRate).toFixed(2)) : cashAmount;
-          await supabase.from("payments").insert({
-            ticket_id: (ticket as any).id,
-            amount: finalAmount,
-            currency: paymentData.currency,
-            payment_method: "cash",
-            amount_received: cashAmount,
-            change_amount: 0,
-            exchange_rate: exchangeRate,
-          } as any);
-        }
-
-        if (cardAmount > 0) {
-          const finalAmount = paymentData.currency === "USD" ? Number((cardAmount / exchangeRate).toFixed(2)) : cardAmount;
-          await supabase.from("payments").insert({
-            ticket_id: (ticket as any).id,
-            amount: finalAmount,
-            currency: paymentData.currency,
-            payment_method: "card",
-            amount_received: cardAmount,
-            change_amount: 0,
-            exchange_rate: exchangeRate,
-          } as any);
-        }
-      } else {
-        await supabase.from("payments").insert({
-          ticket_id: (ticket as any).id,
-          amount: paymentData.amount, // Ya viene convertido si es USD
-          currency: paymentData.currency,
-          payment_method: paymentData.method,
-          amount_received: paymentData.received,
-          change_amount: paymentData.change,
-          exchange_rate: exchangeRate,
-        } as any);
+      try {
+        await recordTicketPayment(supabase, (ticket as any).id, paymentData, exchangeRate);
+      } catch (err) {
+        await rollbackTicket();
+        throw err;
       }
 
       // Record membership wash if applicable

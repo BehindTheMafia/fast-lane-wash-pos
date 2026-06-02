@@ -504,6 +504,53 @@ export type Database = {
                 }
                 Relationships: []
             }
+            ticket_mixed_payments: {
+                Row: {
+                    id: number
+                    ticket_id: number
+                    method: string
+                    currency: string
+                    amount: number
+                    exchange_rate: number
+                    amount_nio: number
+                    applied_nio: number
+                    change_nio: number
+                    created_at: string
+                }
+                Insert: {
+                    id?: number
+                    ticket_id: number
+                    method: string
+                    currency?: string
+                    amount: number
+                    exchange_rate?: number
+                    amount_nio: number
+                    applied_nio?: number
+                    change_nio?: number
+                    created_at?: string
+                }
+                Update: {
+                    id?: number
+                    ticket_id?: number
+                    method?: string
+                    currency?: string
+                    amount?: number
+                    exchange_rate?: number
+                    amount_nio?: number
+                    applied_nio?: number
+                    change_nio?: number
+                    created_at?: string
+                }
+                Relationships: [
+                    {
+                        foreignKeyName: "ticket_mixed_payments_ticket_id_fkey"
+                        columns: ["ticket_id"]
+                        isOneToOne: false
+                        referencedRelation: "tickets"
+                        referencedColumns: ["id"]
+                    },
+                ]
+            }
             ticket_items: {
                 Row: {
                     created_at: string

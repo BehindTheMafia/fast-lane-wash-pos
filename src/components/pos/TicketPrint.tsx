@@ -93,6 +93,17 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     if (discount > 0) message += `🏷️ *DESCUENTO:* -C$${discount.toFixed(2)}\n`;
     message += `💵 *TOTAL:* C$${total.toFixed(2)}\n`;
     message += `🌎 *TOTAL USD:* $${totalUSD.toFixed(2)}\n`;
+
+    // Payment method info
+    if (ticket.payment?.method === "mixed" && ticket.payment?.mixedPayments?.length) {
+      message += `💳 *PAGO MIXTO:*\n`;
+      for (const part of ticket.payment.mixedPayments) {
+        const partSym = ticket.payment.currency === "USD" ? "$" : "C$";
+        const partLabel = part.method === "cash" ? "Efectivo" : part.method === "card" ? "Tarjeta" : "Transferencia";
+        message += `   🔹 ${partLabel}: ${partSym}${Number(part.amount).toFixed(2)}\n`;
+        if (part.change > 0) message += `   ↩️ Vuelto: ${partSym}${Number(part.change).toFixed(2)}\n`;
+      }
+    }
     message += `${line}\n`;
     const waGreeting = ticket.settings?.whatsapp_greeting || ticket.settings?.receipt_footer || "¡Gracias por su visita!";
     message += `🙏 _${waGreeting}_\n`;
@@ -255,15 +266,50 @@ export default function TicketPrint({ ticket, onClose }: Props) {
         <>
           <div className="border-t border-dashed border-border print:border-black my-2" />
           <div className="text-xs space-y-1">
-            <div className="flex justify-between">
-              <span>Pago ({ticket.payment.method}):</span>
-              <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.received.toFixed(2)}</span>
-            </div>
-            {ticket.payment.change > 0 && (
-              <div className="flex justify-between font-semibold">
-                <span>Vuelto:</span>
-                <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.change.toFixed(2)}</span>
-              </div>
+            {ticket.payment.method === "mixed" && ticket.payment.mixedPayments?.length ? (
+              <>
+                <div className="flex justify-between font-semibold">
+                  <span>Pago Mixto:</span>
+                  <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.amount.toFixed(2)}</span>
+                </div>
+                {ticket.payment.mixedPayments.map((part: any, idx: number) => {
+                  const sym = ticket.payment.currency === "NIO" ? "C$" : "$";
+                  const label = part.method === "cash" ? "Efectivo" : part.method === "card" ? "Tarjeta" : "Transferencia";
+                  return (
+                    <div key={idx} className="pl-2 space-y-0.5">
+                      <div className="flex justify-between text-muted-foreground print:text-gray-600">
+                        <span>↳ {label}:</span>
+                        <span>{sym}{part.amount.toFixed(2)}</span>
+                      </div>
+                      {part.method === "cash" && part.received > part.amount && (
+                        <div className="flex justify-between text-muted-foreground print:text-gray-600">
+                          <span className="pl-2">Recibido:</span>
+                          <span>{sym}{part.received.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {part.change > 0 && (
+                        <div className="flex justify-between font-semibold print:text-black">
+                          <span className="pl-2">Vuelto:</span>
+                          <span>{sym}{part.change.toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between">
+                  <span>Pago ({ticket.payment.method === "cash" ? "Efectivo" : ticket.payment.method === "card" ? "Tarjeta" : ticket.payment.method === "transfer" ? "Transferencia" : ticket.payment.method}):</span>
+                  <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.received.toFixed(2)}</span>
+                </div>
+                {ticket.payment.change > 0 && (
+                  <div className="flex justify-between font-semibold">
+                    <span>Vuelto:</span>
+                    <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.change.toFixed(2)}</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </>

@@ -10,6 +10,7 @@ import MembershipRenewalModal from "@/components/memberships/MembershipRenewalMo
 import PaymentModal from "@/components/pos/PaymentModal";
 import TicketPrint from "@/components/pos/TicketPrint";
 import PermissionModal from "@/components/PermissionModal";
+import { recordTicketPayment } from "@/lib/recordTicketPayment";
 
 
 
@@ -226,19 +227,17 @@ export default function Memberships() {
         throw ticketErr;
       }
 
-      // Create payment record
-      console.log("[Memberships] paymentData:", paymentData, "exchangeRate:", exchangeRate);
-      const { error: paymentErr } = await supabase.from("payments").insert({
-        ticket_id: (ticket as any).id,
-        amount: paymentData.amount, // Ya viene convertido por el PaymentModal
-        currency: paymentData.currency,
-        payment_method: paymentData.method,
-        amount_received: paymentData.received,
-        change_amount: paymentData.change,
-        exchange_rate: exchangeRate,
-      } as any);
+      const rollbackTicket = async () => {
+        await supabase.from("ticket_mixed_payments").delete().eq("ticket_id", (ticket as any).id);
+        await supabase.from("payments").delete().eq("ticket_id", (ticket as any).id);
+        await supabase.from("ticket_items").delete().eq("ticket_id", (ticket as any).id);
+        await supabase.from("tickets").delete().eq("id", (ticket as any).id);
+      };
 
-      if (paymentErr) {
+      try {
+        await recordTicketPayment(supabase, (ticket as any).id, paymentData, exchangeRate);
+      } catch (paymentErr) {
+        await rollbackTicket();
         console.error("Error creating payment:", paymentErr);
         throw paymentErr;
       }
@@ -409,18 +408,19 @@ export default function Memberships() {
 
       if (ticketErr) throw ticketErr;
 
-      // Create payment record
-      const { error: paymentErr } = await supabase.from('payments').insert({
-        ticket_id: (ticket as any).id,
-        amount: paymentData.amount,
-        currency: paymentData.currency,
-        payment_method: paymentData.method,
-        amount_received: paymentData.received,
-        change_amount: paymentData.change,
-        exchange_rate: exchangeRate,
-      } as any);
+      const rollbackTicket = async () => {
+        await supabase.from("ticket_mixed_payments").delete().eq("ticket_id", (ticket as any).id);
+        await supabase.from("payments").delete().eq("ticket_id", (ticket as any).id);
+        await supabase.from("ticket_items").delete().eq("ticket_id", (ticket as any).id);
+        await supabase.from("tickets").delete().eq("id", (ticket as any).id);
+      };
 
-      if (paymentErr) throw paymentErr;
+      try {
+        await recordTicketPayment(supabase, (ticket as any).id, paymentData, exchangeRate);
+      } catch (paymentErr) {
+        await rollbackTicket();
+        throw paymentErr;
+      }
 
       // Create ticket_item with snapshot
       const { error: ticketItemErr } = await supabase.from('ticket_items').insert({
