@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { niStartOfDay, niFormatTime, niFormatLongDate, niFormatShortDate, niNow } from "@/utils/niDate";
+import { useBusinessLine } from "@/contexts/BusinessLineContext";
+import { BUSINESS_LINE_LABELS } from "@/lib/businessLine";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TicketDetail {
@@ -27,28 +29,45 @@ interface DayStats {
   cardUSD: number;
   transfer: number;
   transferUSD: number;
+  // From mixed payments (decomposed)
+  mixedCashNIO: number;
+  mixedCardNIO: number;
+  mixedTransferNIO: number;
+  mixedCashUSD: number;
+  mixedCardUSD: number;
+  mixedTransferUSD: number;
   totalTickets: number;
   cashTickets: number;
   cardTickets: number;
   transferTickets: number;
+  mixedTickets: number;
   tickets: TicketDetail[];
 }
 
 type ToastType = { msg: string; type: "success" | "error" } | null;
-type MethodFilter = "all" | "cash" | "card" | "transfer";
+type MethodFilter = "all" | "cash" | "card" | "transfer" | "mixed";
+
+interface MixedTicketBreakdown {
+  ticket_id: string;
+  parts: { method: string; applied_nio: number; currency: string; amount: number }[];
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function CashClose() {
+  const { businessLine } = useBusinessLine();
   const { user, profile } = useAuth();
   const { data: settings } = useBusinessSettings();
 
   // Data
   const [dayStats, setDayStats] = useState<DayStats>({
     cashNIO: 0, cashUSD: 0, card: 0, cardUSD: 0, transfer: 0, transferUSD: 0,
-    totalTickets: 0, cashTickets: 0, cardTickets: 0, transferTickets: 0,
+    mixedCashNIO: 0, mixedCardNIO: 0, mixedTransferNIO: 0,
+    mixedCashUSD: 0, mixedCardUSD: 0, mixedTransferUSD: 0,
+    totalTickets: 0, cashTickets: 0, cardTickets: 0, transferTickets: 0, mixedTickets: 0,
     tickets: [],
   });
   const [history, setHistory] = useState<any[]>([]);
+  const [mixedBreakdowns, setMixedBreakdowns] = useState<MixedTicketBreakdown[]>([]);
   const [loading, setLoading] = useState(true);
 
   // User inputs
@@ -65,7 +84,7 @@ export default function CashClose() {
   const [showHistory, setShowHistory] = useState(false);
 
   // ── Load data ───────────────────────────────────
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); }, [businessLine]);
 
   const loadAll = async () => {
     setLoading(true);
@@ -76,24 +95,67 @@ export default function CashClose() {
   const loadDayStats = async () => {
     const todayISO = niStartOfDay();
 
-    const { data: payments } = await supabase
+    // 1. Fetch payments for today
+    const { data: paymentsRaw } = await supabase
       .from("payments")
-      .select(`
-        *,
-        tickets(
-          id, ticket_number, total, created_at, vehicle_plate, user_id,
-          vehicle_types(name),
-          ticket_items(services(name))
-        )
-      `)
+      .select("*")
       .gte("created_at", todayISO);
 
-    if (!payments) return;
+    const { data: lineTicketsToday } = await supabase
+      .from("tickets")
+      .select("id")
+      .eq("business_line", businessLine)
+      .gte("created_at", todayISO);
+
+    const allowedTicketIds = new Set((lineTicketsToday || []).map((t: { id: number }) => t.id));
+    const payments = (paymentsRaw || []).filter((p: { ticket_id: number }) =>
+      allowedTicketIds.has(p.ticket_id)
+    );
+
+    if (!payments || payments.length === 0) {
+      setDayStats({
+        cashNIO: 0, cashUSD: 0, card: 0, cardUSD: 0, transfer: 0, transferUSD: 0,
+        mixedCashNIO: 0, mixedCardNIO: 0, mixedTransferNIO: 0,
+        mixedCashUSD: 0, mixedCardUSD: 0, mixedTransferUSD: 0,
+        totalTickets: 0,
+        cashTickets: 0, cardTickets: 0, transferTickets: 0, mixedTickets: 0,
+        tickets: [],
+      });
+      setMixedBreakdowns([]);
+      return;
+    }
+
+    const ticketIds = payments.map((p: any) => p.ticket_id);
+
+    // 2. Fetch tickets for these payments
+    const { data: ticketsRaw } = await supabase
+      .from("tickets")
+      .select("*, vehicle_types(name)")
+      .eq("business_line", businessLine)
+      .in("id", ticketIds);
+
+    const ticketsMap: Record<number, any> = {};
+    (ticketsRaw || []).forEach((t: any) => {
+      ticketsMap[t.id] = t;
+    });
+
+    // 3. Fetch ticket_items for these tickets
+    const { data: ticketItems } = await supabase
+      .from("ticket_items")
+      .select("ticket_id, services(name), products(name), service_name_snapshot")
+      .in("ticket_id", ticketIds) as any;
+
+    const itemsMap: Record<number, any[]> = {};
+    (ticketItems || []).forEach((ti: any) => {
+      if (!itemsMap[ti.ticket_id]) itemsMap[ti.ticket_id] = [];
+      itemsMap[ti.ticket_id].push(ti);
+    });
 
     // Collect unique user_ids to fetch cashier names
     const userIds = new Set<string>();
     payments.forEach((p: any) => {
-      if (p.tickets?.user_id) userIds.add(p.tickets.user_id);
+      const t = ticketsMap[p.ticket_id];
+      if (t?.user_id) userIds.add(t.user_id);
     });
 
     // Fetch profiles for cashier names
@@ -108,35 +170,47 @@ export default function CashClose() {
       }
     }
 
-    // Try to fetch customer names for tickets that have customer_id
-    const ticketIds = payments.filter((p: any) => p.tickets).map((p: any) => p.ticket_id);
+    // Fetch customer names for tickets that have customer_id
     const customerMap: Map<number, { name: string; plate: string }> = new Map();
-    if (ticketIds.length > 0) {
+    const customerIds = [...new Set((ticketsRaw || []).map((t: any) => t.customer_id).filter(Boolean))];
+    if (customerIds.length > 0) {
       try {
-        const { data: ticketCustomers } = await supabase
-          .from("tickets")
-          .select("id, customer_id, customers(name, plate)")
-          .in("id", ticketIds) as any;
-        if (ticketCustomers) {
-          ticketCustomers.forEach((tc: any) => {
-            if (tc.customers) {
-              customerMap.set(tc.id, { name: tc.customers.name, plate: tc.customers.plate || "" });
+        const { data: customers } = await supabase
+          .from("customers")
+          .select("id, name, plate")
+          .in("id", customerIds);
+        if (customers) {
+          const custById: Record<number, any> = {};
+          customers.forEach((c: any) => { custById[c.id] = c; });
+          
+          (ticketsRaw || []).forEach((t: any) => {
+            if (t.customer_id && custById[t.customer_id]) {
+              const c = custById[t.customer_id];
+              customerMap.set(t.id, { name: c.name, plate: c.plate || "" });
             }
           });
         }
-      } catch { /* customer_id may not exist, no problem */ }
+      } catch (err) {
+        console.error("Error fetching customers for cash close:", err);
+      }
     }
 
     let cashNIO = 0, cashUSD = 0, card = 0, cardUSD = 0, transfer = 0, transferUSD = 0;
-    let cashTickets = 0, cardTickets = 0, transferTickets = 0;
+    let cashTickets = 0, cardTickets = 0, transferTickets = 0, mixedTickets = 0;
     const ticketMap: Map<string, TicketDetail> = new Map();
 
     payments.forEach((p: any) => {
-      const t = p.tickets;
-      if (t && !ticketMap.has(p.ticket_id)) {
-        const items = t.ticket_items || [];
-        const serviceName = items.length > 0 && items[0].services ? items[0].services.name : "—";
-        const vehicleName = t.vehicle_types?.name || "—";
+      const t = ticketsMap[p.ticket_id];
+      if (!t) return;
+      if (!ticketMap.has(p.ticket_id)) {
+        const items = itemsMap[p.ticket_id] || [];
+        const firstItem = items[0];
+        const serviceName =
+          firstItem?.service_name_snapshot ||
+          firstItem?.products?.name ||
+          firstItem?.services?.name ||
+          "—";
+        const vehicleName = t.vehicle_types?.name || (businessLine === "barbershop" ? "—" : "—");
         const custData = customerMap.get(p.ticket_id);
         const customerName = custData?.name || "Cliente General";
         const plate = t.vehicle_plate || custData?.plate || "—";
@@ -168,8 +242,72 @@ export default function CashClose() {
       } else if (p.payment_method === "transfer") {
         if (isUSD) { transferUSD += Number(p.amount); } else { transfer += Number(p.amount); }
         transferTickets++;
+      } else if (p.payment_method === "mixed") {
+        mixedTickets++;
       }
     });
+
+    // ── Fetch mixed payment breakdown and distribute to correct buckets ──
+    let mixedCashNIO = 0, mixedCardNIO = 0, mixedTransferNIO = 0;
+    let mixedCashUSD = 0, mixedCardUSD = 0, mixedTransferUSD = 0;
+    const { data: mixedParts, error: mixedPartsErr } = await (supabase as any)
+      .from("ticket_mixed_payments")
+      .select("*")
+      .in("ticket_id", ticketIds);
+
+    if (mixedPartsErr) console.error("[CashClose] ticket_mixed_payments error:", mixedPartsErr.message);
+
+    // Build per-ticket breakdown map
+    const breakdownMap = new Map<string, { method: string; applied_nio: number; currency: string; amount: number }[]>();
+
+    if (mixedParts) {
+      mixedParts.forEach((mp: any) => {
+        const isUSD = mp.currency === "USD";
+        const applied = Math.max(0, Number(mp.applied_nio) || 0);
+        const partAmount = Number(mp.amount) || 0;
+
+        if (isUSD) {
+          if (mp.method === "cash") {
+            mixedCashUSD += partAmount;
+            cashUSD += partAmount;
+          } else if (mp.method === "card") {
+            mixedCardUSD += partAmount;
+            cardUSD += partAmount;
+          } else if (mp.method === "transfer") {
+            mixedTransferUSD += partAmount;
+            transferUSD += partAmount;
+          }
+        } else {
+          const nioAmount = applied > 0 ? applied : partAmount;
+          if (mp.method === "cash") {
+            mixedCashNIO += nioAmount;
+            cashNIO += nioAmount;
+          } else if (mp.method === "card") {
+            mixedCardNIO += nioAmount;
+            card += nioAmount;
+          } else if (mp.method === "transfer") {
+            mixedTransferNIO += nioAmount;
+            transfer += nioAmount;
+          }
+        }
+
+        const tid = String(mp.ticket_id);
+        if (!breakdownMap.has(tid)) breakdownMap.set(tid, []);
+        breakdownMap.get(tid)!.push({
+          method: mp.method,
+          applied_nio: applied,
+          currency: mp.currency || "NIO",
+          amount: partAmount,
+        });
+      });
+    }
+
+    // Convert map to array state
+    const breakdownArr: MixedTicketBreakdown[] = [];
+    breakdownMap.forEach((parts, ticket_id) => {
+      breakdownArr.push({ ticket_id, parts });
+    });
+    setMixedBreakdowns(breakdownArr);
 
     const tickets = Array.from(ticketMap.values()).sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -177,8 +315,10 @@ export default function CashClose() {
 
     setDayStats({
       cashNIO, cashUSD, card, cardUSD, transfer, transferUSD,
+      mixedCashNIO, mixedCardNIO, mixedTransferNIO,
+      mixedCashUSD, mixedCardUSD, mixedTransferUSD,
       totalTickets: tickets.length,
-      cashTickets, cardTickets, transferTickets,
+      cashTickets, cardTickets, transferTickets, mixedTickets,
       tickets,
     });
   };
@@ -187,6 +327,7 @@ export default function CashClose() {
     const { data: closures } = await supabase
       .from("cash_closures")
       .select("*")
+      .eq("business_line", businessLine)
       .order("closed_at", { ascending: false });
 
     if (!closures) return;
@@ -251,6 +392,7 @@ export default function CashClose() {
 
     const { error } = await supabase.from("cash_closures").insert({
       cashier_id: user.id,
+      business_line: businessLine,
       shift: "",
       initial_balance: 0,
       total_cash_nio: dayStats.cashNIO,
@@ -289,14 +431,16 @@ export default function CashClose() {
     : [];
 
   const methodLabel = (m: string) =>
-    m === "cash" ? "Efectivo" : m === "card" ? "Tarjeta" : m === "transfer" ? "Transferencia" : m;
+    m === "cash" ? "Efectivo" : m === "card" ? "Tarjeta" : m === "transfer" ? "Transferencia" : m === "mixed" ? "Mixto" : m;
 
   const methodBadgeClass = (m: string) =>
     m === "cash"
       ? "bg-emerald-100 text-emerald-700"
       : m === "card"
         ? "bg-blue-100 text-blue-700"
-        : "bg-violet-100 text-violet-700";
+        : m === "mixed"
+          ? "bg-orange-100 text-orange-700"
+          : "bg-violet-100 text-violet-700";
 
   const fmtDate = (iso: string) => niFormatShortDate(iso);
   const fmtTime = (iso: string) => niFormatTime(iso);
@@ -321,7 +465,7 @@ export default function CashClose() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-3xl font-bold text-foreground flex items-center gap-3">
-            <span className="text-4xl">🏦</span> Cierre de Caja
+            <span className="text-4xl">🏦</span> Cierre de Caja — {BUSINESS_LINE_LABELS[businessLine]}
           </h2>
           <p className="text-muted-foreground mt-1">
             {niFormatLongDate()}
@@ -469,7 +613,7 @@ export default function CashClose() {
         </p>
 
         {/* Clickable cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+        <div className={`grid grid-cols-1 sm:grid-cols-2 ${dayStats.mixedTickets > 0 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-4 mt-2`}>
           {/* Cash */}
           <button
             onClick={() => toggleMethodFilter("cash")}
@@ -513,6 +657,67 @@ export default function CashClose() {
               </div>
             )}
           </button>
+
+          {/* Mixed — only shown when there are mixed tickets */}
+          {dayStats.mixedTickets > 0 && (
+            <button
+              onClick={() => toggleMethodFilter("mixed")}
+              className={`rounded-2xl p-5 text-left transition-all duration-200 border-2 ${methodFilter === "mixed"
+                ? "border-orange-500 ring-2 ring-orange-300 scale-[1.02] bg-orange-100 dark:bg-orange-900/40"
+                : "border-orange-200 bg-orange-50 hover:border-orange-400 hover:scale-[1.01] dark:bg-orange-900/20 dark:border-orange-700/40"
+                }`}>
+              <div className="flex items-center gap-2 mb-3">
+                <i className="fa-solid fa-shuffle text-2xl text-orange-600" />
+                <span className="font-bold text-orange-700 dark:text-orange-400 text-base">Mixto</span>
+                {methodFilter === "mixed" && <i className="fa-solid fa-chevron-down text-xs text-orange-500 ml-auto" />}
+              </div>
+              <p className="text-4xl font-black text-orange-700 dark:text-orange-300">
+                C${(
+                  dayStats.mixedCashNIO + dayStats.mixedCardNIO + dayStats.mixedTransferNIO
+                  + (dayStats.mixedCashUSD + dayStats.mixedCardUSD + dayStats.mixedTransferUSD) * rate
+                ).toFixed(2)}
+              </p>
+              <p className="text-xs text-orange-600 mt-1">{dayStats.mixedTickets} factura{dayStats.mixedTickets !== 1 ? "s" : ""}</p>
+              <div className="mt-2 space-y-1">
+                {dayStats.mixedCashNIO > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-money-bills text-[9px] text-emerald-600" />
+                    <p className="text-[10px] text-emerald-600 font-semibold">Ef. C${dayStats.mixedCashNIO.toFixed(2)}</p>
+                  </div>
+                )}
+                {dayStats.mixedCashUSD > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-money-bills text-[9px] text-emerald-600" />
+                    <p className="text-[10px] text-emerald-600 font-semibold">Ef. ${dayStats.mixedCashUSD.toFixed(2)}</p>
+                  </div>
+                )}
+                {dayStats.mixedCardNIO > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-credit-card text-[9px] text-blue-600" />
+                    <p className="text-[10px] text-blue-600 font-semibold">Tj. C${dayStats.mixedCardNIO.toFixed(2)}</p>
+                  </div>
+                )}
+                {dayStats.mixedCardUSD > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-credit-card text-[9px] text-blue-600" />
+                    <p className="text-[10px] text-blue-600 font-semibold">Tj. ${dayStats.mixedCardUSD.toFixed(2)}</p>
+                  </div>
+                )}
+                {dayStats.mixedTransferNIO > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-building-columns text-[9px] text-violet-600" />
+                    <p className="text-[10px] text-violet-600 font-semibold">Tr. C${dayStats.mixedTransferNIO.toFixed(2)}</p>
+                  </div>
+                )}
+                {dayStats.mixedTransferUSD > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-building-columns text-[9px] text-violet-600" />
+                    <p className="text-[10px] text-violet-600 font-semibold">Tr. ${dayStats.mixedTransferUSD.toFixed(2)}</p>
+                  </div>
+                )}
+              </div>
+            </button>
+          )}
 
           {/* Card */}
           <button
@@ -596,26 +801,54 @@ export default function CashClose() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredTickets.map((t, i) => (
-                      <tr key={t.id} className={`border-t border-border ${i % 2 === 0 ? "bg-background" : "bg-muted/20"} hover:bg-primary/5 transition-colors`}>
-                        <td className="px-3 py-2.5 font-semibold text-foreground">{t.ticket_number}</td>
-                        <td className="px-3 py-2.5 text-muted-foreground">{fmtDate(t.created_at)}</td>
-                        <td className="px-3 py-2.5 text-muted-foreground">{fmtTime(t.created_at)}</td>
-                        <td className="px-3 py-2.5 text-foreground">{t.service_name}</td>
-                        <td className="px-3 py-2.5 text-foreground">{t.vehicle_name}</td>
-                        <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{t.plate}</td>
-                        <td className="px-3 py-2.5 text-foreground">{t.customer_name}</td>
-                        <td className="px-3 py-2.5">
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${methodBadgeClass(t.method)}`}>
-                            {methodLabel(t.method)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5 text-muted-foreground text-xs">{t.cashier_name}</td>
-                        <td className="px-3 py-2.5 text-right font-black text-foreground">
-                          {t.currency === "USD" ? "$" : "C$"}{t.payment_amount.toFixed(2)}
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredTickets.map((t, i) => {
+                      const mixedBreakdown = t.method === "mixed"
+                        ? mixedBreakdowns.find(b => b.ticket_id === String(t.id))
+                        : undefined;
+                      return (
+                        <tr key={t.id} className={`border-t border-border ${i % 2 === 0 ? "bg-background" : "bg-muted/20"} hover:bg-primary/5 transition-colors`}>
+                          <td className="px-3 py-2.5 font-semibold text-foreground">{t.ticket_number}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground">{fmtDate(t.created_at)}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground">{fmtTime(t.created_at)}</td>
+                          <td className="px-3 py-2.5 text-foreground">{t.service_name}</td>
+                          <td className="px-3 py-2.5 text-foreground">{t.vehicle_name}</td>
+                          <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{t.plate}</td>
+                          <td className="px-3 py-2.5 text-foreground">{t.customer_name}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex flex-col gap-1">
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${methodBadgeClass(t.method)}`}>
+                                {methodLabel(t.method)}
+                              </span>
+                              {t.method === "mixed" && !mixedBreakdown && (
+                                <span className="text-[9px] text-muted-foreground italic">Desglose no disponible</span>
+                              )}
+                              {mixedBreakdown && (
+                                <div className="space-y-0.5">
+                                  {mixedBreakdown.parts.map((part, pi) => {
+                                    const partLabel = part.method === "cash" ? "Ef." : part.method === "card" ? "Tj." : "Tr.";
+                                    const partColor = part.method === "cash" ? "text-emerald-600" : part.method === "card" ? "text-blue-600" : "text-violet-600";
+                                    const partIcon = part.method === "cash" ? "fa-money-bills" : part.method === "card" ? "fa-credit-card" : "fa-building-columns";
+                                    const isPartUSD = part.currency === "USD";
+                                    const displayAmt = isPartUSD ? part.amount : (part.applied_nio > 0 ? part.applied_nio : part.amount);
+                                    const sym = isPartUSD ? "$" : "C$";
+                                    return (
+                                      <div key={pi} className={`flex items-center gap-1 text-[9px] font-semibold ${partColor}`}>
+                                        <i className={`fa-solid ${partIcon} text-[8px]`} />
+                                        {partLabel} {sym}{Number(displayAmt).toFixed(2)}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 text-muted-foreground text-xs">{t.cashier_name}</td>
+                          <td className="px-3 py-2.5 text-right font-black text-foreground">
+                            {t.currency === "USD" ? "$" : "C$"}{t.payment_amount.toFixed(2)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 border-border bg-muted/30">
@@ -968,7 +1201,7 @@ export default function CashClose() {
 
                 <div className="pos-card p-4 space-y-3 text-sm">
                   <p className="font-bold text-foreground text-base">Resumen del cierre:</p>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className={`grid gap-2 ${dayStats.mixedTickets > 0 ? 'grid-cols-2' : 'grid-cols-3'}`}>
                     <div className="text-center p-3 rounded-xl bg-emerald-50 border border-emerald-200">
                       <i className="fa-solid fa-money-bills text-emerald-600 text-lg mb-1 block" />
                       <p className="text-xs text-emerald-600 font-semibold">Efectivo</p>
@@ -987,6 +1220,32 @@ export default function CashClose() {
                       <p className="font-black text-blue-700">C${dayStats.card.toFixed(2)}</p>
                       {dayStats.cardUSD > 0 && <p className="text-[10px] text-green-600 font-bold leading-none">+ ${dayStats.cardUSD.toFixed(2)} USD</p>}
                     </div>
+                    {dayStats.mixedTickets > 0 && (
+                      <div className="col-span-2 p-3 rounded-xl bg-orange-50 border border-orange-200">
+                        <div className="flex items-center gap-2 mb-2">
+                          <i className="fa-solid fa-shuffle text-orange-600" />
+                          <p className="text-xs text-orange-600 font-semibold">Mixto ({dayStats.mixedTickets} factura{dayStats.mixedTickets !== 1 ? "s" : ""})</p>
+                          <p className="font-black text-orange-700 ml-auto">C${(dayStats.mixedCashNIO + dayStats.mixedCardNIO + dayStats.mixedTransferNIO).toFixed(2)}</p>
+                        </div>
+                        <div className="flex gap-3 flex-wrap">
+                          {dayStats.mixedCashNIO > 0 && (
+                            <div className="flex items-center gap-1 text-[10px] text-emerald-600 font-semibold">
+                              <i className="fa-solid fa-money-bills text-[9px]" /> Ef. C${dayStats.mixedCashNIO.toFixed(2)}
+                            </div>
+                          )}
+                          {dayStats.mixedCardNIO > 0 && (
+                            <div className="flex items-center gap-1 text-[10px] text-blue-600 font-semibold">
+                              <i className="fa-solid fa-credit-card text-[9px]" /> Tj. C${dayStats.mixedCardNIO.toFixed(2)}
+                            </div>
+                          )}
+                          {dayStats.mixedTransferNIO > 0 && (
+                            <div className="flex items-center gap-1 text-[10px] text-violet-600 font-semibold">
+                              <i className="fa-solid fa-building-columns text-[9px]" /> Tr. C${dayStats.mixedTransferNIO.toFixed(2)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">

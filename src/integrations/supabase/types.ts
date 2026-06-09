@@ -13,6 +13,7 @@ export type Database = {
                 Row: {
                     address: string | null
                     business_name: string
+                    business_line: Database["public"]["Enums"]["business_line"]
                     email: string | null
                     exchange_rate: number
                     id: number
@@ -29,6 +30,7 @@ export type Database = {
                 }
                 Insert: {
                     address?: string | null
+                    business_line?: Database["public"]["Enums"]["business_line"]
                     business_name?: string
                     email?: string | null
                     exchange_rate?: number
@@ -46,6 +48,7 @@ export type Database = {
                 }
                 Update: {
                     address?: string | null
+                    business_line?: Database["public"]["Enums"]["business_line"]
                     business_name?: string
                     email?: string | null
                     exchange_rate?: number
@@ -66,6 +69,7 @@ export type Database = {
             cash_closures: {
                 Row: {
                     bills_count: Json | null
+                    business_line: Database["public"]["Enums"]["business_line"]
                     cashier_id: string
                     closed_at: string
                     coins_count: Json | null
@@ -84,6 +88,7 @@ export type Database = {
                 }
                 Insert: {
                     bills_count?: Json | null
+                    business_line?: Database["public"]["Enums"]["business_line"]
                     cashier_id: string
                     closed_at?: string
                     coins_count?: Json | null
@@ -102,6 +107,7 @@ export type Database = {
                 }
                 Update: {
                     bills_count?: Json | null
+                    business_line?: Database["public"]["Enums"]["business_line"]
                     cashier_id?: string
                     closed_at?: string
                     coins_count?: Json | null
@@ -119,6 +125,95 @@ export type Database = {
                     total_transfer?: number
                 }
                 Relationships: []
+            }
+            products: {
+                Row: {
+                    id: number
+                    name: string
+                    description: string | null
+                    sku: string | null
+                    price: number
+                    stock_quantity: number
+                    min_stock_level: number
+                    is_active: boolean
+                    sort_order: number
+                    icon: string | null
+                    business_line: Database["public"]["Enums"]["business_line"]
+                    created_at: string
+                    updated_at: string
+                }
+                Insert: {
+                    id?: number
+                    name: string
+                    description?: string | null
+                    sku?: string | null
+                    price: number
+                    stock_quantity?: number
+                    min_stock_level?: number
+                    is_active?: boolean
+                    sort_order?: number
+                    icon?: string | null
+                    business_line?: Database["public"]["Enums"]["business_line"]
+                    created_at?: string
+                    updated_at?: string
+                }
+                Update: {
+                    id?: number
+                    name?: string
+                    description?: string | null
+                    sku?: string | null
+                    price?: number
+                    stock_quantity?: number
+                    min_stock_level?: number
+                    is_active?: boolean
+                    sort_order?: number
+                    icon?: string | null
+                    business_line?: Database["public"]["Enums"]["business_line"]
+                    created_at?: string
+                    updated_at?: string
+                }
+                Relationships: []
+            }
+            stock_movements: {
+                Row: {
+                    id: number
+                    product_id: number
+                    quantity_delta: number
+                    reason: Database["public"]["Enums"]["stock_movement_reason"]
+                    ticket_id: number | null
+                    user_id: string | null
+                    notes: string | null
+                    created_at: string
+                }
+                Insert: {
+                    id?: number
+                    product_id: number
+                    quantity_delta: number
+                    reason: Database["public"]["Enums"]["stock_movement_reason"]
+                    ticket_id?: number | null
+                    user_id?: string | null
+                    notes?: string | null
+                    created_at?: string
+                }
+                Update: {
+                    id?: number
+                    product_id?: number
+                    quantity_delta?: number
+                    reason?: Database["public"]["Enums"]["stock_movement_reason"]
+                    ticket_id?: number | null
+                    user_id?: string | null
+                    notes?: string | null
+                    created_at?: string
+                }
+                Relationships: [
+                    {
+                        foreignKeyName: "stock_movements_product_id_fkey"
+                        columns: ["product_id"]
+                        isOneToOne: false
+                        referencedRelation: "products"
+                        referencedColumns: ["id"]
+                    },
+                ]
             }
             cash_expenses: {
                 Row: {
@@ -470,6 +565,8 @@ export type Database = {
             }
             services: {
                 Row: {
+                    base_price: number | null
+                    business_line: Database["public"]["Enums"]["business_line"]
                     color: string | null
                     created_at: string
                     description: string | null
@@ -481,6 +578,8 @@ export type Database = {
                     sort_order: number | null
                 }
                 Insert: {
+                    base_price?: number | null
+                    business_line?: Database["public"]["Enums"]["business_line"]
                     color?: string | null
                     created_at?: string
                     description?: string | null
@@ -492,6 +591,8 @@ export type Database = {
                     sort_order?: number | null
                 }
                 Update: {
+                    base_price?: number | null
+                    business_line?: Database["public"]["Enums"]["business_line"]
                     color?: string | null
                     created_at?: string
                     description?: string | null
@@ -504,35 +605,98 @@ export type Database = {
                 }
                 Relationships: []
             }
+            ticket_mixed_payments: {
+                Row: {
+                    id: number
+                    ticket_id: number
+                    method: string
+                    currency: string
+                    amount: number
+                    exchange_rate: number
+                    amount_nio: number
+                    applied_nio: number
+                    change_nio: number
+                    created_at: string
+                }
+                Insert: {
+                    id?: number
+                    ticket_id: number
+                    method: string
+                    currency?: string
+                    amount: number
+                    exchange_rate?: number
+                    amount_nio: number
+                    applied_nio?: number
+                    change_nio?: number
+                    created_at?: string
+                }
+                Update: {
+                    id?: number
+                    ticket_id?: number
+                    method?: string
+                    currency?: string
+                    amount?: number
+                    exchange_rate?: number
+                    amount_nio?: number
+                    applied_nio?: number
+                    change_nio?: number
+                    created_at?: string
+                }
+                Relationships: [
+                    {
+                        foreignKeyName: "ticket_mixed_payments_ticket_id_fkey"
+                        columns: ["ticket_id"]
+                        isOneToOne: false
+                        referencedRelation: "tickets"
+                        referencedColumns: ["id"]
+                    },
+                ]
+            }
             ticket_items: {
                 Row: {
                     created_at: string
                     id: number
+                    item_type: Database["public"]["Enums"]["ticket_item_type"]
                     price: number
                     price_snapshot: number | null
-                    service_id: number
+                    product_id: number | null
+                    quantity: number
+                    service_id: number | null
                     service_name_snapshot: string | null
                     ticket_id: number
                 }
                 Insert: {
                     created_at?: string
                     id?: number
+                    item_type?: Database["public"]["Enums"]["ticket_item_type"]
                     price: number
                     price_snapshot?: number | null
-                    service_id: number
+                    product_id?: number | null
+                    quantity?: number
+                    service_id?: number | null
                     service_name_snapshot?: string | null
                     ticket_id: number
                 }
                 Update: {
                     created_at?: string
                     id?: number
+                    item_type?: Database["public"]["Enums"]["ticket_item_type"]
                     price?: number
                     price_snapshot?: number | null
-                    service_id?: number
+                    product_id?: number | null
+                    quantity?: number
+                    service_id?: number | null
                     service_name_snapshot?: string | null
                     ticket_id?: number
                 }
                 Relationships: [
+                    {
+                        foreignKeyName: "ticket_items_product_id_fkey"
+                        columns: ["product_id"]
+                        isOneToOne: false
+                        referencedRelation: "products"
+                        referencedColumns: ["id"]
+                    },
                     {
                         foreignKeyName: "ticket_items_service_id_fkey"
                         columns: ["service_id"]
@@ -551,6 +715,7 @@ export type Database = {
             }
             tickets: {
                 Row: {
+                    business_line: Database["public"]["Enums"]["business_line"]
                     created_at: string
                     id: number
                     status: string | null
@@ -562,6 +727,7 @@ export type Database = {
                     vehicle_type_id: number | null
                 }
                 Insert: {
+                    business_line?: Database["public"]["Enums"]["business_line"]
                     created_at?: string
                     id?: number
                     status?: string | null
@@ -573,6 +739,7 @@ export type Database = {
                     vehicle_type_id?: number | null
                 }
                 Update: {
+                    business_line?: Database["public"]["Enums"]["business_line"]
                     created_at?: string
                     id?: number
                     status?: string | null
@@ -628,10 +795,28 @@ export type Database = {
             [_ in never]: never
         }
         Functions: {
-            [_ in never]: never
+            decrement_product_stock: {
+                Args: {
+                    p_product_id: number
+                    p_qty: number
+                    p_ticket_id?: number
+                }
+                Returns: Json
+            }
+            adjust_product_stock: {
+                Args: {
+                    p_product_id: number
+                    p_delta: number
+                    p_reason?: Database["public"]["Enums"]["stock_movement_reason"]
+                    p_notes?: string
+                }
+                Returns: Json
+            }
         }
         Enums: {
-            [_ in never]: never
+            business_line: "car_wash" | "barbershop"
+            ticket_item_type: "service" | "product"
+            stock_movement_reason: "sale" | "adjustment" | "restock"
         }
         CompositeTypes: {
             [_ in never]: never

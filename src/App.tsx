@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { BusinessLineProvider } from "@/contexts/BusinessLineContext";
 import AppLayout from "@/components/AppLayout";
 import Login from "@/pages/Login";
 import POS from "@/pages/POS";
@@ -15,6 +16,7 @@ import Memberships from "@/pages/Memberships";
 import Services from "@/pages/Services";
 import Reminders from "@/pages/Reminders";
 import Settings from "@/pages/Settings";
+import Inventory from "@/pages/Inventory";
 import NotFound from "@/pages/NotFound";
 import DBValidation from "@/pages/DBValidation";
 import CreateAdmin from "@/pages/CreateAdmin";
@@ -63,6 +65,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <BusinessLineProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<RootRedirect />} />
@@ -74,11 +77,13 @@ const App = () => (
             <Route path="/memberships" element={<ProtectedRoute><Memberships /></ProtectedRoute>} />
             <Route path="/reminders" element={<ProtectedRoute><Reminders /></ProtectedRoute>} />
             <Route path="/services" element={<ProtectedRoute><AdminRoute><Services /></AdminRoute></ProtectedRoute>} />
+            <Route path="/inventory" element={<ProtectedRoute><AdminOrOwnerRoute><Inventory /></AdminOrOwnerRoute></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><AdminRoute><Settings /></AdminRoute></ProtectedRoute>} />
             <Route path="/db-validation" element={<DBValidation />} />
             <Route path="/create-admin" element={<CreateAdmin />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </BusinessLineProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

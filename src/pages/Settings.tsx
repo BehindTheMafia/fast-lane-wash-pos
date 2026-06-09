@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useBusinessSettings, useUpdateBusinessSettings } from "@/hooks/useBusinessSettings";
+import { BUSINESS_LINE_LABELS, type BusinessLine } from "@/lib/businessLine";
 import { niFormatDate } from "@/utils/niDate";
 import { FULL_DATABASE_SCHEMA } from "@/utils/backupSchema";
 import { supabase } from "@/integrations/supabase/client";
@@ -73,8 +74,9 @@ function DangerModal({ title, description, confirmLabel, confirmWord = "ELIMINAR
 
 // ─── Main Settings Page ─────────────────────────────────────────────────────
 export default function Settings() {
-  const { data: settings, isLoading } = useBusinessSettings();
-  const updateSettings = useUpdateBusinessSettings();
+  const [editLine, setEditLine] = useState<BusinessLine>("car_wash");
+  const { data: settings, isLoading } = useBusinessSettings(editLine);
+  const updateSettings = useUpdateBusinessSettings(editLine);
   const [form, setForm] = useState<any>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -96,8 +98,9 @@ export default function Settings() {
 
   if (isLoading) return <div className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
 
-  if (!form && settings) {
-    setTimeout(() => setForm({
+  useEffect(() => {
+    if (!settings) return;
+    setForm({
       business_name: settings.business_name,
       address: settings.address || "",
       phone: settings.phone || "",
@@ -110,13 +113,13 @@ export default function Settings() {
       double_print_ticket: settings.double_print_ticket ?? true,
       qr_image_url: settings.qr_image_url || "",
       qr_text: settings.qr_text || "Tu opinión es importante para nosotros",
-      whatsapp_feedback_enabled: (settings as any).whatsapp_feedback_enabled ?? true,
-      whatsapp_feedback_text: (settings as any).whatsapp_feedback_text || "Tu opinión es importante para nosotros",
-      whatsapp_feedback_link: (settings as any).whatsapp_feedback_link || "https://forms.gle/ZLqzSWJPxrK1Wsum7",
-      whatsapp_greeting: (settings as any).whatsapp_greeting || "¡Gracias por su visita!",
-      whatsapp_link_label: (settings as any).whatsapp_link_label || "Dejanos tu recomendación aquí:",
-    }), 0);
-  }
+      whatsapp_feedback_enabled: (settings as Record<string, unknown>).whatsapp_feedback_enabled ?? true,
+      whatsapp_feedback_text: (settings as Record<string, unknown>).whatsapp_feedback_text || "Tu opinión es importante para nosotros",
+      whatsapp_feedback_link: (settings as Record<string, unknown>).whatsapp_feedback_link || "https://forms.gle/ZLqzSWJPxrK1Wsum7",
+      whatsapp_greeting: (settings as Record<string, unknown>).whatsapp_greeting || "¡Gracias por su visita!",
+      whatsapp_link_label: (settings as Record<string, unknown>).whatsapp_link_label || "Dejanos tu recomendación aquí:",
+    });
+  }, [settings, editLine]);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -251,6 +254,8 @@ export default function Settings() {
         "services",
         "vehicle_types",
         "service_prices",
+        "products",
+        "stock_movements",
         "customers",
         "tickets",
         "ticket_items",
@@ -382,6 +387,21 @@ export default function Settings() {
       <h2 className="text-2xl font-bold text-foreground">
         <i className="fa-solid fa-gear mr-3 text-secondary" />Configuración
       </h2>
+
+      <div className="flex gap-2 p-1 bg-muted/30 rounded-xl w-fit">
+        {(["car_wash", "barbershop"] as BusinessLine[]).map((line) => (
+          <button
+            key={line}
+            type="button"
+            onClick={() => setEditLine(line)}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+              editLine === line ? "bg-background shadow-sm" : "text-muted-foreground"
+            }`}
+          >
+            {BUSINESS_LINE_LABELS[line]}
+          </button>
+        ))}
+      </div>
 
       {/* ── Datos del negocio ── */}
       <div className="pos-card p-6 space-y-4">

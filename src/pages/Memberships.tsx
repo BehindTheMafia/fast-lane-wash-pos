@@ -599,7 +599,8 @@ export default function Memberships() {
   if (loading) return <div className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
+    <>
+      <div className="p-6 space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-foreground">
           <i className="fa-solid fa-id-card mr-3 text-secondary" />Membresías
@@ -702,421 +703,422 @@ export default function Memberships() {
           )}
         </div>
       </div>
+    </div>
 
-      {/* Assign/Sell modal */}
-      {showAssign && (
-        <div className="modal-overlay" onClick={() => setShowAssign(false)}>
-          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-foreground">
-                <i className="fa-solid fa-id-card mr-2 text-secondary" />Vender Membresía
-              </h3>
-              <button onClick={() => setShowAssign(false)} className="touch-btn p-2 hover:bg-muted rounded-lg">
-                <i className="fa-solid fa-times text-muted-foreground" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              {/* Plan Selection */}
-              <div>
-                <label className="text-sm font-semibold text-foreground block mb-2">Plan de membresía</label>
-                <div className="grid grid-cols-1 gap-2">
-                  {plans.map((plan) => {
-                    const isSelected = selectedPlanId === plan.id;
-                    return (
-                      <button
-                        key={plan.id}
-                        onClick={() => setSelectedPlanId(plan.id)}
-                        className={`p-4 rounded-xl border-2 text-left transition-all ${isSelected
-                          ? 'border-primary bg-primary/10 shadow-md'
-                          : 'border-border hover:border-primary/50'
-                          }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className={`font-bold text-sm ${isSelected ? 'text-primary' : 'text-foreground'}`}>
-                              {plan.name}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5">{plan.description}</p>
-                          </div>
-                          {isSelected && <i className="fa-solid fa-circle-check text-primary text-lg" />}
-                        </div>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          <span className="px-2 py-0.5 rounded-full bg-accent/10 text-accent text-xs font-semibold">
-                            {plan.discount_percent}% desc.
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-semibold">
-                            {plan.wash_count} lavados
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-secondary/10 text-secondary text-xs font-semibold">
-                            {Math.round((plan.duration_days || 28) / 7)} semanas
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-semibold text-foreground block mb-1">Cliente</label>
-                <input
-                  type="text"
-                  value={customerSearch}
-                  onChange={(e) => {
-                    setCustomerSearch(e.target.value);
-                    setSelectedCustomer(""); // Reset selection when typing
-                  }}
-                  placeholder="Buscar cliente..."
-                  className="input-touch"
-                />
-                {customerSearch && !selectedCustomer && filteredCustomers.length > 0 && (
-                  <div className="mt-2 max-h-48 overflow-y-auto border border-border rounded-lg bg-background">
-                    {filteredCustomers.map((c: any) => (
-                      <button
-                        key={c.id}
-                        onClick={() => {
-                          setSelectedCustomer(c.id.toString());
-                          setCustomerSearch(c.name);
-                        }}
-                        className="w-full text-left px-3 py-2 hover:bg-muted transition-colors text-sm border-b border-border last:border-b-0"
-                      >
-                        <i className="fa-solid fa-user mr-2 text-secondary" />
-                        {c.name}
-                        {c.plate && <span className="ml-2 text-xs text-muted-foreground">({c.plate})</span>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {selectedCustomer && customerSearch && (
-                  <div className="mt-2 text-sm text-accent flex items-center">
-                    <i className="fa-solid fa-circle-check mr-2" />
-                    Cliente seleccionado: {customerSearch}
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="text-sm font-semibold text-foreground block mb-1">Servicio</label>
-                <select value={selectedService} onChange={(e) => setSelectedService(Number(e.target.value))} className="input-touch">
-                  {services.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-semibold text-foreground block mb-2">Tipo de vehículo</label>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {(vehicleTypes || []).map((vt) => (
+    {/* Assign/Sell modal */}
+    {showAssign && (
+      <div className="modal-overlay" onClick={() => setShowAssign(false)}>
+        <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-foreground">
+              <i className="fa-solid fa-id-card mr-2 text-secondary" />Vender Membresía
+            </h3>
+            <button onClick={() => setShowAssign(false)} className="touch-btn p-2 hover:bg-muted rounded-lg">
+              <i className="fa-solid fa-times text-muted-foreground" />
+            </button>
+          </div>
+          <div className="space-y-4">
+            {/* Plan Selection */}
+            <div>
+              <label className="text-sm font-semibold text-foreground block mb-2">Plan de membresía</label>
+              <div className="grid grid-cols-1 gap-2">
+                {plans.map((plan) => {
+                  const isSelected = selectedPlanId === plan.id;
+                  return (
                     <button
-                      key={vt.id}
-                      onClick={() => setSelectedVehicleType(vt.id)}
-                      className={`p-3 rounded-lg border-2 transition-all ${selectedVehicleType === vt.id
-                        ? 'border-primary bg-primary/10'
+                      key={plan.id}
+                      onClick={() => setSelectedPlanId(plan.id)}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${isSelected
+                        ? 'border-primary bg-primary/10 shadow-md'
                         : 'border-border hover:border-primary/50'
                         }`}
                     >
-                      <i className={`fa-solid ${vt.icon} text-2xl ${selectedVehicleType === vt.id ? 'text-primary' : 'text-secondary'
-                        }`} />
-                      <p className="text-xs font-semibold text-foreground mt-1">{vt.name}</p>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className={`font-bold text-sm ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                            {plan.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{plan.description}</p>
+                        </div>
+                        {isSelected && <i className="fa-solid fa-circle-check text-primary text-lg" />}
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <span className="px-2 py-0.5 rounded-full bg-accent/10 text-accent text-xs font-semibold">
+                          {plan.discount_percent}% desc.
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-semibold">
+                          {plan.wash_count} lavados
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-secondary/10 text-secondary text-xs font-semibold">
+                          {Math.round((plan.duration_days || 28) / 7)} semanas
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-semibold text-foreground block mb-1">Cliente</label>
+              <input
+                type="text"
+                value={customerSearch}
+                onChange={(e) => {
+                  setCustomerSearch(e.target.value);
+                  setSelectedCustomer(""); // Reset selection when typing
+                }}
+                placeholder="Buscar cliente..."
+                className="input-touch"
+              />
+              {customerSearch && !selectedCustomer && filteredCustomers.length > 0 && (
+                <div className="mt-2 max-h-48 overflow-y-auto border border-border rounded-lg bg-background">
+                  {filteredCustomers.map((c: any) => (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        setSelectedCustomer(c.id.toString());
+                        setCustomerSearch(c.name);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-muted transition-colors text-sm border-b border-border last:border-b-0"
+                    >
+                      <i className="fa-solid fa-user mr-2 text-secondary" />
+                      {c.name}
+                      {c.plate && <span className="ml-2 text-xs text-muted-foreground">({c.plate})</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectedCustomer && customerSearch && (
+                <div className="mt-2 text-sm text-accent flex items-center">
+                  <i className="fa-solid fa-circle-check mr-2" />
+                  Cliente seleccionado: {customerSearch}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="text-sm font-semibold text-foreground block mb-1">Servicio</label>
+              <select value={selectedService} onChange={(e) => setSelectedService(Number(e.target.value))} className="input-touch">
+                {services.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-semibold text-foreground block mb-2">Tipo de vehículo</label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {(vehicleTypes || []).map((vt) => (
+                  <button
+                    key={vt.id}
+                    onClick={() => setSelectedVehicleType(vt.id)}
+                    className={`p-3 rounded-lg border-2 transition-all ${selectedVehicleType === vt.id
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/50'
+                      }`}
+                  >
+                    <i className={`fa-solid ${vt.icon} text-2xl ${selectedVehicleType === vt.id ? 'text-primary' : 'text-secondary'
+                      }`} />
+                    <p className="text-xs font-semibold text-foreground mt-1">{vt.name}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Discount Input */}
+            {membershipBasePrice > 0 && (
+              <div>
+                <label className="text-sm font-semibold text-foreground block mb-1">
+                  <i className="fa-solid fa-percent mr-1 text-secondary" />
+                  Descuento personalizado
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={discountPercent || ""}
+                    onChange={(e) => {
+                      const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                      setDiscountPercent(val);
+                    }}
+                    className="input-touch text-center text-lg font-bold flex-1"
+                    placeholder="0"
+                    min={0}
+                    max={100}
+                    step={1}
+                  />
+                  <span className="text-lg font-bold text-muted-foreground">%</span>
+                </div>
+                {/* Quick discount buttons */}
+                <div className="flex gap-2 mt-2">
+                  {[0, 5, 10, 15, 20, 25].map((pct) => (
+                    <button
+                      key={pct}
+                      onClick={() => setDiscountPercent(pct)}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${discountPercent === pct
+                        ? 'bg-secondary text-white'
+                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                        }`}
+                    >
+                      {pct}%
                     </button>
                   ))}
                 </div>
               </div>
+            )}
 
-              {/* Discount Input */}
-              {membershipBasePrice > 0 && (
-                <div>
-                  <label className="text-sm font-semibold text-foreground block mb-1">
-                    <i className="fa-solid fa-percent mr-1 text-secondary" />
-                    Descuento personalizado
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={discountPercent || ""}
-                      onChange={(e) => {
-                        const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                        setDiscountPercent(val);
-                      }}
-                      className="input-touch text-center text-lg font-bold flex-1"
-                      placeholder="0"
-                      min={0}
-                      max={100}
-                      step={1}
-                    />
-                    <span className="text-lg font-bold text-muted-foreground">%</span>
-                  </div>
-                  {/* Quick discount buttons */}
-                  <div className="flex gap-2 mt-2">
-                    {[0, 5, 10, 15, 20, 25].map((pct) => (
-                      <button
-                        key={pct}
-                        onClick={() => setDiscountPercent(pct)}
-                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${discountPercent === pct
-                          ? 'bg-secondary text-white'
-                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                          }`}
-                      >
-                        {pct}%
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Price Display - Now dynamic based on selected plan */}
-              {membershipBasePrice > 0 && selectedPlan && (
-                <div className="pos-card p-4 text-center bg-accent/10 border-2 border-accent/30">
-                  <p className="text-sm text-secondary mb-1">
-                    Precio del paquete ({selectedPlan.wash_count} lavados con {selectedPlan.discount_percent}% desc.)
-                  </p>
-                  {discountPercent > 0 ? (
-                    <>
-                      <p className="text-lg text-muted-foreground line-through">C${membershipBasePrice.toFixed(2)}</p>
-                      <p className="text-3xl font-bold text-primary">C${membershipPrice.toFixed(2)}</p>
-                      <p className="text-sm text-accent font-semibold mt-1">
-                        <i className="fa-solid fa-tag mr-1" />
-                        Ahorro: C${discountAmount.toFixed(2)} ({discountPercent}% desc.)
-                      </p>
-                    </>
-                  ) : (
+            {/* Price Display - Now dynamic based on selected plan */}
+            {membershipBasePrice > 0 && selectedPlan && (
+              <div className="pos-card p-4 text-center bg-accent/10 border-2 border-accent/30">
+                <p className="text-sm text-secondary mb-1">
+                  Precio del paquete ({selectedPlan.wash_count} lavados con {selectedPlan.discount_percent}% desc.)
+                </p>
+                {discountPercent > 0 ? (
+                  <>
+                    <p className="text-lg text-muted-foreground line-through">C${membershipBasePrice.toFixed(2)}</p>
                     <p className="text-3xl font-bold text-primary">C${membershipPrice.toFixed(2)}</p>
-                  )}
-                  <p className="text-xs text-muted-foreground mt-1">
-                    ~${(membershipPrice / exchangeRate).toFixed(2)} USD
-                  </p>
-                  <p className="text-xs text-secondary mt-1">
-                    <i className="fa-solid fa-calendar-days mr-1" />
-                    Vigencia: {planDurationDays} días ({Math.round(planDurationDays / 7)} semanas)
-                  </p>
-                </div>
-              )}
+                    <p className="text-sm text-accent font-semibold mt-1">
+                      <i className="fa-solid fa-tag mr-1" />
+                      Ahorro: C${discountAmount.toFixed(2)} ({discountPercent}% desc.)
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-3xl font-bold text-primary">C${membershipPrice.toFixed(2)}</p>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">
+                  ~${(membershipPrice / exchangeRate).toFixed(2)} USD
+                </p>
+                <p className="text-xs text-secondary mt-1">
+                  <i className="fa-solid fa-calendar-days mr-1" />
+                  Vigencia: {planDurationDays} días ({Math.round(planDurationDays / 7)} semanas)
+                </p>
+              </div>
+            )}
 
-              <button
-                onClick={handleProceedToPayment}
-                disabled={!selectedCustomer || !selectedService || !selectedVehicleType || !selectedPlanId || membershipPrice <= 0}
-                className="btn-cobrar w-full disabled:opacity-50"
-              >
-                <i className="fa-solid fa-money-bill-wave mr-2" />
-                Proceder al Pago — C${membershipPrice.toFixed(2)}
-              </button>
-            </div>
+            <button
+              onClick={handleProceedToPayment}
+              disabled={!selectedCustomer || !selectedService || !selectedVehicleType || !selectedPlanId || membershipPrice <= 0}
+              className="btn-cobrar w-full disabled:opacity-50"
+            >
+              <i className="fa-solid fa-money-bill-wave mr-2" />
+              Proceder al Pago — C${membershipPrice.toFixed(2)}
+            </button>
           </div>
         </div>
-      )}
+      </div>
+    )}
 
-      {/* Payment Modal */}
-      {showPayment && (
-        <PaymentModal
-          total={membershipPrice}
-          exchangeRate={exchangeRate}
-          onClose={() => setShowPayment(false)}
-          onConfirm={handlePaymentComplete}
-        />
-      )}
+    {/* Payment Modal */}
+    {showPayment && (
+      <PaymentModal
+        total={membershipPrice}
+        exchangeRate={exchangeRate}
+        onClose={() => setShowPayment(false)}
+        onConfirm={handlePaymentComplete}
+      />
+    )}
 
-      {/* Print Ticket Modal */}
-      {showPrint && lastTicket && (
-        <TicketPrint
-          ticket={lastTicket}
-          onClose={() => { setShowPrint(false); setLastTicket(null); }}
-        />
-      )}
+    {/* Print Ticket Modal */}
+    {showPrint && lastTicket && (
+      <TicketPrint
+        ticket={lastTicket}
+        onClose={() => { setShowPrint(false); setLastTicket(null); }}
+      />
+    )}
 
-      {/* Renewal Modal */}
-      {renewingMembership && !showRenewalPayment && (
-        <MembershipRenewalModal
-          membership={renewingMembership}
-          onConfirm={handleRenew}
-          onClose={() => setRenewingMembership(null)}
-          isLoading={isRenewing}
-        />
-      )}
+    {/* Renewal Modal */}
+    {renewingMembership && !showRenewalPayment && (
+      <MembershipRenewalModal
+        membership={renewingMembership}
+        onConfirm={handleRenew}
+        onClose={() => setRenewingMembership(null)}
+        isLoading={isRenewing}
+      />
+    )}
 
-      {/* Renewal Payment Modal */}
-      {showRenewalPayment && renewingMembership && (
-        <PaymentModal
-          total={renewalPrice}
-          exchangeRate={exchangeRate}
-          onClose={() => { setShowRenewalPayment(false); setRenewingMembership(null); }}
-          onConfirm={handleRenewalPaymentComplete}
-        />
-      )}
+    {/* Renewal Payment Modal */}
+    {showRenewalPayment && renewingMembership && (
+      <PaymentModal
+        total={renewalPrice}
+        exchangeRate={exchangeRate}
+        onClose={() => { setShowRenewalPayment(false); setRenewingMembership(null); }}
+        onConfirm={handleRenewalPaymentComplete}
+      />
+    )}
 
-      {/* Edit Membership Modal */}
-      {editingMembership && (
-        <div className="modal-overlay" onClick={() => setEditingMembership(null)}>
-          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-foreground">
-                <i className="fa-solid fa-pen-to-square mr-2 text-secondary" />
-                Editar Membresía
-              </h2>
-              <button onClick={() => setEditingMembership(null)} className="touch-btn p-2 text-muted-foreground">
-                <i className="fa-solid fa-xmark text-xl" />
-              </button>
-            </div>
+    {/* Edit Membership Modal */}
+    {editingMembership && (
+      <div className="modal-overlay" onClick={() => setEditingMembership(null)}>
+        <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-foreground">
+              <i className="fa-solid fa-pen-to-square mr-2 text-secondary" />
+              Editar Membresía
+            </h2>
+            <button onClick={() => setEditingMembership(null)} className="touch-btn p-2 text-muted-foreground">
+              <i className="fa-solid fa-xmark text-xl" />
+            </button>
+          </div>
 
-            <div className="mb-4 p-3 bg-muted/30 rounded-lg">
-              <p className="text-sm font-bold text-foreground">{editingMembership.customer_name}</p>
-              <p className="text-xs text-secondary">{editingMembership.plan_name}</p>
-            </div>
+          <div className="mb-4 p-3 bg-muted/30 rounded-lg">
+            <p className="text-sm font-bold text-foreground">{editingMembership.customer_name}</p>
+            <p className="text-xs text-secondary">{editingMembership.plan_name}</p>
+          </div>
 
-            <div className="space-y-4">
-              {/* Washes Used */}
-              <div>
-                <label className="block text-sm font-semibold text-foreground mb-1">
-                  <i className="fa-solid fa-droplet mr-1 text-primary" />
-                  Lavados usados
-                </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setEditingMembership({ ...editingMembership, washes_used: Math.max(0, editingMembership.washes_used - 1) })}
-                    className="touch-btn w-10 h-10 rounded-lg bg-destructive/10 text-destructive font-bold text-lg flex items-center justify-center"
-                  >
-                    −
-                  </button>
-                  <input
-                    type="number"
-                    value={editingMembership.washes_used}
-                    onChange={(e) => setEditingMembership({ ...editingMembership, washes_used: Math.max(0, parseInt(e.target.value) || 0) })}
-                    className="input-touch text-center text-lg font-bold flex-1"
-                    min={0}
-                  />
-                  <button
-                    onClick={() => setEditingMembership({ ...editingMembership, washes_used: editingMembership.washes_used + 1 })}
-                    className="touch-btn w-10 h-10 rounded-lg bg-primary/10 text-primary font-bold text-lg flex items-center justify-center"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              {/* Total Washes Allowed */}
-              <div>
-                <label className="block text-sm font-semibold text-foreground mb-1">
-                  <i className="fa-solid fa-hashtag mr-1 text-accent" />
-                  Total de lavados permitidos
-                </label>
+          <div className="space-y-4">
+            {/* Washes Used */}
+            <div>
+              <label className="block text-sm font-semibold text-foreground mb-1">
+                <i className="fa-solid fa-droplet mr-1 text-primary" />
+                Lavados usados
+              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setEditingMembership({ ...editingMembership, washes_used: Math.max(0, editingMembership.washes_used - 1) })}
+                  className="touch-btn w-10 h-10 rounded-lg bg-destructive/10 text-destructive font-bold text-lg flex items-center justify-center"
+                >
+                  −
+                </button>
                 <input
                   type="number"
-                  value={editingMembership.total_washes_allowed}
-                  onChange={(e) => setEditingMembership({ ...editingMembership, total_washes_allowed: Math.max(1, parseInt(e.target.value) || 1) })}
-                  className="input-touch w-full text-center text-lg font-bold"
-                  min={1}
+                  value={editingMembership.washes_used}
+                  onChange={(e) => setEditingMembership({ ...editingMembership, washes_used: Math.max(0, parseInt(e.target.value) || 0) })}
+                  className="input-touch text-center text-lg font-bold flex-1"
+                  min={0}
                 />
-              </div>
-
-              {/* Expiration Date */}
-              <div>
-                <label className="block text-sm font-semibold text-foreground mb-1">
-                  <i className="fa-solid fa-calendar-days mr-1 text-secondary" />
-                  Fecha de expiración
-                </label>
-                <input
-                  type="date"
-                  value={editingMembership.expires_at}
-                  onChange={(e) => setEditingMembership({ ...editingMembership, expires_at: e.target.value })}
-                  className="input-touch w-full"
-                />
-              </div>
-
-              {/* Active Toggle */}
-              <div className="flex items-center justify-between p-3 rounded-lg border border-border">
-                <span className="text-sm font-semibold text-foreground">
-                  <i className="fa-solid fa-toggle-on mr-2 text-accent" />
-                  Estado activo
-                </span>
                 <button
-                  onClick={() => setEditingMembership({ ...editingMembership, active: !editingMembership.active })}
-                  className={`w-14 h-7 rounded-full transition-colors relative ${
-                    editingMembership.active ? 'bg-primary' : 'bg-muted'
-                  }`}
+                  onClick={() => setEditingMembership({ ...editingMembership, washes_used: editingMembership.washes_used + 1 })}
+                  className="touch-btn w-10 h-10 rounded-lg bg-primary/10 text-primary font-bold text-lg flex items-center justify-center"
                 >
-                  <div className={`w-5 h-5 rounded-full bg-white shadow-md absolute top-1 transition-transform ${
-                    editingMembership.active ? 'translate-x-8' : 'translate-x-1'
-                  }`} />
+                  +
                 </button>
               </div>
+            </div>
 
-              {/* Progress Preview */}
-              <div className="p-3 bg-accent/5 rounded-lg border border-accent/20">
-                <p className="text-xs text-muted-foreground text-center">
-                  <i className="fa-solid fa-eye mr-1" />
-                  Vista previa: {editingMembership.washes_used}/{editingMembership.total_washes_allowed} lavados usados
-                </p>
-                <div className="w-full h-2 bg-muted rounded-full overflow-hidden mt-2">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all"
-                    style={{ width: `${Math.min(100, (editingMembership.washes_used / editingMembership.total_washes_allowed) * 100)}%` }}
-                  />
-                </div>
+            {/* Total Washes Allowed */}
+            <div>
+              <label className="block text-sm font-semibold text-foreground mb-1">
+                <i className="fa-solid fa-hashtag mr-1 text-accent" />
+                Total de lavados permitidos
+              </label>
+              <input
+                type="number"
+                value={editingMembership.total_washes_allowed}
+                onChange={(e) => setEditingMembership({ ...editingMembership, total_washes_allowed: Math.max(1, parseInt(e.target.value) || 1) })}
+                className="input-touch w-full text-center text-lg font-bold"
+                min={1}
+              />
+            </div>
+
+            {/* Expiration Date */}
+            <div>
+              <label className="block text-sm font-semibold text-foreground mb-1">
+                <i className="fa-solid fa-calendar-days mr-1 text-secondary" />
+                Fecha de expiración
+              </label>
+              <input
+                type="date"
+                value={editingMembership.expires_at}
+                onChange={(e) => setEditingMembership({ ...editingMembership, expires_at: e.target.value })}
+                className="input-touch w-full"
+              />
+            </div>
+
+            {/* Active Toggle */}
+            <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+              <span className="text-sm font-semibold text-foreground">
+                <i className="fa-solid fa-toggle-on mr-2 text-accent" />
+                Estado activo
+              </span>
+              <button
+                onClick={() => setEditingMembership({ ...editingMembership, active: !editingMembership.active })}
+                className={`w-14 h-7 rounded-full transition-colors relative ${
+                  editingMembership.active ? 'bg-primary' : 'bg-muted'
+                }`}
+              >
+                <div className={`w-5 h-5 rounded-full bg-white shadow-md absolute top-1 transition-transform ${
+                  editingMembership.active ? 'translate-x-8' : 'translate-x-1'
+                }`} />
+              </button>
+            </div>
+
+            {/* Progress Preview */}
+            <div className="p-3 bg-accent/5 rounded-lg border border-accent/20">
+              <p className="text-xs text-muted-foreground text-center">
+                <i className="fa-solid fa-eye mr-1" />
+                Vista previa: {editingMembership.washes_used}/{editingMembership.total_washes_allowed} lavados usados
+              </p>
+              <div className="w-full h-2 bg-muted rounded-full overflow-hidden mt-2">
+                <div
+                  className="h-full bg-primary rounded-full transition-all"
+                  style={{ width: `${Math.min(100, (editingMembership.washes_used / editingMembership.total_washes_allowed) * 100)}%` }}
+                />
               </div>
             </div>
+          </div>
 
-            <div className="flex gap-2 mt-6">
-              <button
-                onClick={() => setEditingMembership(null)}
-                className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleEditSave}
-                className="flex-1 py-3 rounded-xl bg-accent text-accent-foreground font-semibold hover:bg-accent/90 transition-colors"
-              >
-                <i className="fa-solid fa-save mr-2" />Guardar
-              </button>
-            </div>
+          <div className="flex gap-2 mt-6">
+            <button
+              onClick={() => setEditingMembership(null)}
+              className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleEditSave}
+              className="flex-1 py-3 rounded-xl bg-accent text-accent-foreground font-semibold hover:bg-accent/90 transition-colors"
+            >
+              <i className="fa-solid fa-save mr-2" />Guardar
+            </button>
           </div>
         </div>
-      )}
+      </div>
+    )}
 
-      {/* Delete Confirmation Modal */}
-      {deletingMembership && (
-        <div className="modal-overlay" onClick={() => setDeletingMembership(null)}>
-          <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-foreground">
-                <i className="fa-solid fa-triangle-exclamation mr-2 text-destructive" />
-                Confirmar eliminación
-              </h2>
-              <button onClick={() => setDeletingMembership(null)} className="touch-btn p-2 text-muted-foreground">
-                <i className="fa-solid fa-xmark text-xl" />
-              </button>
-            </div>
-            <p className="text-foreground mb-2">
-              ¿Estás seguro de que deseas eliminar la membresía de <strong>{deletingMembership.customers?.name}</strong>?
-            </p>
-            <p className="text-sm text-muted-foreground mb-4">
-              Plan: {deletingMembership.membership_plans?.name} — Lavados: {deletingMembership.washes_used}/{deletingMembership.total_washes_allowed}
-            </p>
-            <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-xs text-destructive mb-6">
-              <i className="fa-solid fa-triangle-exclamation mr-1" />
-              Esta acción eliminará la membresía y sus registros de lavados. No se puede deshacer.
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setDeletingMembership(null)}
-                className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleDeleteConfirm}
-                className="flex-1 py-3 rounded-xl bg-destructive text-white font-semibold hover:bg-red-600 transition-colors"
-              >
-                <i className="fa-solid fa-trash-can mr-2" />
-                Eliminar
-              </button>
-            </div>
+    {/* Delete Confirmation Modal */}
+    {deletingMembership && (
+      <div className="modal-overlay" onClick={() => setDeletingMembership(null)}>
+        <div className="modal-content animate-scale-in max-w-md" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-foreground">
+              <i className="fa-solid fa-triangle-exclamation mr-2 text-destructive" />
+              Confirmar eliminación
+            </h2>
+            <button onClick={() => setDeletingMembership(null)} className="touch-btn p-2 text-muted-foreground">
+              <i className="fa-solid fa-xmark text-xl" />
+            </button>
+          </div>
+          <p className="text-foreground mb-2">
+            ¿Estás seguro de que deseas eliminar la membresía de <strong>{deletingMembership.customers?.name}</strong>?
+          </p>
+          <p className="text-sm text-muted-foreground mb-4">
+            Plan: {deletingMembership.membership_plans?.name} — Lavados: {deletingMembership.washes_used}/{deletingMembership.total_washes_allowed}
+          </p>
+          <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-xs text-destructive mb-6">
+            <i className="fa-solid fa-triangle-exclamation mr-1" />
+            Esta acción eliminará la membresía y sus registros de lavados. No se puede deshacer.
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setDeletingMembership(null)}
+              className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleDeleteConfirm}
+              className="flex-1 py-3 rounded-xl bg-destructive text-white font-semibold hover:bg-red-600 transition-colors"
+            >
+              <i className="fa-solid fa-trash-can mr-2" />
+              Eliminar
+            </button>
           </div>
         </div>
-      )}
+      </div>
+    )}
 
-      <PermissionModal
-        isOpen={showPermissionModal}
-        onClose={() => setShowPermissionModal(false)}
-      />
+    <PermissionModal
+      isOpen={showPermissionModal}
+      onClose={() => setShowPermissionModal(false)}
+    />
 
-      {toast && <div className="toast-success"><i className="fa-solid fa-circle-check mr-2" />{toast}</div>}
-    </div>
+    {toast && <div className="toast-success"><i className="fa-solid fa-circle-check mr-2" />{toast}</div>}
+  </>
   );
 }

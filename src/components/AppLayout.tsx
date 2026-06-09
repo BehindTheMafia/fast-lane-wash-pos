@@ -1,6 +1,9 @@
 import { useState, ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Link, useLocation, Navigate } from "react-router-dom";
+import { useBusinessLine } from "@/contexts/BusinessLineContext";
+import { useBusinessSettings } from "@/hooks/useBusinessSettings";
+import { BUSINESS_LINE_LABELS, type BusinessLine } from "@/lib/businessLine";
 
 interface NavItem {
   label: string;
@@ -9,6 +12,9 @@ interface NavItem {
   adminOnly?: boolean;
   adminOrOwner?: boolean;
   adminOrOwnerOrCajero?: boolean;
+  carWashOnly?: boolean;
+  barbershopOnly?: boolean;
+  barbershopOnlyAdminOrOwner?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -17,14 +23,56 @@ const navItems: NavItem[] = [
   { label: "Reportes", icon: "fa-file-lines", path: "/reports", adminOrOwner: true },
   { label: "Cierre de Caja", icon: "fa-vault", path: "/cash-close" },
   { label: "Clientes", icon: "fa-users", path: "/customers" },
-  { label: "Membresías", icon: "fa-id-card", path: "/memberships" },
-  { label: "Recordatorios", icon: "fa-bell", path: "/reminders" },
+  { label: "Membresías", icon: "fa-id-card", path: "/memberships", carWashOnly: true },
+  { label: "Recordatorios", icon: "fa-bell", path: "/reminders", carWashOnly: true },
+  { label: "Inventario", icon: "fa-boxes-stacked", path: "/inventory", barbershopOnlyAdminOrOwner: true },
   { label: "Servicios", icon: "fa-list-check", path: "/services", adminOnly: true },
   { label: "Configuración", icon: "fa-gear", path: "/settings", adminOnly: true },
 ];
 
+function BusinessLineSelector({ compact }: { compact?: boolean }) {
+  const { businessLine, setBusinessLine } = useBusinessLine();
+
+  const btn = (line: BusinessLine, icon: string) => (
+    <button
+      key={line}
+      type="button"
+      onClick={() => setBusinessLine(line)}
+      className={`touch-btn flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1 ${
+        businessLine === line
+          ? "bg-sidebar-accent text-sidebar-foreground"
+          : "text-sidebar-foreground/60 hover:bg-sidebar-accent/40"
+      }`}
+    >
+      <i className={`fa-solid ${icon}`} />
+      {!compact && BUSINESS_LINE_LABELS[line]}
+    </button>
+  );
+
+  if (compact) {
+    return (
+      <div className="flex gap-1 bg-black/20 rounded-lg p-0.5">
+        {btn("car_wash", "fa-car-side")}
+        {btn("barbershop", "fa-scissors")}
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-3 pb-2">
+      <p className="text-[10px] uppercase tracking-wide text-sidebar-foreground/50 mb-1 px-1">Línea de negocio</p>
+      <div className="flex gap-1 bg-black/20 rounded-lg p-0.5">
+        {btn("car_wash", "fa-car-side")}
+        {btn("barbershop", "fa-scissors")}
+      </div>
+    </div>
+  );
+}
+
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { profile, signOut, loading, user, isAdmin } = useAuth();
+  const { businessLine, isBarbershop } = useBusinessLine();
+  const { data: settings } = useBusinessSettings();
   const isOwner = profile?.role === "owner";
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -40,11 +88,18 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   if (!user) return <Navigate to="/login" replace />;
 
   const visibleNav = navItems.filter((n) => {
+    if (n.carWashOnly && isBarbershop) return false;
+    if (n.barbershopOnly && !isBarbershop) return false;
+    if (n.barbershopOnlyAdminOrOwner) return isBarbershop && (isAdmin || isOwner);
     if (n.adminOnly) return isAdmin;
     if (n.adminOrOwner) return isAdmin || isOwner;
     if (n.adminOrOwnerOrCajero) return isAdmin || isOwner || profile?.role === "cajero";
     return true;
   });
+
+  const brandName = settings?.business_name || (isBarbershop ? "EL RAPIDO BARBERÍA" : "EL RAPIDO");
+  const brandSubtitle = isBarbershop ? "BARBERÍA" : "AUTOLAVADO";
+  const headerIcon = isBarbershop ? "fa-scissors" : "fa-car-side";
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -53,15 +108,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <div className="p-4 border-b border-sidebar-border">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-sidebar-accent flex items-center justify-center">
-              <i className="fa-solid fa-car-side text-sidebar-foreground" />
+              <i className={`fa-solid ${headerIcon} text-sidebar-foreground`} />
             </div>
-            <div>
-              <h2 className="font-bold text-sm text-sidebar-foreground">EL RAPIDO</h2>
-              <p className="text-xs text-sidebar-foreground/70">AUTOLAVADO</p>
+            <div className="min-w-0">
+              <h2 className="font-bold text-sm text-sidebar-foreground truncate">{brandName}</h2>
+              <p className="text-xs text-sidebar-foreground/70">{brandSubtitle}</p>
             </div>
           </div>
         </div>
-        <nav className="flex-1 p-3 space-y-1">
+        <BusinessLineSelector />
+        <nav className="flex-1 p-3 space-y-1 overflow-auto">
           {visibleNav.map((item) => {
             const active = location.pathname === item.path;
             return (
@@ -103,17 +159,18 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
-          <aside className="absolute left-0 top-0 bottom-0 w-72 nav-sidebar animate-slide-in-left">
+          <aside className="absolute left-0 top-0 bottom-0 w-72 nav-sidebar animate-slide-in-left flex flex-col">
             <div className="p-4 flex items-center justify-between border-b border-sidebar-border">
-              <div className="flex items-center gap-3">
-                <i className="fa-solid fa-car-side text-sidebar-foreground" />
-                <span className="font-bold text-sidebar-foreground">EL RAPIDO</span>
+              <div className="flex items-center gap-3 min-w-0">
+                <i className={`fa-solid ${headerIcon} text-sidebar-foreground`} />
+                <span className="font-bold text-sidebar-foreground truncate">{brandName}</span>
               </div>
               <button onClick={() => setSidebarOpen(false)} className="touch-btn p-2 text-sidebar-foreground">
                 <i className="fa-solid fa-xmark" />
               </button>
             </div>
-            <nav className="p-3 space-y-1">
+            <BusinessLineSelector />
+            <nav className="p-3 space-y-1 flex-1 overflow-auto">
               {visibleNav.map((item) => {
                 const active = location.pathname === item.path;
                 return (
@@ -130,7 +187,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 );
               })}
             </nav>
-            <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-sidebar-border">
+            <div className="p-3 border-t border-sidebar-border">
               <button
                 onClick={signOut}
                 className="touch-btn flex items-center gap-3 px-4 py-3 w-full rounded-xl text-sm text-sidebar-foreground/70"
@@ -145,15 +202,22 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top header */}
-        <header className="header-bar px-4 py-3 flex items-center gap-4 shadow-md">
+        <header className="header-bar px-4 py-3 flex items-center gap-3 shadow-md">
           <button
             onClick={() => setSidebarOpen(true)}
             className="touch-btn lg:hidden p-2 text-accent-foreground"
           >
             <i className="fa-solid fa-bars text-lg" />
           </button>
-          <h1 className="font-bold text-lg text-accent-foreground flex-1">EL RAPIDO AUTOLAVADO</h1>
+          <h1 className="font-bold text-lg text-accent-foreground flex-1 truncate">
+            {brandName}
+          </h1>
+          <div className="lg:hidden">
+            <BusinessLineSelector compact />
+          </div>
+          <span className="hidden sm:inline text-xs px-2 py-0.5 rounded-full bg-sidebar-accent/80 text-accent-foreground capitalize">
+            {BUSINESS_LINE_LABELS[businessLine]}
+          </span>
           <div className="hidden sm:flex items-center gap-2 text-accent-foreground/80 text-sm">
             <i className="fa-solid fa-user" />
             <span>{profile?.full_name}</span>
@@ -161,7 +225,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        {/* Page content */}
         <main className="flex-1 overflow-auto">
           {children}
         </main>

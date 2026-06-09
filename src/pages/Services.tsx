@@ -4,6 +4,8 @@ import { useAllServices, useAllExtras } from "@/hooks/useServices";
 import { useAllVehicleTypes } from "@/hooks/useVehicleTypes";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useBusinessLine } from "@/contexts/BusinessLineContext";
+import ServicesBarberAdmin from "@/components/admin/ServicesBarberAdmin";
 
 type Tab = "services" | "extras" | "vehicles";
 
@@ -17,7 +19,7 @@ function EmptyForm(isExtra: boolean) {
   return { name: "", description: "", icon: "fa-soap", is_extra: isExtra, prices: {} as Record<string, string> };
 }
 
-export default function Services() {
+function ServicesCarWash() {
   const qc = useQueryClient();
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "owner";
@@ -74,6 +76,7 @@ export default function Services() {
       icon: form.icon,
       is_extra: form.is_extra,
       is_active: true,
+      business_line: "car_wash",
     };
 
     let svcId: string;
@@ -430,4 +433,20 @@ export default function Services() {
       )}
     </div>
   );
+}
+
+export default function Services() {
+  const { isBarbershop } = useBusinessLine();
+  if (isBarbershop) {
+    return (
+      <div className="p-6 space-y-6 animate-fade-in">
+        <h2 className="text-2xl font-bold text-foreground">
+          <i className="fa-solid fa-scissors mr-3 text-secondary" />
+          Catálogo Barbería
+        </h2>
+        <ServicesBarberAdmin />
+      </div>
+    );
+  }
+  return <ServicesCarWash />;
 }

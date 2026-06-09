@@ -51,7 +51,11 @@ export async function printTicketBluetooth(ticket: any) {
             const date = new Date(ticket.created_at || Date.now());
             const dateStr = date.toLocaleDateString("es-NI") + " " + date.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
             const clientName = ticket.customer?.name || "Cliente General";
-            const plate = ticket.customer?.plate ? String(ticket.customer.plate).toUpperCase() : "";
+            const isBarber = ticket.business_line === "barbershop";
+            const plate =
+                !isBarber && ticket.customer?.plate
+                    ? String(ticket.customer.plate).toUpperCase()
+                    : "";
 
             const hr = '-'.repeat(columns);
 
@@ -80,31 +84,44 @@ export async function printTicketBluetooth(ticket: any) {
 
             const symbol = ticket.payment?.currency === 'USD' ? '$' : 'C$';
 
-            // 4. Detalle de Servicios
-            encoder
-                .line(hr)
-                .line('SERVICIOS');
-
             const items = Array.isArray(ticket.items) ? ticket.items : [];
-            items.forEach((item: any) => {
-                const name = item?.serviceName ?? "Servicio";
-                const price = Number(item?.price || 0);
-                const priceStr = `${symbol}${price.toFixed(2)}`;
-                const nameWidth = Math.max(0, columns - priceStr.length - 1);
+            const printItemBlock = (list: any[], title: string) => {
+                if (!list.length) return;
+                encoder.line(hr).line(title);
+                list.forEach((item: any) => {
+                    const name = item?.name || item?.serviceName || "Ítem";
+                    const qty = Number(item?.quantity ?? 1);
+                    const unit = Number(item?.price || 0);
+                    const disc = Number(item?.discountPercent || 0) / 100;
+                    const lineTotal = unit * qty * (1 - disc);
+                    const priceStr = `${symbol}${lineTotal.toFixed(2)}`;
+                    const label = qty > 1 ? `${name} x${qty}` : name;
+                    const nameWidth = Math.max(0, columns - priceStr.length - 1);
 
-                if (name.length <= nameWidth) {
-                    // Name fits on same line as price
-                    encoder.size('normal').line(`${name.padEnd(nameWidth)} ${priceStr}`);
-                } else {
-                    // Name is too long – print name first, then price right-aligned
-                    encoder.size('normal').line(name);
-                    encoder.align('right').line(priceStr).align('left');
-                }
+                    if (label.length <= nameWidth) {
+                        encoder.size('normal').line(`${label.padEnd(nameWidth)} ${priceStr}`);
+                    } else {
+                        encoder.size('normal').line(label);
+                        encoder.align('right').line(priceStr).align('left');
+                    }
 
-                if (item.vehicleLabel) {
-                    encoder.size('small').line(` (${item.vehicleLabel})`);
-                }
-            });
+                    if (item.vehicleLabel && !isBarber) {
+                        encoder.size('small').line(` (${item.vehicleLabel})`);
+                    }
+                });
+            };
+
+            printItemBlock(
+                items.filter((i: any) => i.itemType !== "product"),
+                "SERVICIOS"
+            );
+            printItemBlock(
+                items.filter((i: any) => i.itemType === "product"),
+                "PRODUCTOS"
+            );
+            if (items.length && !items.some((i: any) => i.itemType)) {
+                printItemBlock(items, "SERVICIOS");
+            }
 
             const rate = Number(ticket.settings?.exchange_rate || 36.5);
             const totalNIO = Number(ticket.total || 0);

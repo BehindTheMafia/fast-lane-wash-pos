@@ -50,9 +50,16 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     };
 
     const items = Array.isArray(ticket.items) ? ticket.items : [];
-    const computedSubtotal = items.reduce((sum: number, item: any) => {
-      return sum + toNumber(item?.price) * toNumber(item?.qty ?? 1);
-    }, 0);
+    const itemLabel = (item: any) =>
+      item?.name || item?.serviceName || "Ítem";
+    const itemQty = (item: any) => toNumber(item?.quantity ?? item?.qty ?? 1);
+    const itemLineTotal = (item: any) => {
+      const unit = toNumber(item?.price);
+      const qty = itemQty(item);
+      const disc = toNumber(item?.discountPercent) / 100;
+      return unit * qty * (1 - disc);
+    };
+    const computedSubtotal = items.reduce((sum: number, item: any) => sum + itemLineTotal(item), 0);
 
     const subtotal = toNumber(ticket.subtotal) || computedSubtotal;
     const discount = toNumber(ticket.discount);
@@ -65,7 +72,11 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     const businessName = ticket.settings?.business_name || "EL RAPIDO AUTOLAVADO";
     const ticketNum = ticket.ticket_number || "----";
     const clientName = ticket.customer?.name || "Cliente";
-    const plate = ticket.customer?.plate ? String(ticket.customer.plate).toUpperCase() : "";
+    const isBarber = ticket.business_line === "barbershop";
+    const plate =
+      !isBarber && ticket.customer?.plate
+        ? String(ticket.customer.plate).toUpperCase()
+        : "";
     const symbol = ticket.payment?.currency === "USD" ? "$" : "C$";
     const line = "------------------------------";
 
@@ -75,15 +86,26 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     message += `👤 *Cliente:* ${clientName}\n`;
     if (plate) message += `🚗 *Placa:* ${plate}\n`;
     message += `${line}\n`;
-    message += `🧼 *SERVICIOS:*\n`;
-
-    items.forEach((item: any) => {
-      const name = item?.serviceName ?? "Servicio";
-      const price = toNumber(item?.price);
-      const qty = toNumber(item?.qty ?? 1);
-      message += `🔹 ${name}${qty > 1 ? ` (x${qty})` : ""}\n`;
-      message += `   💰 ${symbol}${(price * qty).toFixed(2)}\n`;
-    });
+    const serviceItems = items.filter((i: any) => i.itemType !== "product");
+    const productItems = items.filter((i: any) => i.itemType === "product");
+    if (serviceItems.length) {
+      message += `🧼 *SERVICIOS:*\n`;
+      serviceItems.forEach((item: any) => {
+        const name = itemLabel(item);
+        const qty = itemQty(item);
+        message += `🔹 ${name}${qty > 1 ? ` (x${qty})` : ""}\n`;
+        message += `   💰 ${symbol}${itemLineTotal(item).toFixed(2)}\n`;
+      });
+    }
+    if (productItems.length) {
+      message += `📦 *PRODUCTOS:*\n`;
+      productItems.forEach((item: any) => {
+        const name = itemLabel(item);
+        const qty = itemQty(item);
+        message += `🔹 ${name}${qty > 1 ? ` (x${qty})` : ""}\n`;
+        message += `   💰 ${symbol}${itemLineTotal(item).toFixed(2)}\n`;
+      });
+    }
 
     const rate = Number(ticket.settings?.exchange_rate || 36.5);
     const totalUSD = total / rate;
@@ -93,6 +115,17 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     if (discount > 0) message += `🏷️ *DESCUENTO:* -C$${discount.toFixed(2)}\n`;
     message += `💵 *TOTAL:* C$${total.toFixed(2)}\n`;
     message += `🌎 *TOTAL USD:* $${totalUSD.toFixed(2)}\n`;
+
+    // Payment method info
+    if (ticket.payment?.method === "mixed" && ticket.payment?.mixedPayments?.length) {
+      message += `💳 *PAGO MIXTO:*\n`;
+      for (const part of ticket.payment.mixedPayments) {
+        const partSym = ticket.payment.currency === "USD" ? "$" : "C$";
+        const partLabel = part.method === "cash" ? "Efectivo" : part.method === "card" ? "Tarjeta" : "Transferencia";
+        message += `   🔹 ${partLabel}: ${partSym}${Number(part.amount).toFixed(2)}\n`;
+        if (part.change > 0) message += `   ↩️ Vuelto: ${partSym}${Number(part.change).toFixed(2)}\n`;
+      }
+    }
     message += `${line}\n`;
     const waGreeting = ticket.settings?.whatsapp_greeting || ticket.settings?.receipt_footer || "¡Gracias por su visita!";
     message += `🙏 _${waGreeting}_\n`;
@@ -179,44 +212,81 @@ export default function TicketPrint({ ticket, onClose }: Props) {
       <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
 
       {/* Items */}
-      <div className="mb-3 print:mb-2">
-        <div className="text-xs font-bold mb-2 uppercase">Servicios</div>
-        <div className="space-y-1.5">
-          {ticket.items?.map((item: any, i: number) => {
-            const itemPrice = Number(item.price) || 0;
-            const discPct = Number(item.discountPercent) || 0;
-            const itemDiscountAmt = itemPrice * discPct / 100;
-            const symbol = ticket.payment?.currency === "USD" ? "$" : "C$";
-            return (
-              <div key={i} className="text-[11px]">
-                <div className="flex justify-between font-semibold">
-                  <span>{item.serviceName}{discPct > 0 ? ` – ${discPct}% desc.` : ''}</span>
-                  <span>{symbol}{itemPrice.toFixed(2)}</span>
-                </div>
-                <div className="text-[9px] text-muted-foreground print:text-gray-600 pl-2">
-                  {item.vehicleLabel}
-                </div>
-                {discPct > 0 && (
-                  <div className="text-[9px] text-destructive print:text-black pl-2 font-semibold">
-                    Descuento: -{symbol}{itemDiscountAmt.toFixed(2)}
-                  </div>
-                )}
+      {(() => {
+        const allItems = ticket.items || [];
+        const renderLines = (list: any[], title: string) =>
+          list.length > 0 ? (
+            <div className="mb-3 print:mb-2">
+              <div className="text-xs font-bold mb-2 uppercase">{title}</div>
+              <div className="space-y-1.5">
+                {list.map((item: any, i: number) => {
+                  const qty = Number(item.quantity ?? 1);
+                  const unit = Number(item.price) || 0;
+                  const discPct = Number(item.discountPercent) || 0;
+                  const lineTotal = unit * qty * (1 - discPct / 100);
+                  const symbol = ticket.payment?.currency === "USD" ? "$" : "C$";
+                  const name = item.name || item.serviceName || "Ítem";
+                  return (
+                    <div key={i} className="text-[11px]">
+                      <div className="flex justify-between font-semibold">
+                        <span>
+                          {name}
+                          {qty > 1 ? ` x${qty}` : ""}
+                          {discPct > 0 ? ` – ${discPct}% desc.` : ""}
+                        </span>
+                        <span>{symbol}{lineTotal.toFixed(2)}</span>
+                      </div>
+                      {item.vehicleLabel && ticket.business_line !== "barbershop" && (
+                        <div className="text-[9px] text-muted-foreground print:text-gray-600 pl-2">
+                          {item.vehicleLabel}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      </div>
+            </div>
+          ) : null;
+
+        return (
+          <>
+            {renderLines(
+              allItems.filter((i: any) => i.itemType !== "product"),
+              "Servicios"
+            )}
+            {renderLines(
+              allItems.filter((i: any) => i.itemType === "product"),
+              "Productos"
+            )}
+            {allItems.length > 0 &&
+              !allItems.some((i: any) => i.itemType) &&
+              renderLines(allItems, "Servicios")}
+          </>
+        );
+      })()}
 
       <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
 
       {/* Totals */}
       {(() => {
         const items = Array.isArray(ticket.items) ? ticket.items : [];
-        const computedSubtotal = items.reduce((s: number, i: any) => s + (Number(i.price) || 0), 0);
+        const lineAmt = (i: any) => {
+          const p = Number(i.price) || 0;
+          const q = Number(i.quantity ?? 1);
+          const d = Number(i.discountPercent) || 0;
+          return p * q * (1 - d / 100);
+        };
+        const gross = (i: any) => {
+          const p = Number(i.price) || 0;
+          const q = Number(i.quantity ?? 1);
+          return p * q;
+        };
+        const computedSubtotal = items.reduce((s: number, i: any) => s + gross(i), 0);
         const computedDiscount = items.reduce((s: number, i: any) => {
           const p = Number(i.price) || 0;
+          const q = Number(i.quantity ?? 1);
           const d = Number(i.discountPercent) || 0;
-          return s + (p * d / 100);
+          return s + p * q * (d / 100);
         }, 0);
         const displaySubtotal = Number(ticket.subtotal) || computedSubtotal;
         const displayDiscount = Number(ticket.discount) || computedDiscount;
@@ -255,15 +325,50 @@ export default function TicketPrint({ ticket, onClose }: Props) {
         <>
           <div className="border-t border-dashed border-border print:border-black my-2" />
           <div className="text-xs space-y-1">
-            <div className="flex justify-between">
-              <span>Pago ({ticket.payment.method}):</span>
-              <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.received.toFixed(2)}</span>
-            </div>
-            {ticket.payment.change > 0 && (
-              <div className="flex justify-between font-semibold">
-                <span>Vuelto:</span>
-                <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.change.toFixed(2)}</span>
-              </div>
+            {ticket.payment.method === "mixed" && ticket.payment.mixedPayments?.length ? (
+              <>
+                <div className="flex justify-between font-semibold">
+                  <span>Pago Mixto:</span>
+                  <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.amount.toFixed(2)}</span>
+                </div>
+                {ticket.payment.mixedPayments.map((part: any, idx: number) => {
+                  const sym = ticket.payment.currency === "NIO" ? "C$" : "$";
+                  const label = part.method === "cash" ? "Efectivo" : part.method === "card" ? "Tarjeta" : "Transferencia";
+                  return (
+                    <div key={idx} className="pl-2 space-y-0.5">
+                      <div className="flex justify-between text-muted-foreground print:text-gray-600">
+                        <span>↳ {label}:</span>
+                        <span>{sym}{part.amount.toFixed(2)}</span>
+                      </div>
+                      {part.method === "cash" && part.received > part.amount && (
+                        <div className="flex justify-between text-muted-foreground print:text-gray-600">
+                          <span className="pl-2">Recibido:</span>
+                          <span>{sym}{part.received.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {part.change > 0 && (
+                        <div className="flex justify-between font-semibold print:text-black">
+                          <span className="pl-2">Vuelto:</span>
+                          <span>{sym}{part.change.toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between">
+                  <span>Pago ({ticket.payment.method === "cash" ? "Efectivo" : ticket.payment.method === "card" ? "Tarjeta" : ticket.payment.method === "transfer" ? "Transferencia" : ticket.payment.method}):</span>
+                  <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.received.toFixed(2)}</span>
+                </div>
+                {ticket.payment.change > 0 && (
+                  <div className="flex justify-between font-semibold">
+                    <span>Vuelto:</span>
+                    <span>{ticket.payment.currency === "NIO" ? "C$" : "$"}{ticket.payment.change.toFixed(2)}</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </>

@@ -20,6 +20,25 @@ export const niFormatTime = (iso: string | Date, opts?: Intl.DateTimeFormatOptio
         ...opts,
     });
 
+/** Format time with seconds (24h), e.g. 14:37:05 */
+export const niFormatTimeExact = (iso: string | Date) =>
+    new Date(iso).toLocaleTimeString("es-NI", {
+        timeZone: NI_TZ,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
+
+/** Compact 24h time for chart axes (HH:mm) */
+export const niFormatTime24 = (iso: string | Date) =>
+    new Date(iso).toLocaleTimeString("es-NI", {
+        timeZone: NI_TZ,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    });
+
 /** Get today's date as YYYY-MM-DD in Nicaragua timezone */
 export const niToday = (): string => {
     return new Date().toLocaleDateString("en-CA", { timeZone: NI_TZ });
