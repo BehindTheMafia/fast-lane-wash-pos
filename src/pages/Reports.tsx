@@ -328,7 +328,7 @@ export default function Reports() {
 
     // Build items array with proper service names and prices
     const itemsFromDB = ticket.ticket_items?.map((ti: any) => ({
-      serviceName: ti.services?.name || "Servicio",
+      serviceName: ti.services?.name || ti.service_name_snapshot || "Servicio",
       vehicleLabel: (ticket.vehicle_types as any)?.name || "",
       price: Number(ti.price),
     })) || [];
@@ -460,7 +460,7 @@ export default function Reports() {
   tickets.forEach((t: any) => {
     // By service from ticket_items
     t.ticket_items?.forEach((ti: any) => {
-      const sn = ti.services?.name || "Otro";
+      const sn = ti.services?.name || ti.service_name_snapshot || "Otro";
       byService[sn] = byService[sn] || { count: 0, total: 0 };
       byService[sn].count++;
       byService[sn].total += Number(ti.price);
@@ -726,7 +726,7 @@ export default function Reports() {
                     </tr>
                   )}
                   {filteredTickets.map((t: any, idx: number) => {
-                    const serviceNames = t.ticket_items?.map((ti: any) => ti.services?.name).filter(Boolean).join(", ") || "—";
+                    const serviceNames = t.ticket_items?.map((ti: any) => ti.services?.name || ti.service_name_snapshot).filter(Boolean).join(", ") || "—";
                     const vehicleName = (t.vehicle_types as any)?.name || "—";
                     const paymentMethods = t.payments?.map((p: any) => methodLabels[p.payment_method] || p.payment_method).join(", ") || "—";
                     const cashierName = t.cashier_name || "—";

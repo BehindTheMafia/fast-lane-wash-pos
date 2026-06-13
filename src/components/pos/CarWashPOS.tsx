@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useServices, useExtras, useBarberServicesForMix } from "@/hooks/useServices";
 import { useVehicleTypes } from "@/hooks/useVehicleTypes";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
+import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { niStartOfDay, niNow } from "@/utils/niDate";
@@ -33,6 +34,7 @@ interface Customer {
 }
 
 export default function CarWashPOS() {
+  const { barbershopVisible } = useBusinessLine();
   const { data: services } = useServices();
   const { data: extras } = useExtras();
   const { data: barberServices } = useBarberServicesForMix();
@@ -42,6 +44,9 @@ export default function CarWashPOS() {
 
   const [selectedVehicleId, setSelectedVehicleId] = useState<number>(0);
   const [selectedServiceId, setSelectedServiceId] = useState<number>(0);
+  const [showCustomChargeModal, setShowCustomChargeModal] = useState(false);
+  const [customConcept, setCustomConcept] = useState("");
+  const [customAmount, setCustomAmount] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [ticketItems, setTicketItems] = useState<TicketItem[]>([]);
   const [showPayment, setShowPayment] = useState(false);
@@ -554,9 +559,24 @@ export default function CarWashPOS() {
 
         {/* Services grid */}
         <div className="p-4 flex-1">
-          <p className="text-sm font-semibold text-foreground mb-3">
-            <i className="fa-solid fa-list-check mr-2 text-secondary" />Servicios
-          </p>
+          <div className="flex justify-between items-center mb-3">
+            <p className="text-sm font-semibold text-foreground">
+              <i className="fa-solid fa-list-check mr-2 text-secondary" />Servicios
+            </p>
+            {selectedVehicleId > 0 && !selectedMembership && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomConcept("");
+                  setCustomAmount("");
+                  setShowCustomChargeModal(true);
+                }}
+                className="touch-btn text-xs px-3 py-1.5 rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-all font-semibold flex items-center gap-1"
+              >
+                <i className="fa-solid fa-plus-circle" /> Cobro Personalizado
+              </button>
+            )}
+          </div>
 
           {/* Show message when membership is selected */}
           {selectedMembership ? (
@@ -677,7 +697,7 @@ export default function CarWashPOS() {
           )}
 
           {/* Barbershop Services Section (cross-sell) */}
-          {!selectedMembership && barberServices && barberServices.length > 0 && (
+          {!selectedMembership && barbershopVisible && barberServices && barberServices.length > 0 && (
             <div className="mt-6">
               <button
                 type="button"
@@ -942,6 +962,92 @@ export default function CarWashPOS() {
           onSelect={(c: any) => { setCustomer(c as Customer); setShowCustomer(false); }}
           onClose={() => setShowCustomer(false)}
         />
+      )}
+      {showCustomChargeModal && (
+        <div className="modal-overlay" onClick={() => setShowCustomChargeModal(false)}>
+          <div className="modal-content animate-scale-in" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-foreground">
+                <i className="fa-solid fa-plus-circle mr-2 text-secondary" />Cobro Personalizado
+              </h2>
+              <button 
+                onClick={() => setShowCustomChargeModal(false)} 
+                className="touch-btn p-2 text-muted-foreground"
+              >
+                <i className="fa-solid fa-xmark text-xl" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">Concepto / Descripción</label>
+                <input 
+                  type="text" 
+                  value={customConcept} 
+                  onChange={(e) => setCustomConcept(e.target.value)} 
+                  className="input-touch" 
+                  placeholder="Ej: Lavado especial de alfombras"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">Monto (C$)</label>
+                <input 
+                  type="number" 
+                  value={customAmount} 
+                  onChange={(e) => setCustomAmount(e.target.value)} 
+                  className="input-touch" 
+                  placeholder="Ej: 150"
+                  min="0.01"
+                  step="0.01"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCustomChargeModal(false)}
+                  className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!customConcept.trim()) {
+                      showToast("Por favor, ingresa el concepto", "error");
+                      return;
+                    }
+                    const amt = parseFloat(customAmount);
+                    if (isNaN(amt) || amt <= 0) {
+                      showToast("Por favor, ingresa un monto válido mayor a 0", "error");
+                      return;
+                    }
+                    const vt = vehicleTypes?.find((v) => v.id === selectedVehicleId);
+                    setTicketItems((prev) => [
+                      ...prev,
+                      {
+                        serviceId: null,
+                        serviceName: customConcept.trim(),
+                        vehicleTypeId: selectedVehicleId,
+                        vehicleLabel: vt?.name || "",
+                        price: amt,
+                        discountPercent: 0,
+                      },
+                    ]);
+                    setShowCustomChargeModal(false);
+                    showToast("Cobro personalizado agregado");
+                  }}
+                  className="btn-cobrar flex-1 flex items-center justify-center gap-2"
+                >
+                  <i className="fa-solid fa-check" /> Agregar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
       {showPrint && lastTicket && (
         <TicketPrint

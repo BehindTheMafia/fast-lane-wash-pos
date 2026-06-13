@@ -4,6 +4,7 @@ import { useCarWashServicesForMix } from "@/hooks/useServices";
 import { useProducts } from "@/hooks/useProducts";
 import { useVehicleTypes } from "@/hooks/useVehicleTypes";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
+import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { niStartOfDay, niNow } from "@/utils/niDate";
@@ -31,6 +32,7 @@ interface Customer {
 }
 
 export default function BarbershopPOS() {
+  const { carWashVisible } = useBusinessLine();
   const { data: services } = useBarberServices();
   const { data: products } = useProducts();
   const { data: carWashServices } = useCarWashServicesForMix();
@@ -40,6 +42,9 @@ export default function BarbershopPOS() {
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [ticketItems, setTicketItems] = useState<BarberCartItem[]>([]);
+  const [showCustomChargeModal, setShowCustomChargeModal] = useState(false);
+  const [customConcept, setCustomConcept] = useState("");
+  const [customAmount, setCustomAmount] = useState("");
   const [showPayment, setShowPayment] = useState(false);
   const [showCustomer, setShowCustomer] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
@@ -364,10 +369,23 @@ export default function BarbershopPOS() {
 
       <div className="flex-1 flex flex-col overflow-auto pb-24 lg:pb-0">
         <div className="p-4 border-b border-border">
-          <p className="text-sm font-semibold text-foreground mb-3">
-            <i className="fa-solid fa-scissors mr-2 text-secondary" />
-            Servicios
-          </p>
+          <div className="flex justify-between items-center mb-3">
+            <p className="text-sm font-semibold text-foreground">
+              <i className="fa-solid fa-scissors mr-2 text-secondary" />
+              Servicios
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setCustomConcept("");
+                setCustomAmount("");
+                setShowCustomChargeModal(true);
+              }}
+              className="touch-btn text-xs px-3 py-1.5 rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-all font-semibold flex items-center gap-1"
+            >
+              <i className="fa-solid fa-plus-circle" /> Cobro Personalizado
+            </button>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3">
             {services?.filter(svc => Number(svc.base_price || 0) > 0).map((svc) => (
               <button
@@ -423,7 +441,7 @@ export default function BarbershopPOS() {
         </div>
 
         {/* Car Wash Services Section (cross-sell) */}
-        {carWashServices && carWashServices.length > 0 && (
+        {carWashVisible && carWashServices && carWashServices.length > 0 && (
           <div className="p-4 border-t border-border">
             <button
               type="button"
@@ -653,6 +671,90 @@ export default function BarbershopPOS() {
           }}
           onClose={() => setShowCustomer(false)}
         />
+      )}
+      {showCustomChargeModal && (
+        <div className="modal-overlay" onClick={() => setShowCustomChargeModal(false)}>
+          <div className="modal-content animate-scale-in" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-foreground">
+                <i className="fa-solid fa-plus-circle mr-2 text-secondary" />Cobro Personalizado
+              </h2>
+              <button 
+                onClick={() => setShowCustomChargeModal(false)} 
+                className="touch-btn p-2 text-muted-foreground"
+              >
+                <i className="fa-solid fa-xmark text-xl" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">Concepto / Descripción</label>
+                <input 
+                  type="text" 
+                  value={customConcept} 
+                  onChange={(e) => setCustomConcept(e.target.value)} 
+                  className="input-touch" 
+                  placeholder="Ej: Servicio de afeitado VIP"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">Monto (C$)</label>
+                <input 
+                  type="number" 
+                  value={customAmount} 
+                  onChange={(e) => setCustomAmount(e.target.value)} 
+                  className="input-touch" 
+                  placeholder="Ej: 120"
+                  min="0.01"
+                  step="0.01"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCustomChargeModal(false)}
+                  className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!customConcept.trim()) {
+                      showToast("Por favor, ingresa el concepto", "error");
+                      return;
+                    }
+                    const amt = parseFloat(customAmount);
+                    if (isNaN(amt) || amt <= 0) {
+                      showToast("Por favor, ingresa un monto válido mayor a 0", "error");
+                      return;
+                    }
+                    setTicketItems((prev) => [
+                      ...prev,
+                      {
+                        itemType: "service",
+                        name: customConcept.trim(),
+                        price: amt,
+                        quantity: 1,
+                        discountPercent: 0,
+                      },
+                    ]);
+                    setShowCustomChargeModal(false);
+                    showToast("Cobro personalizado agregado");
+                  }}
+                  className="btn-cobrar flex-1 flex items-center justify-center gap-2"
+                >
+                  <i className="fa-solid fa-check" /> Agregar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
       {showPrint && lastTicket && (
         <TicketPrint

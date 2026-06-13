@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useBusinessSettings, useUpdateBusinessSettings } from "@/hooks/useBusinessSettings";
 import { BUSINESS_LINE_LABELS, type BusinessLine } from "@/lib/businessLine";
+import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import { niFormatDate } from "@/utils/niDate";
 import { FULL_DATABASE_SCHEMA } from "@/utils/backupSchema";
 import { supabase } from "@/integrations/supabase/client";
@@ -74,6 +75,7 @@ function DangerModal({ title, description, confirmLabel, confirmWord = "ELIMINAR
 
 // ─── Main Settings Page ─────────────────────────────────────────────────────
 export default function Settings() {
+  const { carWashVisible, barbershopVisible, updateVisibilities } = useBusinessLine();
   const [editLine, setEditLine] = useState<BusinessLine>("car_wash");
   const { data: settings, isLoading } = useBusinessSettings(editLine);
   const updateSettings = useUpdateBusinessSettings(editLine);
@@ -401,6 +403,62 @@ export default function Settings() {
             {BUSINESS_LINE_LABELS[line]}
           </button>
         ))}
+      </div>
+
+      {/* ── Módulos Activos (Visual) ── */}
+      <div className="pos-card p-6 space-y-4">
+        <h3 className="font-bold text-foreground">
+          <i className="fa-solid fa-square-check mr-2 text-secondary" />
+          Módulos Activos (Visual)
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          Activa o desactiva la visibilidad de los módulos. Los cambios se sincronizarán con los demás usuarios del sistema. Al menos un módulo debe estar activo.
+        </p>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/20 border border-border">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Módulo de Autolavado</p>
+              <p className="text-xs text-muted-foreground">Mostrar/ocultar las funciones de autolavado</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (carWashVisible && !barbershopVisible) {
+                  showToast("Debe haber al menos un módulo activo", "error");
+                  return;
+                }
+                const newVal = !carWashVisible;
+                updateVisibilities(newVal, barbershopVisible);
+                showToast(`Módulo de Autolavado ${newVal ? 'activado' : 'desactivado'}`);
+              }}
+              className={`w-12 h-6 rounded-full transition-colors relative ${carWashVisible ? 'bg-accent' : 'bg-muted'}`}
+            >
+              <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${carWashVisible ? 'translate-x-6' : ''}`} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/20 border border-border">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Módulo de Barbería</p>
+              <p className="text-xs text-muted-foreground">Mostrar/ocultar las funciones de barbería</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (barbershopVisible && !carWashVisible) {
+                  showToast("Debe haber al menos un módulo activo", "error");
+                  return;
+                }
+                const newVal = !barbershopVisible;
+                updateVisibilities(carWashVisible, newVal);
+                showToast(`Módulo de Barbería ${newVal ? 'activado' : 'desactivado'}`);
+              }}
+              className={`w-12 h-6 rounded-full transition-colors relative ${barbershopVisible ? 'bg-accent' : 'bg-muted'}`}
+            >
+              <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${barbershopVisible ? 'translate-x-6' : ''}`} />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ── Datos del negocio ── */}

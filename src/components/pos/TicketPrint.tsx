@@ -51,7 +51,7 @@ export default function TicketPrint({ ticket, onClose }: Props) {
 
     const items = Array.isArray(ticket.items) ? ticket.items : [];
     const itemLabel = (item: any) =>
-      item?.name || item?.serviceName || "Ítem";
+      item?.name || item?.serviceName || item?.service_name_snapshot || "Ítem";
     const itemQty = (item: any) => toNumber(item?.quantity ?? item?.qty ?? 1);
     const itemLineTotal = (item: any) => {
       const unit = toNumber(item?.price);
@@ -86,8 +86,8 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     message += `👤 *Cliente:* ${clientName}\n`;
     if (plate) message += `🚗 *Placa:* ${plate}\n`;
     message += `${line}\n`;
-    const serviceItems = items.filter((i: any) => i.itemType !== "product");
-    const productItems = items.filter((i: any) => i.itemType === "product");
+    const serviceItems = items.filter((i: any) => (i.itemType || i.item_type) !== "product");
+    const productItems = items.filter((i: any) => (i.itemType || i.item_type) === "product");
     if (serviceItems.length) {
       message += `🧼 *SERVICIOS:*\n`;
       serviceItems.forEach((item: any) => {
@@ -225,7 +225,7 @@ export default function TicketPrint({ ticket, onClose }: Props) {
                   const discPct = Number(item.discountPercent) || 0;
                   const lineTotal = unit * qty * (1 - discPct / 100);
                   const symbol = ticket.payment?.currency === "USD" ? "$" : "C$";
-                  const name = item.name || item.serviceName || "Ítem";
+                  const name = item.name || item.serviceName || item.service_name_snapshot || "Ítem";
                   return (
                     <div key={i} className="text-[11px]">
                       <div className="flex justify-between font-semibold">
@@ -251,16 +251,13 @@ export default function TicketPrint({ ticket, onClose }: Props) {
         return (
           <>
             {renderLines(
-              allItems.filter((i: any) => i.itemType !== "product"),
+              allItems.filter((i: any) => (i.itemType || i.item_type) !== "product"),
               "Servicios"
             )}
             {renderLines(
-              allItems.filter((i: any) => i.itemType === "product"),
+              allItems.filter((i: any) => (i.itemType || i.item_type) === "product"),
               "Productos"
             )}
-            {allItems.length > 0 &&
-              !allItems.some((i: any) => i.itemType) &&
-              renderLines(allItems, "Servicios")}
           </>
         );
       })()}

@@ -316,7 +316,7 @@ export default function Dashboard() {
 
       // Build ticket object for TicketPrint component
       const items = (ticket.ticket_items || []).map((ti: any) => ({
-        serviceName: ti.services?.name || "Servicio",
+        serviceName: ti.services?.name || ti.service_name_snapshot || "Servicio",
         vehicleLabel: ticket.vehicle_types?.name || "—",
         price: Number(ti.price),
         qty: 1,

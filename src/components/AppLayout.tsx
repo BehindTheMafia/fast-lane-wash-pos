@@ -31,7 +31,9 @@ const navItems: NavItem[] = [
 ];
 
 function BusinessLineSelector({ compact }: { compact?: boolean }) {
-  const { businessLine, setBusinessLine } = useBusinessLine();
+  const { businessLine, setBusinessLine, carWashVisible, barbershopVisible } = useBusinessLine();
+
+  if (!carWashVisible || !barbershopVisible) return null;
 
   const btn = (line: BusinessLine, icon: string) => (
     <button
@@ -71,7 +73,7 @@ function BusinessLineSelector({ compact }: { compact?: boolean }) {
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { profile, signOut, loading, user, isAdmin } = useAuth();
-  const { businessLine, isBarbershop } = useBusinessLine();
+  const { businessLine, isBarbershop, carWashVisible, barbershopVisible } = useBusinessLine();
   const { data: settings } = useBusinessSettings();
   const isOwner = profile?.role === "owner";
   const location = useLocation();
@@ -88,9 +90,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   if (!user) return <Navigate to="/login" replace />;
 
   const visibleNav = navItems.filter((n) => {
-    if (n.carWashOnly && isBarbershop) return false;
-    if (n.barbershopOnly && !isBarbershop) return false;
-    if (n.barbershopOnlyAdminOrOwner) return isBarbershop && (isAdmin || isOwner);
+    if (n.carWashOnly && (!carWashVisible || isBarbershop)) return false;
+    if (n.barbershopOnly && (!barbershopVisible || !isBarbershop)) return false;
+    if (n.barbershopOnlyAdminOrOwner) return barbershopVisible && isBarbershop && (isAdmin || isOwner);
     if (n.adminOnly) return isAdmin;
     if (n.adminOrOwner) return isAdmin || isOwner;
     if (n.adminOrOwnerOrCajero) return isAdmin || isOwner || profile?.role === "cajero";
