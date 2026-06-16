@@ -111,17 +111,10 @@ export async function printTicketBluetooth(ticket: any) {
                 });
             };
 
-            printItemBlock(
-                items.filter((i: any) => i.itemType !== "product"),
-                "SERVICIOS"
-            );
-            printItemBlock(
-                items.filter((i: any) => i.itemType === "product"),
-                "PRODUCTOS"
-            );
-            if (items.length && !items.some((i: any) => i.itemType)) {
-                printItemBlock(items, "SERVICIOS");
-            }
+            const serviceItems = items.filter((i: any) => (i.itemType || i.item_type) !== "product");
+            const productItems = items.filter((i: any) => (i.itemType || i.item_type) === "product");
+            printItemBlock(serviceItems, "SERVICIOS");
+            printItemBlock(productItems, "PRODUCTOS");
 
             const rate = Number(ticket.settings?.exchange_rate || 36.5);
             const totalNIO = Number(ticket.total || 0);
