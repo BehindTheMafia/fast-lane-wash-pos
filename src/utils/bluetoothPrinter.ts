@@ -85,12 +85,13 @@ export async function printTicketBluetooth(ticket: any) {
             const symbol = ticket.payment?.currency === 'USD' ? '$' : 'C$';
 
             const items = Array.isArray(ticket.items) ? ticket.items : [];
+
             const printItemBlock = (list: any[], title: string) => {
                 if (!list.length) return;
                 encoder.line(hr).line(title);
                 list.forEach((item: any) => {
-                    const name = item?.name || item?.serviceName || "Ítem";
-                    const qty = Number(item?.quantity ?? 1);
+                    const name = item?.name || item?.serviceName || item?.service_name_snapshot || "Ítem";
+                    const qty = Number(item?.quantity ?? item?.qty ?? 1);
                     const unit = Number(item?.price || 0);
                     const disc = Number(item?.discountPercent || 0) / 100;
                     const lineTotal = unit * qty * (1 - disc);
@@ -163,10 +164,14 @@ export async function printTicketBluetooth(ticket: any) {
                 .newline()
                 .newline()
                 .newline()
+                .newline()
                 .newline();
 
-            // Add a cut between copies or at the end
-            encoder.cut();
+            // Corte de papel: avance + corte completo ESC/POS raw
+            // 0x1B 0x64 0x05 = avanzar 5 líneas
+            // 0x1D 0x56 0x00 = corte completo (GS V 0)
+            encoder.raw([0x1B, 0x64, 0x05]);  // paper feed 5 lines
+            encoder.raw([0x1D, 0x56, 0x00]);  // full cut
         }
 
         const result = encoder.encode();
