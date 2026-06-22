@@ -6,8 +6,32 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import ServicesBarberAdmin from "@/components/admin/ServicesBarberAdmin";
+import { useCarWashProducts, useSetServiceProducts } from "@/hooks/useCarWashInventory";
 
 type Tab = "services" | "extras" | "vehicles";
+
+function ProductTagsRow({ serviceId }: { serviceId: number }) {
+  const [tags, setTags] = useState<string[]>([]);
+  useState(() => {
+    supabase
+      .from("service_products")
+      .select("products(name)")
+      .eq("service_id", serviceId)
+      .then(({ data }) => {
+        if (data) setTags(data.map((r: any) => r.products?.name).filter(Boolean));
+      });
+  });
+  if (tags.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-2">
+      {tags.map(name => (
+        <span key={name} className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 flex items-center gap-1">
+          <i className="fa-solid fa-box text-[8px]" />{name}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 const ICONS = [
   "fa-soap", "fa-car-wash", "fa-spray-can-sparkles", "fa-gem", "fa-star",
@@ -27,10 +51,13 @@ function ServicesCarWash() {
   const { data: services, isLoading: svcsLoading } = useAllServices();
   const { data: extras, isLoading: extrasLoading } = useAllExtras();
   const { data: vehicleTypes, isLoading: vtLoading } = useAllVehicleTypes();
+  const { data: carWashProducts } = useCarWashProducts();
+  const { mutateAsync: saveServiceProducts } = useSetServiceProducts();
 
   const [tab, setTab] = useState<Tab>("services");
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState<any>(EmptyForm(false));
+  const [assignedProductIds, setAssignedProductIds] = useState<Set<number>>(new Set());
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
 
   // Vehicle type form
@@ -51,13 +78,23 @@ function ServicesCarWash() {
     qc.invalidateQueries({ queryKey: ["vehicle_types"] });
   };
 
-  const startEdit = (svc: any) => {
+  const startEdit = async (svc: any) => {
     const prices: Record<string, string> = {};
     svc.service_prices?.forEach((p: any) => {
       prices[String(p.vehicle_type_id)] = String(p.price);
     });
     setEditing(svc);
     setForm({ name: svc.name, description: svc.description || "", icon: svc.icon || "fa-soap", is_extra: svc.is_extra || false, prices });
+    // Load existing product assignments for non-extra services
+    if (!svc.is_extra && svc.business_line === "car_wash") {
+      const { data } = await supabase
+        .from("service_products")
+        .select("product_id")
+        .eq("service_id", svc.id);
+      setAssignedProductIds(new Set((data || []).map((r: any) => r.product_id)));
+    } else {
+      setAssignedProductIds(new Set());
+    }
   };
 
   const startNew = (isExtra: boolean) => {
@@ -65,6 +102,7 @@ function ServicesCarWash() {
     vehicleTypes?.forEach(vt => { prices[String(vt.id)] = "0"; });
     setEditing("new");
     setForm({ ...EmptyForm(isExtra), prices });
+    setAssignedProductIds(new Set());
   };
 
   const handleSave = async () => {
@@ -98,6 +136,15 @@ function ServicesCarWash() {
         { service_id: svcId, vehicle_type_id: parseInt(vtId), price } as any,
         { onConflict: "service_id,vehicle_type_id" }
       );
+    }
+
+    // Save product assignments for non-extra car_wash services
+    if (!form.is_extra) {
+      try {
+        await saveServiceProducts({ serviceId: Number(svcId), productIds: [...assignedProductIds] });
+      } catch (err: any) {
+        showToast("Servicio guardado pero error al guardar productos: " + err.message, false);
+      }
     }
 
     setEditing(null);
@@ -230,6 +277,46 @@ function ServicesCarWash() {
         )}
       </div>
 
+      {/* Product assignment — only for non-extra car_wash services */}
+      {!isExtra && (
+        <div>
+          <label className="text-xs font-semibold text-secondary mb-2 block flex items-center gap-1">
+            <i className="fa-solid fa-boxes-stacked" /> Productos del paquete (inventario global)
+          </label>
+          {(!carWashProducts || carWashProducts.length === 0) ? (
+            <p className="text-xs text-muted-foreground italic">
+              No hay productos de autolavado registrados. Agréga productos desde Inventario.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {carWashProducts.map(p => {
+                const checked = assignedProductIds.has(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      const next = new Set(assignedProductIds);
+                      if (checked) next.delete(p.id); else next.add(p.id);
+                      setAssignedProductIds(next);
+                    }}
+                    className={`flex items-center gap-2 p-2.5 rounded-xl border-2 text-left transition-all ${checked ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"}`}
+                  >
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${checked ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                      <i className={`fa-solid ${checked ? "fa-check" : (p.icon || "fa-bottle-droplet")} text-xs`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground truncate">{p.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{p.services_per_unit} usos/ud · stock: {p.stock_quantity}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex gap-2">
         <button onClick={handleSave} className="btn-cobrar px-6 py-2 text-sm flex items-center gap-2">
           <i className="fa-solid fa-floppy-disk" />Guardar
@@ -293,6 +380,10 @@ function ServicesCarWash() {
                 );
               })}
             </div>
+            {/* Assigned products (car_wash non-extra services) */}
+            {!svc.is_extra && svc.business_line === "car_wash" && carWashProducts && (
+              <ProductTagsRow serviceId={svc.id} />
+            )}
           </div>
         ))}
       </div>

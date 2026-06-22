@@ -12,6 +12,7 @@ import TicketPrint from "@/components/pos/TicketPrint";
 import MembershipSelector from "@/components/pos/MembershipSelector";
 import { useMemberships } from "@/hooks/useMemberships";
 import { isServiceEligible, ELIGIBLE_SERVICE_NAMES } from "@/lib/membershipUtils";
+import { checkServiceInventory, recordServiceInventory } from "@/hooks/useCarWashInventory";
 
 // Vehicle types are now loaded dynamically from DB via useVehicleTypes()
 
@@ -250,6 +251,31 @@ export default function CarWashPOS() {
 
       const firstItem = homeItems[0] || ticketItems[0];
 
+      // ── Inventory pre-check ───────────────────────────────────────────────
+      // Collect unique non-extra car_wash service IDs (extras and loyalty are skipped by RPC,
+      // but filter client-side to avoid unnecessary calls).
+      const nonExtraServiceIds = [...new Set(
+        homeItems
+          .filter(i => i.serviceId && i.serviceId !== "loyalty-free" && (!i.businessLine || i.businessLine === "car_wash"))
+          .map(i => Number(i.serviceId))
+          .filter(id => !isNaN(id) && id > 0)
+          // Only non-extra services have inventory; extras are filtered by the RPC, but
+          // we exclude them using the already-loaded services list to reduce round-trips.
+          .filter(id => {
+            const svc = services?.find((s: any) => s.id === id);
+            return !svc || svc.is_extra === false;
+          })
+      )];
+
+      for (const serviceId of nonExtraServiceIds) {
+        const result = await checkServiceInventory(serviceId);
+        if (!result.ok) {
+          const depleted = (result.products || []).filter(p => p.available <= 0);
+          const names = depleted.map(p => p.name).join(", ");
+          throw new Error(`Stock insuficiente para completar el servicio. Productos agotados: ${names}. Por favor repón el inventario antes de registrar esta venta.`);
+        }
+      }
+
       // Generate ticket number
       const ticketNumber = `T-${Date.now().toString(36).toUpperCase()}`;
 
@@ -292,6 +318,16 @@ export default function CarWashPOS() {
         await supabase.from("ticket_items").delete().eq("ticket_id", (ticket as any).id);
         await supabase.from("tickets").delete().eq("id", (ticket as any).id);
       };
+
+      // ── Record inventory consumption for non-extra car_wash services ──────
+      for (const serviceId of nonExtraServiceIds) {
+        try {
+          await recordServiceInventory(serviceId, (ticket as any).id);
+        } catch (invErr: any) {
+          await rollbackTicket();
+          throw new Error(`Error al registrar consumo de inventario: ${invErr.message}`);
+        }
+      }
 
       // ── Payment amount for home ticket ──
       const homePaymentAmount = hasCross

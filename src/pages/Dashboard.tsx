@@ -4,6 +4,7 @@ import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useAuth } from "@/hooks/useAuth";
 import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import { useLowStockProducts } from "@/hooks/useProducts";
+import { useLowStockCarWashProducts, computeAvailableServices } from "@/hooks/useCarWashInventory";
 import { BUSINESS_LINE_LABELS } from "@/lib/businessLine";
 import { toast } from "sonner";
 import TicketPrint from "@/components/pos/TicketPrint";
@@ -43,6 +44,7 @@ export default function Dashboard() {
   const { businessLine, isBarbershop } = useBusinessLine();
   const { data: settings } = useBusinessSettings();
   const { data: lowStockProducts } = useLowStockProducts();
+  const { outOfStock: cwOutOfStock, lowStock: cwLowStock } = useLowStockCarWashProducts();
   const { profile, isAdmin, isOwner, isCajero } = useAuth();
   // canDelete affects if the delete button is functional
   const canDeleteRole = isAdmin || isOwner;
@@ -503,17 +505,53 @@ export default function Dashboard() {
             ))}
           </div>
         ) : (
-          <div className="pos-card p-6">
-            <h3 className="font-bold text-foreground mb-4 flex items-center gap-2">
-              <i className="fa-solid fa-car text-secondary" />Top Vehículos
-            </h3>
-            {stats.topVehicles.length === 0 && <p className="text-sm text-muted-foreground">Sin datos hoy</p>}
-            {stats.topVehicles.map((v, i) => (
-              <div key={i} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                <span className="text-sm text-foreground">{v.type}</span>
-                <span className="font-bold text-accent">{v.count}</span>
-              </div>
-            ))}
+          <div className="pos-card p-6 space-y-4">
+            {/* Car wash inventory alerts */}
+            <div>
+              <h3 className="font-bold text-foreground mb-3 flex items-center gap-2">
+                <i className="fa-solid fa-boxes-stacked text-secondary" />
+                Inventario
+              </h3>
+              {cwOutOfStock.length === 0 && cwLowStock.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  <i className="fa-solid fa-circle-check text-emerald-500 mr-1" />Inventario OK
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {cwOutOfStock.map(p => (
+                    <div key={p.id} className="flex justify-between items-center py-1.5 border-b border-border last:border-0">
+                      <div className="min-w-0">
+                        <span className="text-sm font-medium text-foreground truncate block">{p.name}</span>
+                        <span className="text-[10px] text-red-600">Agotado</span>
+                      </div>
+                      <span className="text-xs font-bold text-red-600 shrink-0 ml-2">0 svc</span>
+                    </div>
+                  ))}
+                  {cwLowStock.map(p => (
+                    <div key={p.id} className="flex justify-between items-center py-1.5 border-b border-border last:border-0">
+                      <div className="min-w-0">
+                        <span className="text-sm font-medium text-foreground truncate block">{p.name}</span>
+                        <span className="text-[10px] text-amber-600">Stock bajo · {p.stock_quantity} ud{p.stock_quantity !== 1 ? "s" : ""}</span>
+                      </div>
+                      <span className="text-xs font-bold text-amber-600 shrink-0 ml-2">{computeAvailableServices(p)} svc</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Top vehicles */}
+            <div>
+              <h3 className="font-bold text-foreground mb-3 flex items-center gap-2">
+                <i className="fa-solid fa-car text-secondary" />Top Vehículos
+              </h3>
+              {stats.topVehicles.length === 0 && <p className="text-sm text-muted-foreground">Sin datos hoy</p>}
+              {stats.topVehicles.map((v, i) => (
+                <div key={i} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
+                  <span className="text-sm text-foreground">{v.type}</span>
+                  <span className="font-bold text-accent">{v.count}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

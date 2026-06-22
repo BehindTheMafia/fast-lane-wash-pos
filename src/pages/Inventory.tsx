@@ -2,7 +2,9 @@ import { useState, useMemo, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useInventoryProducts, useProductMovements, type InventoryProduct, type StockMovement } from "@/hooks/useInventory";
+import { useCarWashProducts, useCarWashProductMovements, computeAvailableServices, type CarWashProduct } from "@/hooks/useCarWashInventory";
 import { useAuth } from "@/hooks/useAuth";
+import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import { niFormatShortDate, niFormatTime } from "@/utils/niDate";
 
 type StockFilter = "all" | "low" | "out";
@@ -12,28 +14,37 @@ const REASON_LABELS: Record<string, string> = {
   sale: "Venta",
   adjustment: "Ajuste manual",
   restock: "Reposición",
+  service_consumption: "Consumo por servicio",
 };
 
 const REASON_COLORS: Record<string, string> = {
   sale: "text-red-600 bg-red-50 dark:bg-red-900/20",
   adjustment: "text-blue-600 bg-blue-50 dark:bg-blue-900/20",
   restock: "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20",
+  service_consumption: "text-orange-600 bg-orange-50 dark:bg-orange-900/20",
 };
 
 const REASON_ICONS: Record<string, string> = {
   sale: "fa-shopping-bag",
   adjustment: "fa-sliders",
   restock: "fa-boxes-stacked",
+  service_consumption: "fa-car-side",
 };
 
-function stockStatus(p: InventoryProduct) {
+function stockStatus(p: InventoryProduct | CarWashProduct, isCarWash = false) {
+  if (isCarWash) {
+    const available = computeAvailableServices(p as CarWashProduct);
+    if (available <= 0) return "out";
+    if ((p as CarWashProduct).stock_quantity <= p.min_stock_level) return "low";
+    return "ok";
+  }
   if (p.stock_quantity === 0) return "out";
   if (p.stock_quantity <= p.min_stock_level) return "low";
   return "ok";
 }
 
-function StockBadge({ product }: { product: InventoryProduct }) {
-  const status = stockStatus(product);
+function StockBadge({ product, isCarWash = false }: { product: InventoryProduct | CarWashProduct; isCarWash?: boolean }) {
+  const status = stockStatus(product, isCarWash);
   if (status === "out")
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
@@ -55,16 +66,17 @@ function StockBadge({ product }: { product: InventoryProduct }) {
 
 // ── Product Form Modal ────────────────────────────────────────────────────────
 interface ProductFormProps {
-  editing: InventoryProduct | "new";
+  editing: InventoryProduct | CarWashProduct | "new";
   onClose: () => void;
   onSaved: () => void;
   showToast: (msg: string, ok?: boolean) => void;
+  isCarWash?: boolean;
 }
 
-function ProductFormModal({ editing, onClose, onSaved, showToast }: ProductFormProps) {
+function ProductFormModal({ editing, onClose, onSaved, showToast, isCarWash = false }: ProductFormProps) {
   const isNew = editing === "new";
   const initial = isNew
-    ? { name: "", description: "", sku: "", price: "0", stock_quantity: "0", min_stock_level: "5", icon: "fa-bottle-droplet" }
+    ? { name: "", description: "", sku: "", price: "0", stock_quantity: "0", min_stock_level: "1", services_per_unit: "84", icon: "fa-bottle-droplet" }
     : {
         name: (editing as InventoryProduct).name,
         description: (editing as InventoryProduct).description || "",
@@ -72,6 +84,7 @@ function ProductFormModal({ editing, onClose, onSaved, showToast }: ProductFormP
         price: String((editing as InventoryProduct).price),
         stock_quantity: String((editing as InventoryProduct).stock_quantity),
         min_stock_level: String((editing as InventoryProduct).min_stock_level),
+        services_per_unit: String((editing as CarWashProduct).services_per_unit ?? 84),
         icon: (editing as InventoryProduct).icon || "fa-bottle-droplet",
       };
 
@@ -87,17 +100,18 @@ function ProductFormModal({ editing, onClose, onSaved, showToast }: ProductFormP
   const handleSave = async () => {
     if (!form.name.trim()) { showToast("El nombre es requerido", false); return; }
     setSaving(true);
-    const payload = {
+    const basePayload = {
       name: form.name.trim(),
       description: form.description,
       sku: form.sku,
-      price: parseFloat(form.price) || 0,
       stock_quantity: parseInt(form.stock_quantity, 10) || 0,
-      min_stock_level: parseInt(form.min_stock_level, 10) || 5,
+      min_stock_level: parseInt(form.min_stock_level, 10) || (isCarWash ? 1 : 5),
       icon: form.icon,
       is_active: true,
-      business_line: "barbershop" as const,
     };
+    const payload = isCarWash
+      ? { ...basePayload, price: 0, business_line: "car_wash" as const, services_per_unit: parseInt(form.services_per_unit, 10) || 84 }
+      : { ...basePayload, price: parseFloat(form.price) || 0, business_line: "barbershop" as const };
 
     let err;
     if (isNew) {
@@ -144,18 +158,20 @@ function ProductFormModal({ editing, onClose, onSaved, showToast }: ProductFormP
                 placeholder="Código interno"
               />
             </div>
+            {!isCarWash && (
+              <div>
+                <label className="text-xs font-semibold text-secondary mb-1 block">Precio C$</label>
+                <input
+                  type="number"
+                  className="input-touch w-full"
+                  value={form.price}
+                  onChange={e => setForm({ ...form, price: e.target.value })}
+                  min={0}
+                />
+              </div>
+            )}
             <div>
-              <label className="text-xs font-semibold text-secondary mb-1 block">Precio C$</label>
-              <input
-                type="number"
-                className="input-touch w-full"
-                value={form.price}
-                onChange={e => setForm({ ...form, price: e.target.value })}
-                min={0}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-secondary mb-1 block">Stock inicial</label>
+              <label className="text-xs font-semibold text-secondary mb-1 block">Existencia inicial</label>
               <input
                 type="number"
                 className="input-touch w-full"
@@ -174,6 +190,18 @@ function ProductFormModal({ editing, onClose, onSaved, showToast }: ProductFormP
                 min={0}
               />
             </div>
+            {isCarWash && (
+              <div>
+                <label className="text-xs font-semibold text-secondary mb-1 block">Servicios por unidad</label>
+                <input
+                  type="number"
+                  className="input-touch w-full"
+                  value={form.services_per_unit}
+                  onChange={e => setForm({ ...form, services_per_unit: e.target.value })}
+                  min={1}
+                />
+              </div>
+            )}
           </div>
 
           <div>
@@ -359,14 +387,18 @@ function AdjustStockModal({ product, onClose, onAdjusted, showToast }: AdjustMod
 
 // ── Movement History Panel ────────────────────────────────────────────────────
 interface MovementPanelProps {
-  product: InventoryProduct;
+  product: InventoryProduct | CarWashProduct;
   onClose: () => void;
   onEdit: () => void;
   onAdjust: () => void;
+  onResetUsage?: () => void;
+  isCarWash?: boolean;
 }
 
-function MovementPanel({ product, onClose, onEdit, onAdjust }: MovementPanelProps) {
-  const { data: movements, isLoading } = useProductMovements(product.id);
+function MovementPanel({ product, onClose, onEdit, onAdjust, onResetUsage, isCarWash = false }: MovementPanelProps) {
+  const barberMovements = useProductMovements(isCarWash ? null : product.id);
+  const carWashMovements = useCarWashProductMovements(isCarWash ? product.id : null);
+  const { data: movements, isLoading } = isCarWash ? carWashMovements : barberMovements;
   const [userNames, setUserNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -408,37 +440,65 @@ function MovementPanel({ product, onClose, onEdit, onAdjust }: MovementPanelProp
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-2 mt-4">
-          <div className="text-center p-2 rounded-xl bg-muted/30">
-            <p className="text-lg font-black text-foreground">{product.stock_quantity}</p>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Stock</p>
+        {isCarWash ? (
+          <div className="grid grid-cols-3 gap-2 mt-4">
+            <div className="text-center p-2 rounded-xl bg-muted/30">
+              <p className="text-lg font-black text-foreground">{product.stock_quantity}</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Existencia</p>
+            </div>
+            <div className="text-center p-2 rounded-xl bg-muted/30">
+              <p className="text-lg font-black text-foreground">{(product as CarWashProduct).usage_count}</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Usos actuales</p>
+            </div>
+            <div className="text-center p-2 rounded-xl bg-muted/30">
+              <p className={`text-lg font-black ${computeAvailableServices(product as CarWashProduct) <= 0 ? "text-red-600" : "text-emerald-600"}`}>
+                {computeAvailableServices(product as CarWashProduct)}
+              </p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Svc restantes</p>
+            </div>
           </div>
-          <div className="text-center p-2 rounded-xl bg-muted/30">
-            <p className="text-lg font-black text-foreground">{product.min_stock_level}</p>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Mínimo</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-2 mt-4">
+            <div className="text-center p-2 rounded-xl bg-muted/30">
+              <p className="text-lg font-black text-foreground">{product.stock_quantity}</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Stock</p>
+            </div>
+            <div className="text-center p-2 rounded-xl bg-muted/30">
+              <p className="text-lg font-black text-foreground">{product.min_stock_level}</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Mínimo</p>
+            </div>
+            <div className="text-center p-2 rounded-xl bg-muted/30">
+              <p className="text-lg font-black text-primary">C${Number((product as InventoryProduct).price).toFixed(0)}</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Precio</p>
+            </div>
           </div>
-          <div className="text-center p-2 rounded-xl bg-muted/30">
-            <p className="text-lg font-black text-primary">C${Number(product.price).toFixed(0)}</p>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Precio</p>
-          </div>
-        </div>
+        )}
 
         {/* Status badge */}
         <div className="mt-3 flex items-center justify-between">
-          <StockBadge product={product} />
+          <StockBadge product={product} isCarWash={isCarWash} />
           {!product.is_active && (
             <span className="text-xs text-muted-foreground italic">Inactivo</span>
           )}
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2 mt-3">
+        <div className="flex gap-2 mt-3 flex-wrap">
           <button
             onClick={onAdjust}
             className="touch-btn flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
           >
             <i className="fa-solid fa-sliders" /> Ajustar stock
           </button>
+          {isCarWash && (product as CarWashProduct).usage_count > 0 && onResetUsage && (
+            <button
+              onClick={onResetUsage}
+              className="touch-btn flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 text-sm font-semibold hover:bg-orange-200 dark:hover:bg-orange-900/50 transition-colors"
+              title="Reiniciar contador de usos a 0"
+            >
+              <i className="fa-solid fa-rotate-left text-xs" /> Reiniciar usos
+            </button>
+          )}
           <button
             onClick={onEdit}
             className="touch-btn px-3 py-2 rounded-xl bg-muted text-muted-foreground text-sm font-semibold hover:bg-muted/80 transition-colors"
@@ -509,14 +569,19 @@ function MovementPanel({ product, onClose, onEdit, onAdjust }: MovementPanelProp
 export default function Inventory() {
   const qc = useQueryClient();
   const { profile } = useAuth();
+  const { businessLine } = useBusinessLine();
+  const isCarWash = businessLine === "car_wash";
   const isAdmin = profile?.role === "admin" || profile?.role === "owner";
 
-  const { data: products, isLoading } = useInventoryProducts();
+  const barberProducts = useInventoryProducts();
+  const carWashProducts = useCarWashProducts();
+  const { data: products, isLoading } = isCarWash ? carWashProducts : barberProducts;
+
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StockFilter>("all");
-  const [selected, setSelected] = useState<InventoryProduct | null>(null);
-  const [formEditing, setFormEditing] = useState<InventoryProduct | "new" | null>(null);
-  const [adjusting, setAdjusting] = useState<InventoryProduct | null>(null);
+  const [selected, setSelected] = useState<InventoryProduct | CarWashProduct | null>(null);
+  const [formEditing, setFormEditing] = useState<InventoryProduct | CarWashProduct | "new" | null>(null);
+  const [adjusting, setAdjusting] = useState<InventoryProduct | CarWashProduct | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
 
   const showToast = (msg: string, ok = true) => {
@@ -525,34 +590,73 @@ export default function Inventory() {
   };
 
   const refetchAll = () => {
-    qc.invalidateQueries({ queryKey: ["inventory_products"] });
-    qc.invalidateQueries({ queryKey: ["all_products"] });
-    qc.invalidateQueries({ queryKey: ["products"] });
-    if (selected) qc.invalidateQueries({ queryKey: ["stock_movements", selected.id] });
+    if (isCarWash) {
+      qc.invalidateQueries({ queryKey: ["car_wash_products"] });
+      if (selected) qc.invalidateQueries({ queryKey: ["car_wash_stock_movements", selected.id] });
+    } else {
+      qc.invalidateQueries({ queryKey: ["inventory_products"] });
+      qc.invalidateQueries({ queryKey: ["all_products"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+      if (selected) qc.invalidateQueries({ queryKey: ["stock_movements", selected.id] });
+    }
   };
 
   const filtered = useMemo(() => {
-    let list = products || [];
+    let list = (products || []) as (InventoryProduct | CarWashProduct)[];
     if (search) {
       const q = search.toLowerCase();
       list = list.filter(p => p.name.toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q));
     }
-    if (filter === "low") list = list.filter(p => p.stock_quantity > 0 && p.stock_quantity <= p.min_stock_level);
-    if (filter === "out") list = list.filter(p => p.stock_quantity === 0);
+    if (isCarWash) {
+      if (filter === "low") list = list.filter(p => {
+        const cwp = p as CarWashProduct;
+        return computeAvailableServices(cwp) > 0 && cwp.stock_quantity <= cwp.min_stock_level;
+      });
+      if (filter === "out") list = list.filter(p => computeAvailableServices(p as CarWashProduct) <= 0);
+    } else {
+      if (filter === "low") list = list.filter(p => p.stock_quantity > 0 && p.stock_quantity <= p.min_stock_level);
+      if (filter === "out") list = list.filter(p => p.stock_quantity === 0);
+    }
     return list;
-  }, [products, search, filter]);
+  }, [products, search, filter, isCarWash]);
 
-  const totalLowStock = useMemo(() =>
-    (products || []).filter(p => p.stock_quantity > 0 && p.stock_quantity <= p.min_stock_level).length, [products]);
-  const totalOutOfStock = useMemo(() =>
-    (products || []).filter(p => p.stock_quantity === 0).length, [products]);
+  const totalLowStock = useMemo(() => {
+    const list = (products || []) as (InventoryProduct | CarWashProduct)[];
+    if (isCarWash) return list.filter(p => {
+      const cwp = p as CarWashProduct;
+      return computeAvailableServices(cwp) > 0 && cwp.stock_quantity <= cwp.min_stock_level;
+    }).length;
+    return list.filter(p => p.stock_quantity > 0 && p.stock_quantity <= p.min_stock_level).length;
+  }, [products, isCarWash]);
 
-  const toggleActive = async (p: InventoryProduct) => {
+  const totalOutOfStock = useMemo(() => {
+    const list = (products || []) as (InventoryProduct | CarWashProduct)[];
+    if (isCarWash) return list.filter(p => computeAvailableServices(p as CarWashProduct) <= 0).length;
+    return list.filter(p => p.stock_quantity === 0).length;
+  }, [products, isCarWash]);
+
+  const toggleActive = async (p: InventoryProduct | CarWashProduct) => {
     await supabase.from("products").update({ is_active: !p.is_active }).eq("id", p.id);
     showToast(p.is_active ? "Producto desactivado" : "Producto activado");
     refetchAll();
     if (selected?.id === p.id) setSelected({ ...selected, is_active: !p.is_active });
   };
+
+  const resetUsage = async (p: InventoryProduct | CarWashProduct) => {
+    const { error } = await supabase
+      .from("products")
+      .update({ usage_count: 0, updated_at: new Date().toISOString() })
+      .eq("id", p.id);
+    if (error) { showToast(error.message, false); return; }
+    showToast("Usos reiniciados a 0");
+    refetchAll();
+    if (selected?.id === p.id) setSelected({ ...selected, usage_count: 0 } as CarWashProduct);
+  };
+
+  const title = isCarWash ? "Inventario Autolavado" : "Inventario Barbería";
+  const subtitle = isCarWash
+    ? "Consumibles por servicio — existencia y usos acumulados"
+    : "Gestión de productos y control de stock";
 
   return (
     <div className="flex flex-col h-full animate-fade-in overflow-hidden">
@@ -562,11 +666,11 @@ export default function Inventory() {
           <div>
             <h2 className="text-2xl font-bold text-foreground flex items-center gap-3">
               <span className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                <i className="fa-solid fa-boxes-stacked text-primary" />
+                <i className={`fa-solid ${isCarWash ? "fa-car-side" : "fa-boxes-stacked"} text-primary`} />
               </span>
-              Inventario Barbería
+              {title}
             </h2>
-            <p className="text-sm text-muted-foreground mt-0.5">Gestión de productos y control de stock</p>
+            <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
           </div>
           {isAdmin && (
             <button
@@ -664,7 +768,9 @@ export default function Inventory() {
             <div className="p-4 md:p-6 space-y-2">
               {filtered.map(product => {
                 const isSelected = selected?.id === product.id;
-                const status = stockStatus(product);
+                const status = stockStatus(product, isCarWash);
+                const cwp = product as CarWashProduct;
+                const available = isCarWash ? computeAvailableServices(cwp) : null;
                 return (
                   <button
                     key={product.id}
@@ -684,14 +790,24 @@ export default function Inventory() {
                           {product.sku && <span className="text-[10px] text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full">{product.sku}</span>}
                         </div>
                         <div className="flex items-center gap-3 mt-1 flex-wrap">
-                          <span className="text-sm font-bold text-primary">C${Number(product.price).toFixed(0)}</span>
-                          <span className="text-xs text-muted-foreground">Stock: <span className={`font-bold ${status === "out" ? "text-red-600" : status === "low" ? "text-amber-600" : "text-foreground"}`}>{product.stock_quantity}</span></span>
-                          <span className="text-xs text-muted-foreground hidden sm:inline">Mín: {product.min_stock_level}</span>
+                          {isCarWash ? (
+                            <>
+                              <span className="text-xs text-muted-foreground">Existencia: <span className={`font-bold ${status === "low" ? "text-amber-600" : "text-foreground"}`}>{cwp.stock_quantity}</span></span>
+                              <span className="text-xs text-muted-foreground">Usos: <span className="font-bold text-foreground">{cwp.usage_count}/{cwp.services_per_unit}</span></span>
+                              <span className="text-xs text-muted-foreground hidden sm:inline">Restantes: <span className={`font-bold ${status === "out" ? "text-red-600" : "text-foreground"}`}>{available}</span></span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-sm font-bold text-primary">C${Number((product as InventoryProduct).price).toFixed(0)}</span>
+                              <span className="text-xs text-muted-foreground">Stock: <span className={`font-bold ${status === "out" ? "text-red-600" : status === "low" ? "text-amber-600" : "text-foreground"}`}>{product.stock_quantity}</span></span>
+                              <span className="text-xs text-muted-foreground hidden sm:inline">Mín: {product.min_stock_level}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                       {/* Right side */}
                       <div className="flex flex-col items-end gap-2 shrink-0">
-                        <StockBadge product={product} />
+                        <StockBadge product={product} isCarWash={isCarWash} />
                         {isAdmin && (
                           <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                             <button
@@ -734,6 +850,8 @@ export default function Inventory() {
               onClose={() => setSelected(null)}
               onEdit={() => setFormEditing(selected)}
               onAdjust={() => setAdjusting(selected)}
+              onResetUsage={isCarWash ? () => resetUsage(selected) : undefined}
+              isCarWash={isCarWash}
             />
           </div>
         )}
@@ -746,11 +864,12 @@ export default function Inventory() {
           onClose={() => setFormEditing(null)}
           onSaved={refetchAll}
           showToast={showToast}
+          isCarWash={isCarWash}
         />
       )}
       {adjusting && (
         <AdjustStockModal
-          product={adjusting}
+          product={adjusting as InventoryProduct}
           onClose={() => setAdjusting(null)}
           onAdjusted={refetchAll}
           showToast={showToast}

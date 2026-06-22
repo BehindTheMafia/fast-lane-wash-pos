@@ -139,6 +139,8 @@ export type Database = {
                     sort_order: number
                     icon: string | null
                     business_line: Database["public"]["Enums"]["business_line"]
+                    services_per_unit: number
+                    usage_count: number
                     created_at: string
                     updated_at: string
                 }
@@ -154,6 +156,8 @@ export type Database = {
                     sort_order?: number
                     icon?: string | null
                     business_line?: Database["public"]["Enums"]["business_line"]
+                    services_per_unit?: number
+                    usage_count?: number
                     created_at?: string
                     updated_at?: string
                 }
@@ -169,10 +173,45 @@ export type Database = {
                     sort_order?: number
                     icon?: string | null
                     business_line?: Database["public"]["Enums"]["business_line"]
+                    services_per_unit?: number
+                    usage_count?: number
                     created_at?: string
                     updated_at?: string
                 }
                 Relationships: []
+            }
+            service_products: {
+                Row: {
+                    id: number
+                    service_id: number
+                    product_id: number
+                }
+                Insert: {
+                    id?: number
+                    service_id: number
+                    product_id: number
+                }
+                Update: {
+                    id?: number
+                    service_id?: number
+                    product_id?: number
+                }
+                Relationships: [
+                    {
+                        foreignKeyName: "service_products_service_id_fkey"
+                        columns: ["service_id"]
+                        isOneToOne: false
+                        referencedRelation: "services"
+                        referencedColumns: ["id"]
+                    },
+                    {
+                        foreignKeyName: "service_products_product_id_fkey"
+                        columns: ["product_id"]
+                        isOneToOne: false
+                        referencedRelation: "products"
+                        referencedColumns: ["id"]
+                    },
+                ]
             }
             stock_movements: {
                 Row: {
@@ -812,11 +851,30 @@ export type Database = {
                 }
                 Returns: Json
             }
+            check_service_inventory: {
+                Args: {
+                    p_service_id: number
+                }
+                Returns: Json
+            }
+            record_service_inventory: {
+                Args: {
+                    p_service_id: number
+                    p_ticket_id?: number
+                }
+                Returns: Json
+            }
+            reverse_service_inventory: {
+                Args: {
+                    p_ticket_id: number
+                }
+                Returns: Json
+            }
         }
         Enums: {
             business_line: "car_wash" | "barbershop"
             ticket_item_type: "service" | "product"
-            stock_movement_reason: "sale" | "adjustment" | "restock"
+            stock_movement_reason: "sale" | "adjustment" | "restock" | "service_consumption"
         }
         CompositeTypes: {
             [_ in never]: never

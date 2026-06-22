@@ -8,6 +8,7 @@ import ReportsSalesTrendChart from "@/components/reports/ReportsSalesTrendChart"
 import ReportsVehicleByDayChart from "@/components/reports/ReportsVehicleByDayChart";
 import { buildSalesTrendData, buildVehicleVisitsByDayData } from "@/lib/reportsChartData";
 import { niToday, niFormatDate, niFormatTime } from "@/utils/niDate";
+import { reverseServiceInventory } from "@/hooks/useCarWashInventory";
 import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import { BUSINESS_LINE_LABELS } from "@/lib/businessLine";
 
@@ -231,7 +232,17 @@ export default function Reports() {
           .eq("ticket_id", deletingTicket.id);
       }
 
-      // 3. Delete ticket (cascade will handle ticket_items and payments)
+      // 3. Reverse car_wash inventory consumption (usage_count / stock_quantity)
+      if (deletingTicket.business_line === "car_wash") {
+        try {
+          await reverseServiceInventory(deletingTicket.id);
+        } catch (invErr: any) {
+          console.error("[Reports] Error reversing inventory:", invErr.message);
+          // Non-fatal: continue with ticket deletion
+        }
+      }
+
+      // 4. Delete ticket (cascade will handle ticket_items and payments)
       const { error } = await supabase
         .from("tickets")
         .delete()
@@ -327,27 +338,42 @@ export default function Reports() {
     const isMembershipSale = ticket.is_membership_sale || ticket.ticket_number?.startsWith("M-") || ticket.ticket_number?.startsWith("MR-");
 
     // Build items array with proper service names and prices
-    const itemsFromDB = ticket.ticket_items?.map((ti: any) => ({
-      serviceName: ti.services?.name || ti.service_name_snapshot || "Servicio",
-      vehicleLabel: (ticket.vehicle_types as any)?.name || "",
-      price: Number(ti.price),
-    })) || [];
+    const itemsFromDB = ticket.ticket_items?.map((ti: any) => {
+      const finalPrice = Number(ti.price);
+      const originalPrice = (ti.price_snapshot !== null && ti.price_snapshot !== undefined) 
+        ? Number(ti.price_snapshot) 
+        : finalPrice;
+        
+      let discountPercent = 0;
+      if (originalPrice > 0 && finalPrice < originalPrice) {
+        discountPercent = Math.round((1 - finalPrice / originalPrice) * 100);
+      }
+
+      return {
+        serviceName: ti.services?.name || ti.service_name_snapshot || "Servicio",
+        vehicleLabel: (ticket.vehicle_types as any)?.name || "",
+        price: originalPrice,
+        discountPercent: discountPercent,
+        quantity: Number(ti.quantity || 1),
+      };
+    }) || [];
 
     // For membership sale tickets, enhance the item name with membership context
     let itemsArray: any[];
     if (isMembershipSale && itemsFromDB.length > 0) {
-      // The ticket_item.price is the final price paid (after any custom discount)
+      // The ticket.total is the final price paid
       const finalPrice = Number(ticket.total);
-      const itemTotalFromDB = itemsFromDB.reduce((s: number, i: any) => s + i.price, 0);
+      const itemTotalFromDB = itemsFromDB.reduce((s: number, i: any) => s + (i.price * i.quantity), 0);
 
       // If there's a difference between the item total and ticket total, there was a discount
-      // The item price in DB stores the final paid price for memberships  
       const hasDiscount = itemTotalFromDB > finalPrice;
 
       itemsArray = [{
         serviceName: `MEMBRESÍA: ${itemsFromDB[0].serviceName}`,
         vehicleLabel: itemsFromDB[0].vehicleLabel,
         price: itemTotalFromDB,
+        quantity: 1,
+        discountPercent: 0,
       }];
 
       // If there's a discount difference, add a discount line
@@ -357,6 +383,8 @@ export default function Reports() {
           serviceName: "Descuento aplicado",
           vehicleLabel: "",
           price: -discountAmt,
+          quantity: 1,
+          discountPercent: 0,
         });
       }
     } else {
@@ -364,10 +392,20 @@ export default function Reports() {
     }
 
     // Calculate subtotal and discount
-    const positiveItems = itemsArray.filter((i: any) => i.price >= 0);
-    const negativeItems = itemsArray.filter((i: any) => i.price < 0);
-    const subtotal = positiveItems.reduce((sum: number, item: any) => sum + item.price, 0);
-    const discount = Math.abs(negativeItems.reduce((sum: number, item: any) => sum + item.price, 0));
+    const subtotal = itemsArray.reduce((sum: number, item: any) => {
+      if (item.price < 0) return sum;
+      return sum + (item.price * (item.quantity || 1));
+    }, 0);
+
+    const discount = itemsArray.reduce((sum: number, item: any) => {
+      if (item.price < 0) {
+        return sum + Math.abs(item.price);
+      }
+      if (item.discountPercent > 0) {
+        return sum + (item.price * (item.quantity || 1) * (item.discountPercent / 100));
+      }
+      return sum;
+    }, 0);
 
     // Get customer data with phone for WhatsApp
     const customerData = ticket.customer_data;

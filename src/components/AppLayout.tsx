@@ -25,7 +25,7 @@ const navItems: NavItem[] = [
   { label: "Clientes", icon: "fa-users", path: "/customers" },
   { label: "Membresías", icon: "fa-id-card", path: "/memberships", carWashOnly: true },
   { label: "Recordatorios", icon: "fa-bell", path: "/reminders", carWashOnly: true },
-  { label: "Inventario", icon: "fa-boxes-stacked", path: "/inventory", barbershopOnlyAdminOrOwner: true },
+  { label: "Inventario", icon: "fa-boxes-stacked", path: "/inventory", adminOrOwner: true },
   { label: "Servicios", icon: "fa-list-check", path: "/services", adminOnly: true },
   { label: "Configuración", icon: "fa-gear", path: "/settings", adminOnly: true },
 ];
