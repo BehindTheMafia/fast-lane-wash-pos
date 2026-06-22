@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useBusinessSettings, useUpdateBusinessSettings } from "@/hooks/useBusinessSettings";
 import { BUSINESS_LINE_LABELS, type BusinessLine } from "@/lib/businessLine";
 import { useBusinessLine } from "@/contexts/BusinessLineContext";
+import { useAuth } from "@/hooks/useAuth";
 import { niFormatDate } from "@/utils/niDate";
 import { FULL_DATABASE_SCHEMA } from "@/utils/backupSchema";
 import { supabase } from "@/integrations/supabase/client";
@@ -73,9 +74,52 @@ function DangerModal({ title, description, confirmLabel, confirmWord = "ELIMINAR
   );
 }
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+type UserProfile = {
+  id: string;
+  full_name: string | null;
+  role: string | null;
+  active: boolean;
+  created_at: string;
+};
+
+const ROLE_LABELS: Record<string, string> = {
+  admin:    "Administrador",
+  owner:    "Propietario",
+  cajero:   "Cajero",
+  operator: "Operador",
+  manager:  "Gerente",
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  admin:    "bg-primary/10 text-primary border-primary/20",
+  owner:    "bg-accent/10 text-accent border-accent/20",
+  cajero:   "bg-secondary/10 text-secondary border-secondary/20",
+  operator: "bg-secondary/10 text-secondary border-secondary/20",
+  manager:  "bg-secondary/10 text-secondary border-secondary/20",
+};
+
+function getModuleAccess(role: string | null) {
+  const r = role ?? "";
+  const isAdmin = r === "admin";
+  const isOwner = r === "owner";
+  const isCajero = ["cajero", "operator", "manager"].includes(r);
+  return [
+    { key: "pos",       label: "POS",          icon: "fa-cash-register",  access: true },
+    { key: "dashboard", label: "Dashboard",    icon: "fa-chart-pie",      access: isAdmin || isOwner || isCajero },
+    { key: "reports",   label: "Reportes",     icon: "fa-file-lines",     access: isAdmin || isOwner },
+    { key: "cashclose", label: "Cierre Caja",  icon: "fa-vault",          access: true },
+    { key: "customers", label: "Clientes",     icon: "fa-users",          access: true },
+    { key: "inventory", label: "Inventario",   icon: "fa-boxes-stacked",  access: isAdmin || isOwner },
+    { key: "services",  label: "Servicios",    icon: "fa-list-check",     access: isAdmin },
+    { key: "settings",  label: "Configuración",icon: "fa-gear",           access: isAdmin },
+  ];
+}
+
 // ─── Main Settings Page ─────────────────────────────────────────────────────
 export default function Settings() {
   const { carWashVisible, barbershopVisible, updateVisibilities } = useBusinessLine();
+  const { user: currentUser } = useAuth();
   const [editLine, setEditLine] = useState<BusinessLine>("car_wash");
   const { data: settings, isLoading } = useBusinessSettings(editLine);
   const updateSettings = useUpdateBusinessSettings(editLine);
@@ -83,6 +127,13 @@ export default function Settings() {
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadingQr, setUploadingQr] = useState(false);
+
+  // User management state
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editRole, setEditRole] = useState("");
+  const [savingRole, setSavingRole] = useState(false);
 
   // Danger zone state
   const [dangerModal, setDangerModal] = useState<null | "tickets" | "tickets_range" | "customers_inactive" | "cash_closures" | "all_data">(null);
@@ -96,6 +147,50 @@ export default function Settings() {
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  // ── User management ──────────────────────────────────────────────────────
+  const loadUsers = async () => {
+    setLoadingUsers(true);
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, full_name, role, active, created_at")
+      .order("created_at", { ascending: true });
+    if (data) setUsers(data as UserProfile[]);
+    setLoadingUsers(false);
+  };
+
+  useEffect(() => { loadUsers(); }, []);
+
+  const startEditUser = (u: UserProfile) => {
+    setEditingUserId(u.id);
+    setEditRole(u.role ?? "cajero");
+  };
+
+  const cancelEdit = () => { setEditingUserId(null); setEditRole(""); };
+
+  const handleUpdateRole = async (userId: string) => {
+    setSavingRole(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ role: editRole, updated_at: new Date().toISOString() })
+      .eq("id", userId);
+    setSavingRole(false);
+    if (error) { showToast("Error al actualizar el rol", "error"); return; }
+    showToast("Rol actualizado correctamente");
+    cancelEdit();
+    loadUsers();
+  };
+
+  const handleToggleActive = async (u: UserProfile) => {
+    if (u.id === currentUser?.id) { showToast("No puedes desactivar tu propia cuenta", "error"); return; }
+    const { error } = await supabase
+      .from("profiles")
+      .update({ active: !u.active, updated_at: new Date().toISOString() })
+      .eq("id", u.id);
+    if (error) { showToast("Error al cambiar estado", "error"); return; }
+    showToast(`Usuario ${!u.active ? "activado" : "desactivado"}`);
+    loadUsers();
   };
 
   if (isLoading) return <div className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
@@ -459,6 +554,169 @@ export default function Settings() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* ── Gestión de Usuarios ── */}
+      <div className="pos-card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-foreground">
+            <i className="fa-solid fa-users-gear mr-2 text-secondary" />Gestión de Usuarios
+          </h3>
+          <button
+            type="button"
+            onClick={loadUsers}
+            disabled={loadingUsers}
+            className="touch-btn text-xs px-3 py-1.5 rounded-lg bg-muted/40 text-foreground hover:bg-muted/70 flex items-center gap-1.5"
+          >
+            <i className={`fa-solid fa-rotate ${loadingUsers ? "fa-spin" : ""}`} />
+            Actualizar
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Visualiza y administra los permisos de todos los usuarios del sistema. Cambia el rol para controlar a qué módulos tiene acceso cada usuario.
+        </p>
+
+        {loadingUsers ? (
+          <div className="flex justify-center py-8">
+            <i className="fa-solid fa-spinner fa-spin text-2xl text-secondary" />
+          </div>
+        ) : users.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6">No se encontraron usuarios.</p>
+        ) : (
+          <div className="space-y-3">
+            {users.map((u) => {
+              const isEditing = editingUserId === u.id;
+              const isCurrentUser = u.id === currentUser?.id;
+              const modules = getModuleAccess(isEditing ? editRole : u.role);
+              const roleBadge = ROLE_LABELS[u.role ?? ""] ?? u.role ?? "Sin rol";
+              const roleColor = ROLE_COLORS[u.role ?? ""] ?? "bg-muted text-muted-foreground border-muted";
+
+              return (
+                <div
+                  key={u.id}
+                  className={`rounded-xl border p-4 space-y-3 transition-colors ${
+                    isEditing ? "border-primary/30 bg-primary/5" : "border-border bg-background"
+                  } ${!u.active ? "opacity-60" : ""}`}
+                >
+                  {/* Header row */}
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
+                      <i className="fa-solid fa-user text-accent text-sm" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-semibold text-sm text-foreground truncate">
+                          {u.full_name || "Sin nombre"}
+                        </p>
+                        {isCurrentUser && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-accent text-accent-foreground">TÚ</span>
+                        )}
+                        {!u.active && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-destructive/20 text-destructive">INACTIVO</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Creado {niFormatDate(u.created_at)}
+                      </p>
+                    </div>
+
+                    {/* Role badge / selector */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {isEditing ? (
+                        <select
+                          value={editRole}
+                          onChange={(e) => setEditRole(e.target.value)}
+                          className="text-xs px-2 py-1.5 rounded-lg border border-border bg-background text-foreground"
+                          autoFocus
+                        >
+                          <option value="admin">Administrador</option>
+                          <option value="owner">Propietario</option>
+                          <option value="cajero">Cajero</option>
+                          <option value="operator">Operador</option>
+                          <option value="manager">Gerente</option>
+                        </select>
+                      ) : (
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-lg border ${roleColor}`}>
+                          {roleBadge}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Module access badges */}
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Acceso a módulos</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {modules.map((m) => (
+                        <span
+                          key={m.key}
+                          title={m.access ? `${m.label}: acceso permitido` : `${m.label}: sin acceso`}
+                          className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg font-medium transition-all ${
+                            m.access
+                              ? "bg-green-100 text-green-700 border border-green-200"
+                              : "bg-muted/50 text-muted-foreground/50 border border-transparent line-through"
+                          }`}
+                        >
+                          <i className={`fa-solid ${m.icon} text-[10px]`} />
+                          {m.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleActive(u)}
+                      disabled={isCurrentUser}
+                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        u.active
+                          ? "border-destructive/30 text-destructive hover:bg-destructive/10"
+                          : "border-green-300 text-green-700 hover:bg-green-50"
+                      }`}
+                    >
+                      <i className={`fa-solid ${u.active ? "fa-user-slash" : "fa-user-check"} mr-1.5`} />
+                      {u.active ? "Desactivar" : "Activar"}
+                    </button>
+
+                    <div className="flex gap-2">
+                      {isEditing ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={cancelEdit}
+                            className="text-xs px-3 py-1.5 rounded-lg border border-border text-foreground hover:bg-muted/50"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateRole(u.id)}
+                            disabled={savingRole || editRole === u.role}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-primary text-primary-foreground font-semibold hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"
+                          >
+                            {savingRole ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-check" />}
+                            Guardar
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => startEditUser(u)}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-border text-foreground hover:bg-muted/50 flex items-center gap-1.5"
+                        >
+                          <i className="fa-solid fa-pen text-[10px]" />
+                          Cambiar rol
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* ── Datos del negocio ── */}
