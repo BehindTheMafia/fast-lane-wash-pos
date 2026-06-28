@@ -141,6 +141,8 @@ export default function Dashboard() {
     });
 
     // 4. Payment method breakdown
+    // payNIO/payUSD: exclude "mixed" payments (amount = full NIO equivalent of ticket).
+    // For mixed, we distribute from ticket_mixed_payments parts (step 5).
     let payNIO = 0, payUSD = 0;
     let cashNIO = 0, cardNIO = 0, transferNIO = 0;
     let cashTickets = 0, cardTickets = 0, transferTickets = 0, mixedTickets = 0;
@@ -148,15 +150,21 @@ export default function Dashboard() {
     ticketsWithPayments.forEach((t: any) => {
       const tPayments: any[] = t.payments || [];
       tPayments.forEach((p: any) => {
-        if (p.currency === "USD") payUSD += Number(p.amount);
-        else payNIO += Number(p.amount);
+        if (p.payment_method !== "mixed") {
+          // Only non-mixed payments contribute to payNIO/payUSD here
+          if (p.currency === "USD") payUSD += Number(p.amount);
+          else payNIO += Number(p.amount);
+        }
+        // Mixed payments: payNIO/payUSD will be updated in step 5 from parts
       });
 
       // Count tickets per method based on primary payment
       const primaryPayment = tPayments[0];
       if (primaryPayment) {
         const m = primaryPayment.payment_method;
-        const amt = Number(primaryPayment.amount);
+        // Convert USD to NIO so cashNIO/cardNIO/transferNIO always represent NIO equivalents
+        const amtRaw = Number(primaryPayment.amount);
+        const amt = primaryPayment.currency === "USD" ? amtRaw * rate : amtRaw;
         if (m === "cash") { cashNIO += amt; cashTickets++; }
         else if (m === "card") { cardNIO += amt; cardTickets++; }
         else if (m === "transfer") { transferNIO += amt; transferTickets++; }
@@ -186,11 +194,15 @@ export default function Dashboard() {
           if (mp.method === "cash") mixedCashUSD += partAmount;
           else if (mp.method === "card") mixedCardUSD += partAmount;
           else if (mp.method === "transfer") mixedTransferUSD += partAmount;
+          // Contribute to currency totals
+          payUSD += partAmount;
         } else {
           const nioAmount = applied > 0 ? applied : partAmount;
           if (mp.method === "cash") { mixedCashNIO += nioAmount; cashNIO += nioAmount; }
           else if (mp.method === "card") { mixedCardNIO += nioAmount; cardNIO += nioAmount; }
           else if (mp.method === "transfer") { mixedTransferNIO += nioAmount; transferNIO += nioAmount; }
+          // Contribute to currency totals
+          payNIO += nioAmount;
         }
 
         const tid = String(mp.ticket_id);

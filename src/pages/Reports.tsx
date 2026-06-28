@@ -464,11 +464,30 @@ export default function Reports() {
   const rate = settings?.exchange_rate || 36.5;
 
   // Calculate actual payment totals by currency
+  // IMPORTANT: skip "mixed" payments — their amount is the NIO equivalent of the full ticket
+  // which would double-count once we also sum from ticket_mixed_payments parts.
+  // For mixed tickets we compute currency totals from the parts breakdown instead.
   let payTotalNIO = 0;
   let payTotalUSD = 0;
   tickets.forEach((t: any) => {
     t.payments?.forEach((p: any) => {
-      if (p.currency === "USD") {
+      if (p.payment_method === "mixed") {
+        // Contribute from parts breakdown (already loaded in mixedPartsMap)
+        const parts = mixedPartsMap[String(t.id)] || [];
+        if (parts.length > 0) {
+          parts.forEach((part) => {
+            if (part.currency === "USD") {
+              payTotalUSD += Number(part.amount);
+            } else {
+              // Use applied_nio if available, else part.amount
+              payTotalNIO += part.applied_nio > 0 ? part.applied_nio : Number(part.amount);
+            }
+          });
+        } else {
+          // Fallback: no parts available, count as NIO
+          payTotalNIO += Number(p.amount);
+        }
+      } else if (p.currency === "USD") {
         payTotalUSD += Number(p.amount);
       } else {
         payTotalNIO += Number(p.amount);
@@ -487,7 +506,7 @@ export default function Reports() {
     .filter((t: any) => !t.is_membership_sale && !t.is_membership_usage)
     .reduce((s, t) => s + Number(t.total), 0);
 
-  // Summary aggregations
+  // Summary aggregations — single source of truth: payments + ticket_mixed_payments
   const byService: Record<string, { count: number; total: number }> = {};
   const byVehicle: Record<string, { count: number; total: number }> = {};
   const byMethod: Record<string, number> = {};
@@ -496,13 +515,22 @@ export default function Reports() {
   const mixedSubBreakdown: Record<string, number> = { cash: 0, card: 0, transfer: 0 };
 
   tickets.forEach((t: any) => {
-    // By service from ticket_items
-    t.ticket_items?.forEach((ti: any) => {
-      const sn = ti.services?.name || ti.service_name_snapshot || "Otro";
-      byService[sn] = byService[sn] || { count: 0, total: 0 };
-      byService[sn].count++;
-      byService[sn].total += Number(ti.price);
-    });
+    // By service: use tickets.total distributed proportionally across items
+    // (consistent with byVehicle which also uses t.total)
+    const items = t.ticket_items || [];
+    if (items.length > 0) {
+      // Compute raw sum of item prices to get proportions
+      const itemPriceSum = items.reduce((s: number, ti: any) => s + Number(ti.price), 0);
+      const ticketTotal = Number(t.total);
+      items.forEach((ti: any) => {
+        const sn = ti.services?.name || ti.service_name_snapshot || "Otro";
+        byService[sn] = byService[sn] || { count: 0, total: 0 };
+        byService[sn].count++;
+        // Distribute tickets.total proportionally — if only one item, full total goes to it
+        const proportion = itemPriceSum > 0 ? (Number(ti.price) / itemPriceSum) : (1 / items.length);
+        byService[sn].total += ticketTotal * proportion;
+      });
+    }
 
     // By vehicle
     const vn = (t.vehicle_types as any)?.name || "N/A";
@@ -512,7 +540,10 @@ export default function Reports() {
 
     // By method with currency awareness and mixed payment distribution
     t.payments?.forEach((p: any) => {
-      const amountNIO = Number(p.amount);
+      // Convert USD payments to NIO equivalent before accumulating into byMethod
+      // Without this, a $6.03 USD cash payment appears as C$6.03 instead of C$220.10
+      const exRate = settings?.exchange_rate || 36.5;
+      const amountNIO = p.currency === "USD" ? Number(p.amount) * exRate : Number(p.amount);
       
       if (p.payment_method === "mixed") {
         const parts = mixedPartsMap[String(t.id)] || [];
@@ -685,10 +716,22 @@ export default function Reports() {
                     <span className="text-foreground font-semibold">{methodLabels[method] || method}</span>
                     <span className="font-semibold">C${(total as number).toFixed(2)}</span>
                   </div>
-                  {method === "cash" && (
-                    <div className="flex justify-between text-[10px] text-muted-foreground px-2">
-                      <span>NIO: C${cashBreakdown.nio.toFixed(2)}</span>
-                      <span>USD: ${cashBreakdown.usd.toFixed(2)}</span>
+                  {method === "cash" && (cashBreakdown.nio > 0 || cashBreakdown.usd > 0) && (
+                    <div className="px-2 pt-0.5 space-y-0.5">
+                      <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">Incluye:</p>
+                      {cashBreakdown.nio > 0 && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                          <span className="text-emerald-400 font-bold">•</span>
+                          <span>NIO: C${cashBreakdown.nio.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {cashBreakdown.usd > 0 && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                          <span className="text-green-400 font-bold">•</span>
+                          <span>USD: ${cashBreakdown.usd.toFixed(2)}</span>
+                          <span className="italic text-[9px] opacity-70">(ya convertido en el total)</span>
+                        </div>
+                      )}
                     </div>
                   )}
                   {method === "mixed" && (

@@ -81,6 +81,7 @@ type UserProfile = {
   role: string | null;
   active: boolean;
   created_at: string;
+  module_overrides?: Record<string, boolean>;
 };
 
 const ROLE_LABELS: Record<string, string> = {
@@ -105,14 +106,16 @@ function getModuleAccess(role: string | null) {
   const isOwner = r === "owner";
   const isCajero = ["cajero", "operator", "manager"].includes(r);
   return [
-    { key: "pos",       label: "POS",          icon: "fa-cash-register",  access: true },
-    { key: "dashboard", label: "Dashboard",    icon: "fa-chart-pie",      access: isAdmin || isOwner || isCajero },
-    { key: "reports",   label: "Reportes",     icon: "fa-file-lines",     access: isAdmin || isOwner },
-    { key: "cashclose", label: "Cierre Caja",  icon: "fa-vault",          access: true },
-    { key: "customers", label: "Clientes",     icon: "fa-users",          access: true },
-    { key: "inventory", label: "Inventario",   icon: "fa-boxes-stacked",  access: isAdmin || isOwner },
-    { key: "services",  label: "Servicios",    icon: "fa-list-check",     access: isAdmin },
-    { key: "settings",  label: "Configuración",icon: "fa-gear",           access: isAdmin },
+    { key: "pos",         label: "POS",           icon: "fa-cash-register",  access: true },
+    { key: "dashboard",   label: "Dashboard",     icon: "fa-chart-pie",      access: isAdmin || isOwner || isCajero },
+    { key: "reports",     label: "Reportes",      icon: "fa-file-lines",     access: isAdmin || isOwner },
+    { key: "cashclose",   label: "Cierre Caja",   icon: "fa-vault",          access: true },
+    { key: "customers",   label: "Clientes",      icon: "fa-users",          access: true },
+    { key: "memberships", label: "Membresías",    icon: "fa-id-card",        access: true },
+    { key: "reminders",   label: "Recordatorios", icon: "fa-bell",           access: true },
+    { key: "inventory",   label: "Inventario",    icon: "fa-boxes-stacked",  access: isAdmin || isOwner },
+    { key: "services",    label: "Servicios",     icon: "fa-list-check",     access: isAdmin },
+    { key: "settings",    label: "Configuración", icon: "fa-gear",           access: isAdmin },
   ];
 }
 
@@ -133,6 +136,7 @@ export default function Settings() {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState("");
+  const [editOverrides, setEditOverrides] = useState<Record<string, boolean>>({});
   const [savingRole, setSavingRole] = useState(false);
 
   // Danger zone state
@@ -154,9 +158,9 @@ export default function Settings() {
     setLoadingUsers(true);
     const { data } = await supabase
       .from("profiles")
-      .select("id, full_name, role, active, created_at")
+      .select("id, full_name, role, active, created_at, module_overrides")
       .order("created_at", { ascending: true });
-    if (data) setUsers(data as UserProfile[]);
+    if (data) setUsers(data as any as UserProfile[]);
     setLoadingUsers(false);
   };
 
@@ -165,19 +169,37 @@ export default function Settings() {
   const startEditUser = (u: UserProfile) => {
     setEditingUserId(u.id);
     setEditRole(u.role ?? "cajero");
+    setEditOverrides(u.module_overrides ?? {});
   };
 
-  const cancelEdit = () => { setEditingUserId(null); setEditRole(""); };
+  const cancelEdit = () => { setEditingUserId(null); setEditRole(""); setEditOverrides({}); };
+
+  const toggleOverride = (key: string, defaultAccess: boolean) => {
+    setEditOverrides(prev => {
+      const next = { ...prev };
+      if (next[key] === undefined) {
+        // First click: lock to the OPPOSITE of default
+        next[key] = !defaultAccess;
+      } else if (next[key] !== defaultAccess) {
+        // Second click: restore to default (remove key)
+        delete next[key];
+      } else {
+        // edge: same as default, remove
+        delete next[key];
+      }
+      return next;
+    });
+  };
 
   const handleUpdateRole = async (userId: string) => {
     setSavingRole(true);
     const { error } = await supabase
       .from("profiles")
-      .update({ role: editRole, updated_at: new Date().toISOString() })
+      .update({ role: editRole, module_overrides: editOverrides, updated_at: new Date().toISOString() } as any)
       .eq("id", userId);
     setSavingRole(false);
-    if (error) { showToast("Error al actualizar el rol", "error"); return; }
-    showToast("Rol actualizado correctamente");
+    if (error) { showToast("Error al actualizar el usuario", "error"); return; }
+    showToast("Usuario actualizado correctamente");
     cancelEdit();
     loadUsers();
   };
@@ -215,6 +237,7 @@ export default function Settings() {
       whatsapp_feedback_link: (settings as Record<string, unknown>).whatsapp_feedback_link || "https://forms.gle/ZLqzSWJPxrK1Wsum7",
       whatsapp_greeting: (settings as Record<string, unknown>).whatsapp_greeting || "¡Gracias por su visita!",
       whatsapp_link_label: (settings as Record<string, unknown>).whatsapp_link_label || "Dejanos tu recomendación aquí:",
+      show_expected_cash_to_cashier: (settings as Record<string, unknown>).show_expected_cash_to_cashier ?? true,
     });
   }, [settings, editLine]);
 
@@ -284,7 +307,16 @@ export default function Settings() {
       whatsapp_feedback_link: form.whatsapp_feedback_link || "",
       whatsapp_greeting: form.whatsapp_greeting || "",
       whatsapp_link_label: form.whatsapp_link_label || "",
+      show_expected_cash_to_cashier: form.show_expected_cash_to_cashier,
     });
+
+    // show_expected_cash_to_cashier is a global role policy — sync to the other business line too
+    const otherLine = editLine === "car_wash" ? "barbershop" : "car_wash";
+    await supabase
+      .from("business_settings")
+      .update({ show_expected_cash_to_cashier: form.show_expected_cash_to_cashier } as any)
+      .eq("business_line", otherLine);
+
     showToast("Configuración guardada");
   };
 
@@ -643,25 +675,78 @@ export default function Settings() {
                     </div>
                   </div>
 
-                  {/* Module access badges */}
+                  {/* Module access — interactive toggles in edit mode */}
                   <div>
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Acceso a módulos</p>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">
+                      {isEditing ? "Editar acceso a módulos" : "Acceso a módulos"}
+                    </p>
+                    {isEditing && (
+                      <p className="text-[10px] text-muted-foreground mb-2 leading-relaxed">
+                        Haz clic para forzar acceso (✅) o bloquearlo (❌). Sin marcar = comportamiento por defecto del rol.
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-1.5">
-                      {modules.map((m) => (
-                        <span
-                          key={m.key}
-                          title={m.access ? `${m.label}: acceso permitido` : `${m.label}: sin acceso`}
-                          className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg font-medium transition-all ${
-                            m.access
-                              ? "bg-green-100 text-green-700 border border-green-200"
-                              : "bg-muted/50 text-muted-foreground/50 border border-transparent line-through"
-                          }`}
-                        >
-                          <i className={`fa-solid ${m.icon} text-[10px]`} />
-                          {m.label}
-                        </span>
-                      ))}
+                      {modules.map((m) => {
+                        const overrideVal = isEditing ? editOverrides[m.key] : (u.module_overrides ?? {})[m.key];
+                        const hasOverride = overrideVal !== undefined;
+                        const effectiveAccess = hasOverride ? overrideVal : m.access;
+
+                        if (isEditing) {
+                          // Three-state cycle: default → force-deny → force-grant → default
+                          const label = hasOverride
+                            ? overrideVal ? "✅ Forzado" : "❌ Bloqueado"
+                            : m.access ? "Acceso" : "Sin acceso";
+                          const cls = hasOverride
+                            ? overrideVal
+                              ? "bg-emerald-100 text-emerald-700 border-emerald-400 ring-1 ring-emerald-300"
+                              : "bg-red-100 text-red-700 border-red-400 ring-1 ring-red-300"
+                            : m.access
+                              ? "bg-green-50 text-green-700 border-green-200"
+                              : "bg-muted/50 text-muted-foreground/50 border-transparent line-through";
+                          return (
+                            <button
+                              key={m.key}
+                              type="button"
+                              onClick={() => toggleOverride(m.key, m.access)}
+                              title={`Clic para cambiar acceso a ${m.label}`}
+                              className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg font-medium border transition-all hover:scale-105 active:scale-95 ${cls}`}
+                            >
+                              <i className={`fa-solid ${m.icon} text-[10px]`} />
+                              {m.label}
+                              {hasOverride && <span className="text-[9px] ml-0.5">{overrideVal ? "★" : "✕"}</span>}
+                            </button>
+                          );
+                        }
+
+                        // View mode
+                        return (
+                          <span
+                            key={m.key}
+                            title={`${m.label}: ${effectiveAccess ? "acceso permitido" : "sin acceso"}${hasOverride ? " (personalizado)" : ""}`}
+                            className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg font-medium transition-all ${
+                              effectiveAccess
+                                ? hasOverride
+                                  ? "bg-emerald-100 text-emerald-700 border border-emerald-300"
+                                  : "bg-green-100 text-green-700 border border-green-200"
+                                : "bg-muted/50 text-muted-foreground/50 border border-transparent line-through"
+                            }`}
+                          >
+                            <i className={`fa-solid ${m.icon} text-[10px]`} />
+                            {m.label}
+                            {hasOverride && <i className="fa-solid fa-star text-[8px] ml-0.5" />}
+                          </span>
+                        );
+                      })}
                     </div>
+                    {isEditing && Object.keys(editOverrides).length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setEditOverrides({})}
+                        className="mt-2 text-[10px] text-muted-foreground hover:text-destructive flex items-center gap-1"
+                      >
+                        <i className="fa-solid fa-rotate-left" /> Restablecer todo a valores del rol
+                      </button>
+                    )}
                   </div>
 
                   {/* Action buttons */}
@@ -693,7 +778,7 @@ export default function Settings() {
                           <button
                             type="button"
                             onClick={() => handleUpdateRole(u.id)}
-                            disabled={savingRole || editRole === u.role}
+                            disabled={savingRole}
                             className="text-xs px-3 py-1.5 rounded-lg bg-primary text-primary-foreground font-semibold hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"
                           >
                             {savingRole ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-check" />}
@@ -898,6 +983,46 @@ export default function Settings() {
           <label className="text-xs font-semibold text-foreground mb-1 block">1 USD = ? C$</label>
           <input type="number" value={form.exchange_rate} min="0" step="0.0001" onChange={(e) => setForm({ ...form, exchange_rate: e.target.value })} className="input-touch text-2xl font-bold text-center max-w-xs" />
         </div>
+      </div>
+
+      {/* ── Caja / POS ── */}
+      <div className="pos-card p-6 space-y-4">
+        <h3 className="font-bold text-foreground">
+          <i className="fa-solid fa-vault mr-2 text-secondary" />Caja / POS
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          Configura el comportamiento del módulo de cierre de caja según el rol del usuario.
+        </p>
+        <div className="flex items-center justify-between p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700/40">
+          <div className="space-y-1 pr-4">
+            <label className="text-sm font-semibold text-foreground block">
+              Mostrar montos esperados durante el cierre de caja al cajero
+            </label>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Permite decidir si los usuarios con rol <strong>Cajero</strong> pueden visualizar los montos
+              que el sistema espera al momento de realizar el cierre de caja.
+              Esta opción no afecta a Supervisores ni Administradores, quienes siempre podrán ver toda la información.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setForm({ ...form, show_expected_cash_to_cashier: !form.show_expected_cash_to_cashier })}
+            className={`shrink-0 w-12 h-6 rounded-full transition-colors relative ${
+              form.show_expected_cash_to_cashier ? 'bg-emerald-500' : 'bg-muted'
+            }`}
+          >
+            <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
+              form.show_expected_cash_to_cashier ? 'translate-x-6' : ''
+            }`} />
+          </button>
+        </div>
+        <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+          <i className="fa-solid fa-circle-info text-primary" />
+          Estado actual: {form.show_expected_cash_to_cashier
+            ? <span className="text-emerald-600 font-semibold">Activado — el cajero puede ver los montos esperados</span>
+            : <span className="text-amber-600 font-semibold">Desactivado — el cajero solo ingresa su conteo; el sistema compara al finalizar</span>
+          }
+        </p>
       </div>
 
       <button onClick={handleSave} disabled={updateSettings.isPending || uploading} className="btn-cobrar flex items-center gap-2">

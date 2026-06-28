@@ -95,22 +95,36 @@ export default function CashClose() {
   const loadDayStats = async () => {
     const todayISO = niStartOfDay();
 
-    // 1. Fetch payments for today
-    const { data: paymentsRaw } = await supabase
-      .from("payments")
-      .select("*")
-      .gte("created_at", todayISO);
-
+    // 1. Fetch paid tickets for today's business line first (single source of truth)
     const { data: lineTicketsToday } = await supabase
       .from("tickets")
       .select("id")
       .eq("business_line", businessLine)
+      .eq("status", "paid")  // ← solo tickets pagados
       .gte("created_at", todayISO);
 
     const allowedTicketIds = new Set((lineTicketsToday || []).map((t: { id: number }) => t.id));
-    const payments = (paymentsRaw || []).filter((p: { ticket_id: number }) =>
-      allowedTicketIds.has(p.ticket_id)
-    );
+
+    if (allowedTicketIds.size === 0) {
+      setDayStats({
+        cashNIO: 0, cashUSD: 0, card: 0, cardUSD: 0, transfer: 0, transferUSD: 0,
+        mixedCashNIO: 0, mixedCardNIO: 0, mixedTransferNIO: 0,
+        mixedCashUSD: 0, mixedCardUSD: 0, mixedTransferUSD: 0,
+        totalTickets: 0,
+        cashTickets: 0, cardTickets: 0, transferTickets: 0, mixedTickets: 0,
+        tickets: [],
+      });
+      setMixedBreakdowns([]);
+      return;
+    }
+
+    // Fetch payments only for those paid tickets
+    const { data: paymentsRaw } = await supabase
+      .from("payments")
+      .select("*")
+      .in("ticket_id", Array.from(allowedTicketIds));
+
+    const payments = (paymentsRaw || []);
 
     if (!payments || payments.length === 0) {
       setDayStats({
@@ -375,6 +389,14 @@ export default function CashClose() {
   const sobra = hasCounted && difference > 0.01;
   const falta = hasCounted && difference < -0.01;
 
+  // ── Visibility by role + setting ─────────────────────
+  // Admins/owners always see everything.
+  // Cajeros only see amounts when show_expected_cash_to_cashier === true.
+  const userRole = profile?.role ?? "";
+  const isPrivileged = userRole === "admin" || userRole === "owner";
+  const settingEnabled = (settings as any)?.show_expected_cash_to_cashier ?? true;
+  const canSeeExpected = isPrivileged || settingEnabled;
+
   // ── Save ───────────────────────────────────────
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
@@ -612,7 +634,8 @@ export default function CashClose() {
           Haz clic en cualquier método de pago para ver el detalle de las facturas.
         </p>
 
-        {/* Clickable cards */}
+        {/* Clickable cards — only shown when canSeeExpected */}
+        {canSeeExpected ? (
         <div className={`grid grid-cols-1 sm:grid-cols-2 ${dayStats.mixedTickets > 0 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-4 mt-2`}>
           {/* Cash */}
           <button
@@ -763,6 +786,24 @@ export default function CashClose() {
             )}
           </button>
         </div>
+        ) : (
+          /* Cashier blind mode — ticket count only, no amounts */
+          <div className="mt-2 rounded-2xl border-2 border-primary/20 bg-primary/5 p-5 flex items-start gap-4">
+            <i className="fa-solid fa-eye-slash text-3xl text-primary/50 mt-1 shrink-0" />
+            <div className="space-y-1">
+              <p className="font-bold text-foreground">Modo de conteo independiente</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Los montos del sistema están ocultos para tu rol en este negocio.
+                Ingresa el efectivo contado en la sección siguiente y el sistema
+                calculará el resultado automáticamente al finalizar el cierre.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                <i className="fa-solid fa-receipt mr-1" />
+                Facturas registradas hoy: <strong>{dayStats.totalTickets}</strong>
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── TICKETS TABLE (shown when a card is clicked) ── */}
         {methodFilter && (
@@ -874,7 +915,7 @@ export default function CashClose() {
         )}
       </div>
 
-      {/* ─── SECTION 2: DATOS DEL CIERRE ─────────────────── */}
+      {/* ─── SECTION 2: DATOS DEL CIERRE ────────────────── */}
       <div className="pos-card p-6 space-y-5">
         <div className="flex items-center gap-3 mb-1">
           <span className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold text-lg">2</span>
@@ -885,7 +926,8 @@ export default function CashClose() {
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {/* Efectivo registrado en facturas — automático */}
+          {/* Efectivo registrado en facturas — only when canSeeExpected */}
+          {canSeeExpected ? (
           <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-700 p-6 space-y-2">
             <label className="flex items-center gap-2 text-sm font-bold text-emerald-700 dark:text-emerald-300">
               <i className="fa-solid fa-money-bills text-emerald-600 text-xl" />
@@ -900,13 +942,27 @@ export default function CashClose() {
             {dayStats.cashUSD > 0 && (
               <p className="text-lg font-bold text-green-500">
                 + ${dayStats.cashUSD.toFixed(2)} USD
-                <span className="text-xs text-emerald-500 ml-1">(≈ TOTAL C$${(dayStats.cashNIO + dayStats.cashUSD * rate).toFixed(2)})</span>
+                <span className="text-xs text-emerald-500 ml-1">(≈ TOTAL C${(dayStats.cashNIO + dayStats.cashUSD * rate).toFixed(2)})</span>
               </p>
             )}
             <p className="text-xs text-emerald-500 mt-1">
               {dayStats.cashTickets} factura{dayStats.cashTickets !== 1 ? "s" : ""} en efectivo
             </p>
           </div>
+          ) : (
+          /* Blind-mode info card */
+          <div className="rounded-2xl border-2 border-primary/30 bg-primary/5 p-6 space-y-3 flex flex-col justify-center">
+            <div className="flex items-center gap-2 text-primary">
+              <i className="fa-solid fa-hand-holding-dollar text-2xl" />
+              <span className="font-bold text-base">Conteo de efectivo</span>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Cuenta el dinero físico disponible en caja e ingresa los montos encontrados.
+              El sistema comparará automáticamente tu conteo con la información registrada
+              una vez finalices el cierre.
+            </p>
+          </div>
+          )}
 
           {/* Efectivo contado — inputs NIO y USD */}
           <div className="rounded-2xl border-2 border-primary/50 bg-primary/5 p-6 space-y-3">
@@ -1038,7 +1094,8 @@ export default function CashClose() {
           )}
         </div>
 
-        {/* ── EXPECTED CASH breakdown ─────────────── */}
+        {/* ── EXPECTED CASH breakdown ─────────────────────────── */}
+        {canSeeExpected && (
         <div className={`rounded-2xl border p-4 transition-all duration-300 ${
           totalEgresos > 0
             ? "bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-700"
@@ -1073,15 +1130,16 @@ export default function CashClose() {
             </div>
           </div>
         </div>
+        )}
 
-        {/* ── RESULTADO INMEDIATO ─────────────────── */}
+        {/* ── RESULTADO INMEDIATO ─────────────────────────── */}
         {hasCounted && (
           <div className={`rounded-2xl p-6 border-4 transition-all duration-300 text-center ${cuadra
             ? "bg-emerald-50 border-emerald-400 dark:bg-emerald-900/30 dark:border-emerald-600"
             : sobra
               ? "bg-blue-50 border-blue-400 dark:bg-blue-900/30 dark:border-blue-600"
               : "bg-red-50 border-red-400 dark:bg-red-900/30 dark:border-red-600"
-            }`}>
+            }>`}>
             {cuadra && (
               <>
                 <p className="text-6xl mb-2">✅</p>
@@ -1105,6 +1163,8 @@ export default function CashClose() {
                 <p className="text-red-600 font-semibold mt-1">de menos en la caja</p>
               </>
             )}
+            {/* Detail breakdown — only when canSeeExpected */}
+            {canSeeExpected && (
             <div className="mt-4 bg-white/60 dark:bg-black/20 rounded-xl p-4 text-base space-y-2 max-w-md mx-auto">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Efectivo esperado:</span>
@@ -1121,6 +1181,7 @@ export default function CashClose() {
                 </span>
               </div>
             </div>
+            )}
           </div>
         )}
 
@@ -1260,7 +1321,10 @@ export default function CashClose() {
                     )}
                     <div className="flex justify-between pt-1 border-t border-border">
                       <span className="text-muted-foreground">Efectivo esperado:</span>
-                      <span className="font-semibold">C${expectedCash.toFixed(2)}</span>
+                      {canSeeExpected
+                        ? <span className="font-semibold">C${expectedCash.toFixed(2)}</span>
+                        : <span className="font-semibold text-muted-foreground italic">Oculto</span>
+                      }
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Efectivo contado:</span>

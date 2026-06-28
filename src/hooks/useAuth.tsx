@@ -11,6 +11,7 @@ interface Profile {
   role: AppRole;
   raw_role?: string;
   active: boolean;
+  module_overrides: Record<string, boolean>;
 }
 
 interface AuthContextType {
@@ -47,11 +48,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (data) {
-      // Map operator/manager roles to cajero for compatibility in some parts
-      // but preserve the original for specific permissions
       const role = data.role as string;
       const mappedRole = (role === "operator" || role === "manager") ? "cajero" : (role as AppRole);
-      setProfile({ ...data, role: mappedRole, raw_role: role } as unknown as Profile);
+      setProfile({
+        ...data,
+        role: mappedRole,
+        raw_role: role,
+        module_overrides: (data as any).module_overrides ?? {},
+      } as unknown as Profile);
     }
     setLoading(false);
   };

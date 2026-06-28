@@ -89,7 +89,28 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   if (!user) return <Navigate to="/login" replace />;
 
+  const overrides: Record<string, boolean> = (profile as any)?.module_overrides ?? {};
+
+  // Map nav path → module key used in overrides
+  const pathToKey: Record<string, string> = {
+    "/pos": "pos",
+    "/dashboard": "dashboard",
+    "/reports": "reports",
+    "/cash-close": "cashclose",
+    "/customers": "customers",
+    "/memberships": "memberships",
+    "/reminders": "reminders",
+    "/inventory": "inventory",
+    "/services": "services",
+    "/settings": "settings",
+  };
+
   const visibleNav = navItems.filter((n) => {
+    const key = pathToKey[n.path];
+    // Explicit override takes priority
+    if (key !== undefined && overrides[key] === true) return true;
+    if (key !== undefined && overrides[key] === false) return false;
+    // Default role logic
     if (n.carWashOnly && (!carWashVisible || isBarbershop)) return false;
     if (n.barbershopOnly && (!barbershopVisible || !isBarbershop)) return false;
     if (n.barbershopOnlyAdminOrOwner) return barbershopVisible && isBarbershop && (isAdmin || isOwner);
