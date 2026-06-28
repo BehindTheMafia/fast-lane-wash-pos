@@ -395,7 +395,7 @@ export default function CashClose() {
   const userRole = profile?.role ?? "";
   const isPrivileged = userRole === "admin" || userRole === "owner";
   const settingEnabled = (settings as any)?.show_expected_cash_to_cashier ?? true;
-  const canSeeExpected = isPrivileged || settingEnabled;
+  const canSeeExpected = isPrivileged;
 
   // ── Save ───────────────────────────────────────
   const showToast = (msg: string, type: "success" | "error" = "success") => {
@@ -494,17 +494,19 @@ export default function CashClose() {
             {" · "}{profile?.full_name || "—"}
           </p>
         </div>
-        <button
-          onClick={() => setShowHistory(!showHistory)}
-          className="touch-btn flex items-center gap-2 px-4 py-2 rounded-xl bg-muted text-muted-foreground hover:bg-muted/80 text-sm font-semibold transition-colors"
-        >
-          <i className="fa-solid fa-clock-rotate-left" />
-          Cierres anteriores
-        </button>
+        {isPrivileged && (
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className="touch-btn flex items-center gap-2 px-4 py-2 rounded-xl bg-muted text-muted-foreground hover:bg-muted/80 text-sm font-semibold transition-colors"
+          >
+            <i className="fa-solid fa-clock-rotate-left" />
+            Cierres anteriores
+          </button>
+        )}
       </div>
 
       {/* ─── HISTORY PANEL (collapsible) ──────────────────── */}
-      {showHistory && (
+      {isPrivileged && showHistory && (
         <div className="pos-card p-4 animate-scale-in">
           <h3 className="font-bold text-foreground mb-3 flex items-center gap-2">
             <i className="fa-solid fa-history text-secondary" /> Últimos cierres registrados
@@ -1151,7 +1153,9 @@ export default function CashClose() {
               <>
                 <p className="text-6xl mb-2">⬆️</p>
                 <p className="text-3xl font-black text-blue-700 dark:text-blue-300">SOBRA</p>
-                <p className="text-5xl font-black text-blue-700 dark:text-blue-300 mt-1">C${difference.toFixed(2)}</p>
+                {canSeeExpected && (
+                  <p className="text-5xl font-black text-blue-700 dark:text-blue-300 mt-1">C${difference.toFixed(2)}</p>
+                )}
                 <p className="text-blue-600 font-semibold mt-1">de más en la caja</p>
               </>
             )}
@@ -1159,7 +1163,9 @@ export default function CashClose() {
               <>
                 <p className="text-6xl mb-2">⬇️</p>
                 <p className="text-3xl font-black text-red-700 dark:text-red-300">FALTA</p>
-                <p className="text-5xl font-black text-red-700 dark:text-red-300 mt-1">C${Math.abs(difference).toFixed(2)}</p>
+                {canSeeExpected && (
+                  <p className="text-5xl font-black text-red-700 dark:text-red-300 mt-1">C${Math.abs(difference).toFixed(2)}</p>
+                )}
                 <p className="text-red-600 font-semibold mt-1">de menos en la caja</p>
               </>
             )}
@@ -1256,10 +1262,16 @@ export default function CashClose() {
                 <div className={`rounded-2xl p-4 text-center border-2 ${cuadra ? "bg-emerald-50 border-emerald-300" : sobra ? "bg-blue-50 border-blue-300" : "bg-red-50 border-red-300"}`}>
                   <p className="text-2xl mb-1">{cuadra ? "✅" : "⚠️"}</p>
                   <p className={`text-xl font-black ${cuadra ? "text-emerald-700" : sobra ? "text-blue-700" : "text-red-700"}`}>
-                    {cuadra ? "¡Cuadra!" : sobra ? `Sobra C$${difference.toFixed(2)}` : `Falta C$${Math.abs(difference).toFixed(2)}`}
+                    {cuadra
+                      ? "¡Cuadra!"
+                      : sobra
+                        ? canSeeExpected ? `Sobra C$${difference.toFixed(2)}` : "Sobra"
+                        : canSeeExpected ? `Falta C$${Math.abs(difference).toFixed(2)}` : "Falta"
+                    }
                   </p>
                 </div>
 
+                {canSeeExpected ? (
                 <div className="pos-card p-4 space-y-3 text-sm">
                   <p className="font-bold text-foreground text-base">Resumen del cierre:</p>
                   <div className={`grid gap-2 ${dayStats.mixedTickets > 0 ? 'grid-cols-2' : 'grid-cols-3'}`}>
@@ -1321,10 +1333,7 @@ export default function CashClose() {
                     )}
                     <div className="flex justify-between pt-1 border-t border-border">
                       <span className="text-muted-foreground">Efectivo esperado:</span>
-                      {canSeeExpected
-                        ? <span className="font-semibold">C${expectedCash.toFixed(2)}</span>
-                        : <span className="font-semibold text-muted-foreground italic">Oculto</span>
-                      }
+                      <span className="font-semibold">C${expectedCash.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Efectivo contado:</span>
@@ -1344,6 +1353,38 @@ export default function CashClose() {
                     </div>
                   )}
                 </div>
+                ) : (
+                <div className="pos-card p-4 space-y-2 text-sm text-center">
+                  <p className="font-bold text-foreground text-base">Resumen del cierre</p>
+                  <div className={`rounded-2xl p-5 text-center border-2 ${
+                    cuadra ? "bg-emerald-50 border-emerald-300" : sobra ? "bg-blue-50 border-blue-300" : "bg-red-50 border-red-300"
+                  }`}>
+                    <p className="text-3xl mb-1">{cuadra ? "✅" : sobra ? "⬆️" : "⬇️"}</p>
+                    <p className={`text-xl font-black ${
+                      cuadra ? "text-emerald-700" : sobra ? "text-blue-700" : "text-red-700"
+                    }`}>
+                      {cuadra ? "CUADRA" : sobra ? "SOBRA" : "FALTA"}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {cuadra
+                        ? "El efectivo contado coincide con las ventas"
+                        : sobra
+                          ? "Hay dinero de más en la caja"
+                          : "Falta dinero en la caja"
+                      }
+                    </p>
+                  </div>
+                  {note && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-secondary/10 border border-secondary/20 text-left">
+                      <i className="fa-solid fa-note-sticky text-secondary mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-0.5">Nota</p>
+                        <p className="text-sm text-foreground leading-snug">{note}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                )}
 
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-200">
                   <i className="fa-solid fa-triangle-exclamation mr-2" />

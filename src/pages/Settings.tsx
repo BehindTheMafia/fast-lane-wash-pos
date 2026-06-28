@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useBusinessSettings, useUpdateBusinessSettings } from "@/hooks/useBusinessSettings";
 import { BUSINESS_LINE_LABELS, type BusinessLine } from "@/lib/businessLine";
 import { useBusinessLine } from "@/contexts/BusinessLineContext";
@@ -6,6 +6,33 @@ import { useAuth } from "@/hooks/useAuth";
 import { niFormatDate } from "@/utils/niDate";
 import { FULL_DATABASE_SCHEMA } from "@/utils/backupSchema";
 import { supabase } from "@/integrations/supabase/client";
+
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { toast } from "sonner";
 
 // ─── Danger Zone Modal ──────────────────────────────────────────────────────
 interface DangerModalProps {
@@ -47,27 +74,28 @@ function DangerModal({ title, description, confirmLabel, confirmWord = "ELIMINAR
           <p className="text-xs text-destructive font-semibold mb-2">
             Escribe <strong>{confirmWord}</strong> para confirmar:
           </p>
-          <input
+          <Input
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
-            className="input-touch w-full text-sm"
             placeholder={confirmWord}
             autoFocus
+            className="bg-background"
           />
         </div>
 
         <div className="flex gap-2">
-          <button onClick={onClose} className="touch-btn flex-1 py-3 rounded-xl border border-border text-foreground font-semibold">
+          <Button variant="outline" onClick={onClose} className="flex-1 py-3">
             Cancelar
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={handleConfirm}
             disabled={typed !== confirmWord || running}
-            className="flex-1 py-3 rounded-xl bg-destructive text-white font-semibold hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            variant="destructive"
+            className="flex-1 py-3"
           >
             {running ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-trash-can" />}
             {confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -92,14 +120,6 @@ const ROLE_LABELS: Record<string, string> = {
   manager:  "Gerente",
 };
 
-const ROLE_COLORS: Record<string, string> = {
-  admin:    "bg-primary/10 text-primary border-primary/20",
-  owner:    "bg-accent/10 text-accent border-accent/20",
-  cajero:   "bg-secondary/10 text-secondary border-secondary/20",
-  operator: "bg-secondary/10 text-secondary border-secondary/20",
-  manager:  "bg-secondary/10 text-secondary border-secondary/20",
-};
-
 function getModuleAccess(role: string | null) {
   const r = role ?? "";
   const isAdmin = r === "admin";
@@ -119,6 +139,21 @@ function getModuleAccess(role: string | null) {
   ];
 }
 
+// ─── Section nav config ────────────────────────────────────────────────────
+const SECTIONS = [
+  { id: "modules",       label: "Módulos Activos",     icon: "fa-square-check" },
+  { id: "users",         label: "Gestión de Usuarios", icon: "fa-users-gear" },
+  { id: "business",      label: "Datos del negocio",   icon: "fa-building" },
+  { id: "logo",          label: "Logo",                icon: "fa-image" },
+  { id: "ticket",        label: "Ticket",              icon: "fa-receipt" },
+  { id: "qr",            label: "Código QR",           icon: "fa-qrcode" },
+  { id: "whatsapp",      label: "WhatsApp",            icon: "fa-brands fa-whatsapp" },
+  { id: "exchange",      label: "Tasa de cambio",      icon: "fa-coins" },
+  { id: "cashpos",       label: "Caja / POS",          icon: "fa-vault" },
+  { id: "export",        label: "Exportar datos",      icon: "fa-file-arrow-down" },
+  { id: "danger",        label: "Zona de peligro",     icon: "fa-skull-crossbones" },
+] as const;
+
 // ─── Main Settings Page ─────────────────────────────────────────────────────
 export default function Settings() {
   const { carWashVisible, barbershopVisible, updateVisibilities } = useBusinessLine();
@@ -127,7 +162,6 @@ export default function Settings() {
   const { data: settings, isLoading } = useBusinessSettings(editLine);
   const updateSettings = useUpdateBusinessSettings(editLine);
   const [form, setForm] = useState<any>(null);
-  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadingQr, setUploadingQr] = useState(false);
 
@@ -138,6 +172,10 @@ export default function Settings() {
   const [editRole, setEditRole] = useState("");
   const [editOverrides, setEditOverrides] = useState<Record<string, boolean>>({});
   const [savingRole, setSavingRole] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
+  const [deactivateTarget, setDeactivateTarget] = useState<UserProfile | null>(null);
 
   // Danger zone state
   const [dangerModal, setDangerModal] = useState<null | "tickets" | "tickets_range" | "customers_inactive" | "cash_closures" | "all_data">(null);
@@ -148,9 +186,33 @@ export default function Settings() {
   const [stats, setStats] = useState<{ tickets: number; customers: number; closures: number } | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
 
-  const showToast = (msg: string, type: "success" | "error" = "success") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 4000);
+  // ── Section nav scroll tracking ──
+  const [activeSection, setActiveSection] = useState("");
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  useEffect(() => {
+    const observers: IntersectionObserver[] = [];
+    const handleIntersect = (entries: IntersectionObserverEntry[]) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          setActiveSection(entry.target.id);
+        }
+      }
+    };
+    for (const { id } of SECTIONS) {
+      const el = sectionRefs.current[id];
+      if (el) {
+        const obs = new IntersectionObserver(handleIntersect, { rootMargin: "-80px 0px -60% 0px" });
+        obs.observe(el);
+        observers.push(obs);
+      }
+    }
+    return () => observers.forEach((o) => o.disconnect());
+  }, [isLoading]);
+
+  const scrollToSection = (id: string) => {
+    const el = sectionRefs.current[id];
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   // ── User management ──────────────────────────────────────────────────────
@@ -170,21 +232,19 @@ export default function Settings() {
     setEditingUserId(u.id);
     setEditRole(u.role ?? "cajero");
     setEditOverrides(u.module_overrides ?? {});
+    setEditDialogOpen(true);
   };
 
-  const cancelEdit = () => { setEditingUserId(null); setEditRole(""); setEditOverrides({}); };
+  const cancelEdit = () => { setEditingUserId(null); setEditRole(""); setEditOverrides({}); setEditDialogOpen(false); };
 
   const toggleOverride = (key: string, defaultAccess: boolean) => {
     setEditOverrides(prev => {
       const next = { ...prev };
       if (next[key] === undefined) {
-        // First click: lock to the OPPOSITE of default
         next[key] = !defaultAccess;
       } else if (next[key] !== defaultAccess) {
-        // Second click: restore to default (remove key)
         delete next[key];
       } else {
-        // edge: same as default, remove
         delete next[key];
       }
       return next;
@@ -198,21 +258,29 @@ export default function Settings() {
       .update({ role: editRole, module_overrides: editOverrides, updated_at: new Date().toISOString() } as any)
       .eq("id", userId);
     setSavingRole(false);
-    if (error) { showToast("Error al actualizar el usuario", "error"); return; }
-    showToast("Usuario actualizado correctamente");
+    if (error) { toast.error("Error al actualizar el usuario"); return; }
+    toast.success("Usuario actualizado correctamente");
     cancelEdit();
     loadUsers();
   };
 
-  const handleToggleActive = async (u: UserProfile) => {
-    if (u.id === currentUser?.id) { showToast("No puedes desactivar tu propia cuenta", "error"); return; }
+  const handleToggleActive = async () => {
+    if (!deactivateTarget) return;
+    if (deactivateTarget.id === currentUser?.id) { toast.error("No puedes desactivar tu propia cuenta"); return; }
     const { error } = await supabase
       .from("profiles")
-      .update({ active: !u.active, updated_at: new Date().toISOString() })
-      .eq("id", u.id);
-    if (error) { showToast("Error al cambiar estado", "error"); return; }
-    showToast(`Usuario ${!u.active ? "activado" : "desactivado"}`);
+      .update({ active: !deactivateTarget.active, updated_at: new Date().toISOString() })
+      .eq("id", deactivateTarget.id);
+    setDeactivateDialogOpen(false);
+    setDeactivateTarget(null);
+    if (error) { toast.error("Error al cambiar estado"); return; }
+    toast.success(`Usuario ${!deactivateTarget.active ? "activado" : "desactivado"}`);
     loadUsers();
+  };
+
+  const openDeactivateDialog = (u: UserProfile) => {
+    setDeactivateTarget(u);
+    setDeactivateDialogOpen(true);
   };
 
   if (isLoading) return <div className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
@@ -244,8 +312,8 @@ export default function Settings() {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) { showToast("Por favor selecciona una imagen válida", "error"); return; }
-    if (file.size > 2 * 1024 * 1024) { showToast("La imagen debe ser menor a 2MB", "error"); return; }
+    if (!file.type.startsWith('image/')) { toast.error("Por favor selecciona una imagen válida"); return; }
+    if (file.size > 2 * 1024 * 1024) { toast.error("La imagen debe ser menor a 2MB"); return; }
 
     setUploading(true);
     try {
@@ -256,9 +324,9 @@ export default function Settings() {
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from('business-assets').getPublicUrl(filePath);
       setForm({ ...form, logo_url: publicUrl });
-      showToast("Logo subido exitosamente");
+      toast.success("Logo subido exitosamente");
     } catch (error) {
-      showToast("Error al subir el logo", "error");
+      toast.error("Error al subir el logo");
     } finally {
       setUploading(false);
     }
@@ -267,8 +335,8 @@ export default function Settings() {
   const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) { showToast("Por favor selecciona una imagen válida", "error"); return; }
-    if (file.size > 2 * 1024 * 1024) { showToast("La imagen debe ser menor a 2MB", "error"); return; }
+    if (!file.type.startsWith('image/')) { toast.error("Por favor selecciona una imagen válida"); return; }
+    if (file.size > 2 * 1024 * 1024) { toast.error("La imagen debe ser menor a 2MB"); return; }
 
     setUploadingQr(true);
     try {
@@ -279,9 +347,9 @@ export default function Settings() {
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from('business-assets').getPublicUrl(filePath);
       setForm({ ...form, qr_image_url: publicUrl });
-      showToast("QR subido exitosamente");
+      toast.success("QR subido exitosamente");
     } catch (error) {
-      showToast("Error al subir el QR", "error");
+      toast.error("Error al subir el QR");
     } finally {
       setUploadingQr(false);
     }
@@ -310,14 +378,13 @@ export default function Settings() {
       show_expected_cash_to_cashier: form.show_expected_cash_to_cashier,
     });
 
-    // show_expected_cash_to_cashier is a global role policy — sync to the other business line too
     const otherLine = editLine === "car_wash" ? "barbershop" : "car_wash";
     await supabase
       .from("business_settings")
       .update({ show_expected_cash_to_cashier: form.show_expected_cash_to_cashier } as any)
       .eq("business_line", otherLine);
 
-    showToast("Configuración guardada");
+    toast.success("Configuración guardada");
   };
 
   // ── Load stats for danger zone ──
@@ -341,7 +408,7 @@ export default function Settings() {
         .eq("status", "paid")
         .order("created_at", { ascending: false });
 
-      if (!data?.length) { showToast("No hay tickets para exportar", "error"); return; }
+      if (!data?.length) { toast.error("No hay tickets para exportar"); return; }
 
       const headers = ["#Ticket", "Fecha", "Placa", "Total C$", "Estado"];
       const rows = data.map((t: any) => [
@@ -352,7 +419,7 @@ export default function Settings() {
         t.status,
       ]);
       downloadCSV("tickets_export.csv", [headers, ...rows]);
-      showToast(`${data.length} tickets exportados`);
+      toast.success(`${data.length} tickets exportados`);
     } else {
       const { data } = await supabase
         .from("customers")
@@ -360,7 +427,7 @@ export default function Settings() {
         .eq("is_general", false)
         .order("name");
 
-      if (!data?.length) { showToast("No hay clientes para exportar", "error"); return; }
+      if (!data?.length) { toast.error("No hay clientes para exportar"); return; }
 
       const headers = ["Nombre", "Teléfono", "Placa", "Correo", "Visitas", "Lavados Gratis Ganados", "Lavados Gratis Usados", "Registrado"];
       const rows = data.map((c: any) => [
@@ -371,50 +438,33 @@ export default function Settings() {
         new Date(c.created_at).toLocaleDateString("es-NI"),
       ]);
       downloadCSV("clientes_export.csv", [headers, ...rows]);
-      showToast(`${data.length} clientes exportados`);
+      toast.success(`${data.length} clientes exportados`);
     }
   };
 
   const exportFullDatabaseSQL = async () => {
-    showToast("Generando respaldo SQL...", "success");
+    toast.success("Generando respaldo SQL...");
     try {
       const tables = [
-        "business_settings",
-        "services",
-        "vehicle_types",
-        "service_prices",
-        "products",
-        "stock_movements",
-        "customers",
-        "tickets",
-        "ticket_items",
-        "payments",
-        "cash_closures",
-        "cash_expenses",
-        "membership_plans",
-        "customer_memberships",
-        "membership_washes"
+        "business_settings", "services", "vehicle_types", "service_prices",
+        "products", "stock_movements", "customers", "tickets", "ticket_items",
+        "payments", "cash_closures", "cash_expenses", "membership_plans",
+        "customer_memberships", "membership_washes"
       ];
 
       let sqlDump = `-- BACKUP COMPLETO AUTOLAVADO EL RAPIDO\n`;
       sqlDump += `-- Generado: ${new Date().toLocaleString()}\n`;
-      sqlDump += `-- Este archivo contiene la ESTRUCTURA y los DATOS\n\n`;
-      
+      sqlDump += `-- Este archivo contiene la ESTRUCTURA y los DATOS\n\n`;      
       sqlDump += FULL_DATABASE_SCHEMA;
       sqlDump += `\n\n-- ── COMIENZO DE DATOS ──\n\n`;
       sqlDump += `SET statement_timeout = 0;\nSET client_encoding = 'UTF8';\n\n`;
 
       for (const table of tables) {
         const { data, error } = await supabase.from(table as any).select("*");
-        if (error) {
-          console.error(`Error exportando ${table}:`, error);
-          continue;
-        }
-
+        if (error) { console.error(`Error exportando ${table}:`, error); continue; }
         if (data && data.length > 0) {
           sqlDump += `-- Datos para la tabla: ${table}\n`;
           const columns = Object.keys(data[0]);
-          
           for (const row of data) {
             const values = columns.map(col => {
               const val = row[col];
@@ -432,13 +482,11 @@ export default function Settings() {
       const blob = new Blob([sqlDump], { type: "text/plain;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = `backup_elrapido_${new Date().toISOString().split('T')[0]}.sql`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast("Respaldo SQL descargado");
+      a.href = url; a.download = `backup_elrapido_${new Date().toISOString().split('T')[0]}.sql`;
+      a.click(); URL.revokeObjectURL(url);
+      toast.success("Respaldo SQL descargado");
     } catch (err) {
-      showToast("Error al generar el SQL", "error");
+      toast.error("Error al generar el SQL");
     }
   };
 
@@ -454,8 +502,8 @@ export default function Settings() {
   // ── Delete handlers ──
   const deleteAllTickets = async () => {
     const { error } = await supabase.from("tickets").delete().eq("status", "paid");
-    if (error) { showToast("Error: " + error.message, "error"); return; }
-    showToast("Todos los tickets eliminados correctamente");
+    if (error) { toast.error("Error: " + error.message); return; }
+    toast.success("Todos los tickets eliminados correctamente");
     loadStats();
   };
 
@@ -468,757 +516,1146 @@ export default function Settings() {
       .eq("status", "paid")
       .gte("created_at", from.toISOString())
       .lte("created_at", to.toISOString());
-    if (error) { showToast("Error: " + error.message, "error"); return; }
-    showToast(`${count || 0} tickets eliminados del rango seleccionado`);
+    if (error) { toast.error("Error: " + error.message); return; }
+    toast.success(`${count || 0} tickets eliminados del rango seleccionado`);
     loadStats();
   };
 
   const deleteInactiveCustomers = async () => {
-    // Get customers that have no tickets
     const { data: withTickets } = await supabase
       .from("tickets")
       .select("customer_id")
       .not("customer_id", "is", null);
-
     const activeIds = [...new Set((withTickets || []).map((t: any) => t.customer_id))];
-
     let query = supabase.from("customers").delete().eq("is_general", false);
-    if (activeIds.length > 0) {
-      query = query.not("id", "in", `(${activeIds.join(",")})`);
-    }
-
+    if (activeIds.length > 0) query = query.not("id", "in", `(${activeIds.join(",")})`);
     const { error, count } = await (query as any);
-    if (error) { showToast("Error: " + error.message, "error"); return; }
-    showToast(`${count || 0} clientes sin actividad eliminados`);
+    if (error) { toast.error("Error: " + error.message); return; }
+    toast.success(`${count || 0} clientes sin actividad eliminados`);
     loadStats();
   };
 
   const deleteAllCashClosures = async () => {
     const { error } = await supabase.from("cash_closures").delete().gte("id", 0);
-    if (error) { showToast("Error: " + error.message, "error"); return; }
-    showToast("Todos los cierres de caja eliminados");
+    if (error) { toast.error("Error: " + error.message); return; }
+    toast.success("Todos los cierres de caja eliminados");
     loadStats();
   };
 
   const deleteAllData = async () => {
-    // Order matters: tickets first (cascade), then customers, then closures
     await supabase.from("tickets").delete().eq("status", "paid");
     await supabase.from("customers").delete().eq("is_general", false);
     await supabase.from("cash_closures").delete().gte("id", 0);
-    showToast("Todos los datos han sido eliminados");
+    toast.success("Todos los datos han sido eliminados");
     loadStats();
   };
+
+  const setFormField = (field: string, value: any) => setForm({ ...form, [field]: value });
 
   if (!form) return null;
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in max-w-2xl">
-      <h2 className="text-2xl font-bold text-foreground">
-        <i className="fa-solid fa-gear mr-3 text-secondary" />Configuración
-      </h2>
-
-      <div className="flex gap-2 p-1 bg-muted/30 rounded-xl w-fit">
-        {(["car_wash", "barbershop"] as BusinessLine[]).map((line) => (
-          <button
-            key={line}
-            type="button"
-            onClick={() => setEditLine(line)}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
-              editLine === line ? "bg-background shadow-sm" : "text-muted-foreground"
-            }`}
-          >
-            {BUSINESS_LINE_LABELS[line]}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Módulos Activos (Visual) ── */}
-      <div className="pos-card p-6 space-y-4">
-        <h3 className="font-bold text-foreground">
-          <i className="fa-solid fa-square-check mr-2 text-secondary" />
-          Módulos Activos (Visual)
-        </h3>
-        <p className="text-xs text-muted-foreground">
-          Activa o desactiva la visibilidad de los módulos. Los cambios se sincronizarán con los demás usuarios del sistema. Al menos un módulo debe estar activo.
-        </p>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/20 border border-border">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Módulo de Autolavado</p>
-              <p className="text-xs text-muted-foreground">Mostrar/ocultar las funciones de autolavado</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                if (carWashVisible && !barbershopVisible) {
-                  showToast("Debe haber al menos un módulo activo", "error");
-                  return;
-                }
-                const newVal = !carWashVisible;
-                updateVisibilities(newVal, barbershopVisible);
-                showToast(`Módulo de Autolavado ${newVal ? 'activado' : 'desactivado'}`);
-              }}
-              className={`w-12 h-6 rounded-full transition-colors relative ${carWashVisible ? 'bg-accent' : 'bg-muted'}`}
-            >
-              <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${carWashVisible ? 'translate-x-6' : ''}`} />
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/20 border border-border">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Módulo de Barbería</p>
-              <p className="text-xs text-muted-foreground">Mostrar/ocultar las funciones de barbería</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                if (barbershopVisible && !carWashVisible) {
-                  showToast("Debe haber al menos un módulo activo", "error");
-                  return;
-                }
-                const newVal = !barbershopVisible;
-                updateVisibilities(carWashVisible, newVal);
-                showToast(`Módulo de Barbería ${newVal ? 'activado' : 'desactivado'}`);
-              }}
-              className={`w-12 h-6 rounded-full transition-colors relative ${barbershopVisible ? 'bg-accent' : 'bg-muted'}`}
-            >
-              <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${barbershopVisible ? 'translate-x-6' : ''}`} />
-            </button>
-          </div>
+    <div className="p-6 animate-fade-in">
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-3">
+            <span className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
+              <i className="fa-solid fa-gear text-accent" />
+            </span>
+            Configuración
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1 ml-[52px]">
+            Administra la configuración general del sistema
+          </p>
         </div>
       </div>
 
-      {/* ── Gestión de Usuarios ── */}
-      <div className="pos-card p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-foreground">
-            <i className="fa-solid fa-users-gear mr-2 text-secondary" />Gestión de Usuarios
-          </h3>
-          <button
-            type="button"
-            onClick={loadUsers}
-            disabled={loadingUsers}
-            className="touch-btn text-xs px-3 py-1.5 rounded-lg bg-muted/40 text-foreground hover:bg-muted/70 flex items-center gap-1.5"
-          >
-            <i className={`fa-solid fa-rotate ${loadingUsers ? "fa-spin" : ""}`} />
-            Actualizar
-          </button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Visualiza y administra los permisos de todos los usuarios del sistema. Cambia el rol para controlar a qué módulos tiene acceso cada usuario.
-        </p>
+      {/* ── Business line tabs ── */}
+      <div className="mb-6">
+        <Tabs value={editLine} onValueChange={(v) => setEditLine(v as BusinessLine)}>
+          <TabsList className="h-11">
+            {(["car_wash", "barbershop"] as BusinessLine[]).map((line) => (
+              <TabsTrigger key={line} value={line} className="text-sm px-5 gap-2">
+                <i className={`fa-solid ${line === "car_wash" ? "fa-car" : "fa-scissors"}`} />
+                {BUSINESS_LINE_LABELS[line]}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </div>
 
-        {loadingUsers ? (
-          <div className="flex justify-center py-8">
-            <i className="fa-solid fa-spinner fa-spin text-2xl text-secondary" />
+      <div className="flex gap-6">
+        {/* ── Section navigation sidebar ── */}
+        <aside className="hidden lg:block w-56 shrink-0">
+          <nav className="sticky top-6 space-y-0.5">
+            {SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => scrollToSection(s.id)}
+                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2.5 ${
+                  activeSection === s.id
+                    ? "bg-accent text-accent-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }`}
+              >
+                <i className={`fa-solid ${s.icon} w-4 text-center text-xs ${activeSection === s.id ? "opacity-100" : "opacity-60"}`} />
+                {s.label}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        {/* ── Mobile section nav (horizontal scroll) ── */}
+        <div className="lg:hidden overflow-x-auto -mx-6 px-6 mb-2 scrollbar-none">
+          <div className="flex gap-1 pb-2">
+            {SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => scrollToSection(s.id)}
+                className={`shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                  activeSection === s.id
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-muted/50 text-muted-foreground"
+                }`}
+              >
+                <i className={`fa-solid ${s.icon} text-[10px]`} />
+                {s.label}
+              </button>
+            ))}
           </div>
-        ) : users.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">No se encontraron usuarios.</p>
-        ) : (
-          <div className="space-y-3">
-            {users.map((u) => {
-              const isEditing = editingUserId === u.id;
-              const isCurrentUser = u.id === currentUser?.id;
-              const modules = getModuleAccess(isEditing ? editRole : u.role);
-              const roleBadge = ROLE_LABELS[u.role ?? ""] ?? u.role ?? "Sin rol";
-              const roleColor = ROLE_COLORS[u.role ?? ""] ?? "bg-muted text-muted-foreground border-muted";
+        </div>
 
-              return (
-                <div
-                  key={u.id}
-                  className={`rounded-xl border p-4 space-y-3 transition-colors ${
-                    isEditing ? "border-primary/30 bg-primary/5" : "border-border bg-background"
-                  } ${!u.active ? "opacity-60" : ""}`}
-                >
-                  {/* Header row */}
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
-                      <i className="fa-solid fa-user text-accent text-sm" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-semibold text-sm text-foreground truncate">
-                          {u.full_name || "Sin nombre"}
-                        </p>
-                        {isCurrentUser && (
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-accent text-accent-foreground">TÚ</span>
-                        )}
-                        {!u.active && (
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-destructive/20 text-destructive">INACTIVO</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Creado {niFormatDate(u.created_at)}
-                      </p>
-                    </div>
+        {/* ── Main content ── */}
+        <main className="flex-1 min-w-0 space-y-6">
 
-                    {/* Role badge / selector */}
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {isEditing ? (
-                        <select
-                          value={editRole}
-                          onChange={(e) => setEditRole(e.target.value)}
-                          className="text-xs px-2 py-1.5 rounded-lg border border-border bg-background text-foreground"
-                          autoFocus
-                        >
-                          <option value="admin">Administrador</option>
-                          <option value="owner">Propietario</option>
-                          <option value="cajero">Cajero</option>
-                          <option value="operator">Operador</option>
-                          <option value="manager">Gerente</option>
-                        </select>
-                      ) : (
-                        <span className={`text-xs font-semibold px-2 py-1 rounded-lg border ${roleColor}`}>
-                          {roleBadge}
-                        </span>
-                      )}
+          {/* ══════ Módulos Activos ══════ */}
+          <section id="modules" ref={(el) => { sectionRefs.current["modules"] = el; }} className="scroll-mt-20">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center">
+                    <i className="fa-solid fa-square-check text-emerald-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Módulos Activos (Visual)</CardTitle>
+                    <CardDescription>
+                      Activa o desactiva la visibilidad de los módulos. Al menos un módulo debe estar activo.
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center justify-between p-4 rounded-xl bg-background border border-border hover:border-emerald-200 transition-colors">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold">Módulo de Autolavado</Label>
+                    <p className="text-xs text-muted-foreground">Mostrar/ocultar las funciones de autolavado</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium ${carWashVisible ? "text-emerald-600" : "text-muted-foreground"}`}>
+                      {carWashVisible ? "Activo" : "Inactivo"}
+                    </span>
+                    <Switch
+                      checked={carWashVisible}
+                      onCheckedChange={() => {
+                        if (carWashVisible && !barbershopVisible) { toast.error("Debe haber al menos un módulo activo"); return; }
+                        const newVal = !carWashVisible;
+                        updateVisibilities(newVal, barbershopVisible);
+                        toast.success(`Módulo de Autolavado ${newVal ? "activado" : "desactivado"}`);
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between p-4 rounded-xl bg-background border border-border hover:border-emerald-200 transition-colors">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold">Módulo de Barbería</Label>
+                    <p className="text-xs text-muted-foreground">Mostrar/ocultar las funciones de barbería</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium ${barbershopVisible ? "text-emerald-600" : "text-muted-foreground"}`}>
+                      {barbershopVisible ? "Activo" : "Inactivo"}
+                    </span>
+                    <Switch
+                      checked={barbershopVisible}
+                      onCheckedChange={() => {
+                        if (barbershopVisible && !carWashVisible) { toast.error("Debe haber al menos un módulo activo"); return; }
+                        const newVal = !barbershopVisible;
+                        updateVisibilities(carWashVisible, newVal);
+                        toast.success(`Módulo de Barbería ${newVal ? "activado" : "desactivado"}`);
+                      }}
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          {/* ══════ Gestión de Usuarios ══════ */}
+          <section id="users" ref={(el) => { sectionRefs.current["users"] = el; }} className="scroll-mt-20">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center">
+                      <i className="fa-solid fa-users-gear text-blue-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg">Gestión de Usuarios</CardTitle>
+                      <CardDescription>
+                        Visualiza y administra los permisos de todos los usuarios del sistema.
+                      </CardDescription>
                     </div>
                   </div>
+                  <Button variant="outline" size="sm" onClick={loadUsers} disabled={loadingUsers} className="gap-1.5">
+                    <i className={`fa-solid fa-rotate ${loadingUsers ? "fa-spin" : ""}`} />
+                    Actualizar
+                  </Button>
+                </div>
+              </CardHeader>
 
-                  {/* Module access — interactive toggles in edit mode */}
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">
-                      {isEditing ? "Editar acceso a módulos" : "Acceso a módulos"}
-                    </p>
-                    {isEditing && (
-                      <p className="text-[10px] text-muted-foreground mb-2 leading-relaxed">
-                        Haz clic para forzar acceso (✅) o bloquearlo (❌). Sin marcar = comportamiento por defecto del rol.
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-1.5">
-                      {modules.map((m) => {
-                        const overrideVal = isEditing ? editOverrides[m.key] : (u.module_overrides ?? {})[m.key];
-                        const hasOverride = overrideVal !== undefined;
-                        const effectiveAccess = hasOverride ? overrideVal : m.access;
-
-                        if (isEditing) {
-                          // Three-state cycle: default → force-deny → force-grant → default
-                          const label = hasOverride
-                            ? overrideVal ? "✅ Forzado" : "❌ Bloqueado"
-                            : m.access ? "Acceso" : "Sin acceso";
-                          const cls = hasOverride
-                            ? overrideVal
-                              ? "bg-emerald-100 text-emerald-700 border-emerald-400 ring-1 ring-emerald-300"
-                              : "bg-red-100 text-red-700 border-red-400 ring-1 ring-red-300"
-                            : m.access
-                              ? "bg-green-50 text-green-700 border-green-200"
-                              : "bg-muted/50 text-muted-foreground/50 border-transparent line-through";
-                          return (
-                            <button
-                              key={m.key}
-                              type="button"
-                              onClick={() => toggleOverride(m.key, m.access)}
-                              title={`Clic para cambiar acceso a ${m.label}`}
-                              className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg font-medium border transition-all hover:scale-105 active:scale-95 ${cls}`}
-                            >
-                              <i className={`fa-solid ${m.icon} text-[10px]`} />
-                              {m.label}
-                              {hasOverride && <span className="text-[9px] ml-0.5">{overrideVal ? "★" : "✕"}</span>}
-                            </button>
-                          );
-                        }
-
-                        // View mode
-                        return (
-                          <span
-                            key={m.key}
-                            title={`${m.label}: ${effectiveAccess ? "acceso permitido" : "sin acceso"}${hasOverride ? " (personalizado)" : ""}`}
-                            className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg font-medium transition-all ${
-                              effectiveAccess
-                                ? hasOverride
-                                  ? "bg-emerald-100 text-emerald-700 border border-emerald-300"
-                                  : "bg-green-100 text-green-700 border border-green-200"
-                                : "bg-muted/50 text-muted-foreground/50 border border-transparent line-through"
-                            }`}
-                          >
-                            <i className={`fa-solid ${m.icon} text-[10px]`} />
-                            {m.label}
-                            {hasOverride && <i className="fa-solid fa-star text-[8px] ml-0.5" />}
-                          </span>
-                        );
-                      })}
+              {/* Stats bar */}
+              {users.length > 0 && (
+                <div className="mx-6 mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: "Total", value: users.length, color: "text-accent", bg: "bg-accent/10" },
+                    { label: "Administradores", value: users.filter((u) => u.role === "admin" && u.active).length, color: "text-primary", bg: "bg-primary/10" },
+                    { label: "Cajeros/Operadores", value: users.filter((u) => (u.role === "cajero" || u.role === "operator") && u.active).length, color: "text-emerald-600", bg: "bg-emerald-50" },
+                    { label: "Inactivos", value: users.filter((u) => !u.active).length, color: "text-destructive", bg: "bg-destructive/10" },
+                  ].map(({ label, value, color, bg }) => (
+                    <div key={label} className={`${bg} rounded-xl px-4 py-3 text-center`}>
+                      <p className={`text-2xl font-bold ${color}`}>{value}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
                     </div>
-                    {isEditing && Object.keys(editOverrides).length > 0 && (
+                  ))}
+                </div>
+              )}
+
+              <CardContent>
+                {/* Search */}
+                {users.length > 1 && (
+                  <div className="relative mb-4">
+                    <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm" />
+                    <Input
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Buscar usuarios por nombre..."
+                      className="pl-9 h-10"
+                    />
+                    {searchTerm && (
                       <button
-                        type="button"
-                        onClick={() => setEditOverrides({})}
-                        className="mt-2 text-[10px] text-muted-foreground hover:text-destructive flex items-center gap-1"
+                        onClick={() => setSearchTerm("")}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm"
                       >
-                        <i className="fa-solid fa-rotate-left" /> Restablecer todo a valores del rol
+                        <i className="fa-solid fa-xmark" />
                       </button>
                     )}
                   </div>
+                )}
 
-                  {/* Action buttons */}
-                  <div className="flex items-center justify-between pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleActive(u)}
-                      disabled={isCurrentUser}
-                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                        u.active
-                          ? "border-destructive/30 text-destructive hover:bg-destructive/10"
-                          : "border-green-300 text-green-700 hover:bg-green-50"
-                      }`}
-                    >
-                      <i className={`fa-solid ${u.active ? "fa-user-slash" : "fa-user-check"} mr-1.5`} />
-                      {u.active ? "Desactivar" : "Activar"}
-                    </button>
-
-                    <div className="flex gap-2">
-                      {isEditing ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={cancelEdit}
-                            className="text-xs px-3 py-1.5 rounded-lg border border-border text-foreground hover:bg-muted/50"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateRole(u.id)}
-                            disabled={savingRole}
-                            className="text-xs px-3 py-1.5 rounded-lg bg-primary text-primary-foreground font-semibold hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"
-                          >
-                            {savingRole ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-check" />}
-                            Guardar
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => startEditUser(u)}
-                          className="text-xs px-3 py-1.5 rounded-lg border border-border text-foreground hover:bg-muted/50 flex items-center gap-1.5"
-                        >
-                          <i className="fa-solid fa-pen text-[10px]" />
-                          Cambiar rol
-                        </button>
-                      )}
+                {loadingUsers ? (
+                  <div className="flex justify-center py-12">
+                    <div className="flex flex-col items-center gap-3">
+                      <i className="fa-solid fa-spinner fa-spin text-3xl text-blue-500" />
+                      <p className="text-sm text-muted-foreground">Cargando usuarios...</p>
                     </div>
                   </div>
+                ) : users.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="w-16 h-16 rounded-full bg-muted/30 flex items-center justify-center mb-3">
+                      <i className="fa-solid fa-users-slash text-2xl text-muted-foreground/40" />
+                    </div>
+                    <p className="text-sm font-medium text-foreground">No se encontraron usuarios</p>
+                    <p className="text-xs text-muted-foreground mt-1">Los usuarios aparecerán aquí cuando se registren en el sistema.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {(() => {
+                      const filtered = searchTerm
+                        ? users.filter((u) => u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()))
+                        : users;
+                      return filtered.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">No hay resultados para "{searchTerm}"</p>
+                      ) : (
+                        filtered.map((u) => {
+                          const isCurrentUser = u.id === currentUser?.id;
+                          const modules = getModuleAccess(u.role);
+
+                          const initials = (u.full_name || "??")
+                            .split(" ")
+                            .map((n) => n[0])
+                            .join("")
+                            .toUpperCase()
+                            .slice(0, 2);
+
+                          const avatarColor = {
+                            admin: "bg-primary/20 text-primary",
+                            owner: "bg-amber-100 text-amber-700",
+                            manager: "bg-blue-100 text-blue-600",
+                            cajero: "bg-emerald-100 text-emerald-600",
+                            operator: "bg-slate-200 text-slate-600",
+                          }[u.role ?? ""] ?? "bg-muted text-muted-foreground";
+
+                          const roleBadgeStyle = {
+                            admin: "bg-primary/10 text-primary border-primary/20",
+                            owner: "bg-amber-50 text-amber-700 border-amber-200",
+                            manager: "bg-blue-50 text-blue-600 border-blue-200",
+                            cajero: "bg-emerald-50 text-emerald-600 border-emerald-200",
+                            operator: "bg-slate-100 text-slate-600 border-slate-200",
+                          }[u.role ?? ""] ?? "bg-muted text-muted-foreground border-muted";
+
+                          return (
+                            <div
+                              key={u.id}
+                              className={`group relative rounded-xl border transition-all hover:shadow-sm ${
+                                !u.active ? "border-destructive/20 bg-destructive/[0.02]" : "border-border bg-card"
+                              }`}
+                            >
+                              {/* Inactive overlay indicator */}
+                              {!u.active && (
+                                <div className="absolute top-3 right-3">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-destructive/60 flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-destructive" />
+                                    Inactivo
+                                  </span>
+                                </div>
+                              )}
+
+                              <div className="p-4">
+                                <div className="flex items-start gap-3.5">
+                                  {/* Avatar with initials */}
+                                  <Avatar className={`w-11 h-11 rounded-xl ${avatarColor}`}>
+                                    <AvatarFallback className={`rounded-xl text-xs font-bold ${avatarColor}`}>
+                                      {initials}
+                                    </AvatarFallback>
+                                  </Avatar>
+
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <p className={`font-semibold text-sm ${!u.active ? "text-muted-foreground" : "text-foreground"}`}>
+                                        {u.full_name || "Sin nombre"}
+                                      </p>
+                                      {isCurrentUser && (
+                                        <Badge variant="default" className="text-[10px] h-5 px-1.5">TÚ</Badge>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${roleBadgeStyle}`}>
+                                        {ROLE_LABELS[u.role ?? ""] ?? u.role ?? "Sin rol"}
+                                      </span>
+                                      <span className="text-[11px] text-muted-foreground">
+                                        <i className="fa-solid fa-calendar mr-1" />
+                                        {niFormatDate(u.created_at)}
+                                      </span>
+                                    </div>
+
+                                    {/* Module permissions */}
+                                    <div className="flex flex-wrap gap-1 mt-2.5">
+                                      {modules.map((m) => {
+                                        const overrideVal = (u.module_overrides ?? {})[m.key];
+                                        const hasOverride = overrideVal !== undefined;
+                                        const effectiveAccess = hasOverride ? overrideVal : m.access;
+
+                                        return (
+                                          <span
+                                            key={m.key}
+                                            title={`${m.label}: ${effectiveAccess ? "acceso permitido" : "sin acceso"}${hasOverride ? " (personalizado)" : ""}`}
+                                            className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-medium transition-all ${
+                                              effectiveAccess
+                                                ? hasOverride
+                                                  ? "bg-emerald-100 text-emerald-700 border border-emerald-300"
+                                                  : "bg-green-50 text-green-600 border border-green-200"
+                                                : "bg-muted/40 text-muted-foreground/50 border border-transparent line-through"
+                                            }`}
+                                          >
+                                            <i className={`fa-solid ${m.icon} text-[9px]`} />
+                                            {m.label}
+                                            {hasOverride && <i className="fa-solid fa-star text-[7px] ml-0.5" />}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-border/50">
+                                  {u.active ? (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => openDeactivateDialog(u)}
+                                      disabled={isCurrentUser}
+                                      className="text-xs text-destructive/70 hover:text-destructive hover:bg-destructive/5 h-8 px-3 gap-1.5"
+                                    >
+                                      <i className="fa-solid fa-user-slash" />
+                                      Desactivar
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => openDeactivateDialog(u)}
+                                      className="text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 h-8 px-3 gap-1.5"
+                                    >
+                                      <i className="fa-solid fa-user-check" />
+                                      Activar
+                                    </Button>
+                                  )}
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => startEditUser(u)}
+                                    className="text-xs h-8 px-3 gap-1.5"
+                                  >
+                                    <i className="fa-solid fa-pen" />
+                                    Editar permisos
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      );
+                    })()}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+
+          {/* ══════ Datos del negocio ══════ */}
+          <section id="business" ref={(el) => { sectionRefs.current["business"] = el; }} className="scroll-mt-20">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center">
+                    <i className="fa-solid fa-building text-amber-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Datos del negocio</CardTitle>
+                    <CardDescription>Información principal del negocio para tickets y facturación</CardDescription>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="business_name">Nombre del negocio</Label>
+                  <Input id="business_name" value={form.business_name} onChange={(e) => setFormField("business_name", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="address">Dirección</Label>
+                  <Input id="address" value={form.address} onChange={(e) => setFormField("address", e.target.value)} placeholder="Ej: Esquina del banco lafise de nindiri 500 metros al norte" />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Teléfono</Label>
+                    <Input id="phone" value={form.phone} onChange={(e) => setFormField("phone", e.target.value)} placeholder="57037623" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ruc">RUC/NIT</Label>
+                    <Input id="ruc" value={form.ruc} onChange={(e) => setFormField("ruc", e.target.value)} />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="social_media">Redes Sociales</Label>
+                  <Input id="social_media" value={form.social_media} onChange={(e) => setFormField("social_media", e.target.value)} placeholder="@elrapidonica" />
+                </div>
+              </CardContent>
+            </Card>
+          </section>
 
-      {/* ── Datos del negocio ── */}
-      <div className="pos-card p-6 space-y-4">
-        <h3 className="font-bold text-foreground"><i className="fa-solid fa-building mr-2 text-secondary" />Datos del negocio</h3>
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs font-semibold text-foreground mb-1 block">Nombre del negocio</label>
-            <input value={form.business_name} onChange={(e) => setForm({ ...form, business_name: e.target.value })} className="input-touch" />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-foreground mb-1 block">Dirección</label>
-            <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="input-touch" placeholder="Ej: Esquina del banco lafise de nindiri 500 metros al norte" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-semibold text-foreground mb-1 block">Teléfono</label>
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="input-touch" placeholder="57037623" />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-foreground mb-1 block">RUC/NIT</label>
-              <input value={form.ruc} onChange={(e) => setForm({ ...form, ruc: e.target.value })} className="input-touch" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-foreground mb-1 block">Redes Sociales</label>
-            <input value={form.social_media} onChange={(e) => setForm({ ...form, social_media: e.target.value })} className="input-touch" placeholder="@elrapidonica" />
-          </div>
-        </div>
-      </div>
+          {/* ══════ Logo ══════ */}
+          <section id="logo" ref={(el) => { sectionRefs.current["logo"] = el; }} className="scroll-mt-20">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center">
+                    <i className="fa-solid fa-image text-purple-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Logo del negocio</CardTitle>
+                    <CardDescription>Sube el logo que aparecerá en los tickets impresos</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {form.logo_url ? (
+                  <div className="flex flex-col items-center gap-3 p-4 rounded-xl bg-background border border-border">
+                    <img src={form.logo_url} alt="Logo" className="max-h-28 object-contain rounded-lg border border-border p-2 bg-white" />
+                    <Button variant="destructive" size="sm" onClick={() => setFormField("logo_url", "")} className="gap-1.5">
+                      <i className="fa-solid fa-trash-can" /> Quitar logo
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-8 rounded-xl bg-background border-2 border-dashed border-border">
+                    <i className="fa-solid fa-cloud-arrow-up text-3xl text-muted-foreground/40 mb-2" />
+                    <p className="text-sm text-muted-foreground mb-3">Sube el logo de tu negocio (máx 2MB)</p>
+                    <Label htmlFor="logo-upload" className="cursor-pointer">
+                      <span className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-accent-foreground text-sm font-medium hover:opacity-90 transition-opacity">
+                        <i className="fa-solid fa-upload" /> Seleccionar imagen
+                      </span>
+                      <Input id="logo-upload" type="file" accept="image/*" onChange={handleLogoUpload} disabled={uploading} className="hidden" />
+                    </Label>
+                  </div>
+                )}
+                {uploading && (
+                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <i className="fa-solid fa-spinner fa-spin" /> Subiendo...
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </section>
 
-      {/* ── Logo ── */}
-      <div className="pos-card p-6 space-y-4">
-        <h3 className="font-bold text-foreground"><i className="fa-solid fa-image mr-2 text-secondary" />Logo del negocio</h3>
-        <div className="space-y-3">
-          {form.logo_url && (
-            <div className="flex justify-center">
-              <img src={form.logo_url} alt="Logo" className="max-h-32 object-contain rounded-lg border border-border p-2 bg-white" />
-            </div>
-          )}
-          <div>
-            <label className="text-xs font-semibold text-foreground mb-1 block">Subir logo (máx 2MB)</label>
-            <input
-              type="file" accept="image/*" onChange={handleLogoUpload} disabled={uploading}
-              className="input-touch file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-accent file:text-accent-foreground hover:file:opacity-90"
-            />
-          </div>
-        </div>
-      </div>
+          {/* ══════ Ticket ══════ */}
+          <section id="ticket" ref={(el) => { sectionRefs.current["ticket"] = el; }} className="scroll-mt-20">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-rose-100 flex items-center justify-center">
+                    <i className="fa-solid fa-receipt text-rose-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Configuración de ticket</CardTitle>
+                    <CardDescription>Personaliza el contenido y formato del ticket de venta</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="receipt_footer">Mensaje de despedida</Label>
+                  <Textarea id="receipt_footer" value={form.receipt_footer} onChange={(e) => setFormField("receipt_footer", e.target.value)} placeholder="Gracias por su visita" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="printer_width">Ancho de impresora (mm)</Label>
+                  <Select value={form.printer_width_mm} onValueChange={(v) => setFormField("printer_width_mm", v)}>
+                    <SelectTrigger id="printer_width" className="w-full sm:w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="58">58mm (Pequeña)</SelectItem>
+                      <SelectItem value="80">80mm (Estándar)</SelectItem>
+                      <SelectItem value="110">110mm (Grande)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between p-4 rounded-xl bg-background border border-border hover:border-rose-200 transition-colors">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold">Imprimir doble ticket</Label>
+                    <p className="text-xs text-muted-foreground">Genera una copia para el negocio y otra para el cliente.</p>
+                  </div>
+                  <Switch
+                    checked={form.double_print_ticket}
+                    onCheckedChange={(v) => setFormField("double_print_ticket", v)}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </section>
 
-      {/* ── Ticket ── */}
-      <div className="pos-card p-6 space-y-4">
-        <h3 className="font-bold text-foreground"><i className="fa-solid fa-receipt mr-2 text-secondary" />Configuración de ticket</h3>
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs font-semibold text-foreground mb-1 block">Mensaje de despedida</label>
-            <textarea value={form.receipt_footer} onChange={(e) => setForm({ ...form, receipt_footer: e.target.value })} className="input-touch min-h-[80px]" placeholder="Gracias por su visita" />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-foreground mb-1 block">Ancho de impresora (mm)</label>
-            <select value={form.printer_width_mm} onChange={(e) => setForm({ ...form, printer_width_mm: e.target.value })} className="input-touch">
-              <option value="58">58mm (Pequeña)</option>
-              <option value="80">80mm (Estándar)</option>
-              <option value="110">110mm (Grande)</option>
-            </select>
-          </div>
-          <div className="flex items-center justify-between p-3 rounded-xl bg-accent/5 border border-accent/10">
-            <div className="space-y-0.5">
-              <label className="text-sm font-semibold text-foreground block">Imprimir doble ticket</label>
-              <p className="text-xs text-muted-foreground">Genera una copia para el negocio y otra para el cliente.</p>
-            </div>
-            <button
-              onClick={() => setForm({ ...form, double_print_ticket: !form.double_print_ticket })}
-              className={`w-12 h-6 rounded-full transition-colors relative ${form.double_print_ticket ? 'bg-secondary' : 'bg-muted'}`}
-            >
-              <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${form.double_print_ticket ? 'translate-x-6' : ''}`} />
-            </button>
-          </div>
-        </div>
-      </div>
+          {/* ══════ QR ══════ */}
+          <section id="qr" ref={(el) => { sectionRefs.current["qr"] = el; }} className="scroll-mt-20">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center">
+                    <i className="fa-solid fa-qrcode text-indigo-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Código QR del ticket</CardTitle>
+                    <CardDescription>
+                      Sube una imagen de código QR que aparecerá al final de cada ticket impreso.
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {form.qr_image_url ? (
+                  <div className="flex flex-col items-center gap-3 p-4 rounded-xl bg-background border border-border">
+                    <img src={form.qr_image_url} alt="QR" className="max-h-28 object-contain rounded-lg border border-border p-2 bg-white" />
+                    <Button variant="destructive" size="sm" onClick={() => setFormField("qr_image_url", "")} className="gap-1.5">
+                      <i className="fa-solid fa-trash-can" /> Quitar QR
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-8 rounded-xl bg-background border-2 border-dashed border-border">
+                    <i className="fa-solid fa-qrcode text-3xl text-muted-foreground/40 mb-2" />
+                    <p className="text-sm text-muted-foreground mb-3">Sube una imagen QR (máx 2MB)</p>
+                    <Label htmlFor="qr-upload" className="cursor-pointer">
+                      <span className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-accent-foreground text-sm font-medium hover:opacity-90 transition-opacity">
+                        <i className="fa-solid fa-upload" /> Seleccionar imagen
+                      </span>
+                      <Input id="qr-upload" type="file" accept="image/*" onChange={handleQrUpload} disabled={uploadingQr} className="hidden" />
+                    </Label>
+                  </div>
+                )}
+                {uploadingQr && (
+                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <i className="fa-solid fa-spinner fa-spin" /> Subiendo...
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="qr_text">Texto debajo del QR</Label>
+                  <Input id="qr_text" value={form.qr_text} onChange={(e) => setFormField("qr_text", e.target.value)} placeholder="Tu opinión es importante para nosotros" />
+                </div>
+              </CardContent>
+            </Card>
+          </section>
 
-      {/* ── Código QR del ticket ── */}
-      <div className="pos-card p-6 space-y-4">
-        <h3 className="font-bold text-foreground"><i className="fa-solid fa-qrcode mr-2 text-secondary" />Código QR del ticket</h3>
-        <p className="text-xs text-muted-foreground">Sube una imagen de código QR que aparecerá al final de cada ticket impreso. Ideal para encuestas de satisfacción o redes sociales.</p>
-        <div className="space-y-3">
-          {form.qr_image_url && (
-            <div className="flex flex-col items-center gap-2">
-              <img src={form.qr_image_url} alt="QR" className="max-h-32 object-contain rounded-lg border border-border p-2 bg-white" />
-              <button
-                onClick={() => setForm({ ...form, qr_image_url: "" })}
-                className="text-xs text-destructive hover:underline flex items-center gap-1"
-              >
-                <i className="fa-solid fa-trash-can" />Quitar QR
-              </button>
-            </div>
-          )}
-          <div>
-            <label className="text-xs font-semibold text-foreground mb-1 block">Subir imagen QR (máx 2MB)</label>
-            <input
-              type="file" accept="image/*" onChange={handleQrUpload} disabled={uploadingQr}
-              className="input-touch file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-accent file:text-accent-foreground hover:file:opacity-90"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-foreground mb-1 block">Texto debajo del QR</label>
-            <input value={form.qr_text} onChange={(e) => setForm({ ...form, qr_text: e.target.value })} className="input-touch" placeholder="Tu opinión es importante para nosotros" />
-          </div>
-        </div>
-      </div>
+          {/* ══════ WhatsApp ══════ */}
+          <section id="whatsapp" ref={(el) => { sectionRefs.current["whatsapp"] = el; }} className="scroll-mt-20">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-[#25D366]/15 flex items-center justify-center">
+                    <i className="fa-brands fa-whatsapp text-[#25D366]" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Mensaje de WhatsApp</CardTitle>
+                    <CardDescription>
+                      Personaliza el contenido del mensaje que se envía por WhatsApp al cliente después de cada venta.
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-4 rounded-xl bg-[#25D366]/5 border border-[#25D366]/15 hover:border-[#25D366]/30 transition-colors">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold">Incluir sección de opinión</Label>
+                    <p className="text-xs text-muted-foreground">Agrega un enlace de encuesta/recomendación al final del mensaje.</p>
+                  </div>
+                  <Switch
+                    checked={form.whatsapp_feedback_enabled}
+                    onCheckedChange={(v) => setFormField("whatsapp_feedback_enabled", v)}
+                  />
+                </div>
 
-      {/* ── Mensaje de WhatsApp ── */}
-      <div className="pos-card p-6 space-y-4">
-        <h3 className="font-bold text-foreground"><i className="fa-brands fa-whatsapp mr-2 text-[#25D366]" />Mensaje de WhatsApp</h3>
-        <p className="text-xs text-muted-foreground">Personaliza el contenido del mensaje que se envía por WhatsApp al cliente después de cada venta.</p>
-        <div className="space-y-3">
-          {/* Toggle activar/desactivar sección feedback */}
-          <div className="flex items-center justify-between p-3 rounded-xl bg-[#25D366]/5 border border-[#25D366]/10">
-            <div className="space-y-0.5">
-              <label className="text-sm font-semibold text-foreground block">Incluir sección de opinión</label>
-              <p className="text-xs text-muted-foreground">Agrega un enlace de encuesta/recomendación al final del mensaje.</p>
-            </div>
-            <button
-              onClick={() => setForm({ ...form, whatsapp_feedback_enabled: !form.whatsapp_feedback_enabled })}
-              className={`w-12 h-6 rounded-full transition-colors relative ${form.whatsapp_feedback_enabled ? 'bg-[#25D366]' : 'bg-muted'}`}
-            >
-              <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${form.whatsapp_feedback_enabled ? 'translate-x-6' : ''}`} />
-            </button>
-          </div>
+                <div className="space-y-2">
+                  <Label htmlFor="whatsapp_greeting">Mensaje de despedida (WhatsApp)</Label>
+                  <Input id="whatsapp_greeting" value={form.whatsapp_greeting} onChange={(e) => setFormField("whatsapp_greeting", e.target.value)} placeholder="¡Gracias por su visita!" />
+                  <p className="text-[10px] text-muted-foreground">Aparece antes de la sección de opinión. Ej: "¡Gracias por su visita!"</p>
+                </div>
 
-          <div>
-            <label className="text-xs font-semibold text-foreground mb-1 block">Mensaje de despedida (WhatsApp)</label>
-            <input value={form.whatsapp_greeting} onChange={(e) => setForm({ ...form, whatsapp_greeting: e.target.value })} className="input-touch" placeholder="¡Gracias por su visita!" />
-            <p className="text-[10px] text-muted-foreground mt-1">Aparece antes de la sección de opinión. Ej: "¡Gracias por su visita!"</p>
-          </div>
+                {form.whatsapp_feedback_enabled && (
+                  <div className="space-y-4 animate-fade-in">
+                    <Separator />
+                    <div className="space-y-2">
+                      <Label htmlFor="whatsapp_feedback_text">Título de la sección</Label>
+                      <Input id="whatsapp_feedback_text" value={form.whatsapp_feedback_text} onChange={(e) => setFormField("whatsapp_feedback_text", e.target.value)} placeholder="Tu opinión es importante para nosotros" />
+                      <p className="text-[10px] text-muted-foreground">Ej: "Tu opinión es importante para nosotros"</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="whatsapp_link_label">Texto antes del enlace</Label>
+                      <Input id="whatsapp_link_label" value={form.whatsapp_link_label} onChange={(e) => setFormField("whatsapp_link_label", e.target.value)} placeholder="Dejanos tu recomendación aquí:" />
+                      <p className="text-[10px] text-muted-foreground">Ej: "Dejanos tu recomendación aquí:"</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="whatsapp_feedback_link">Enlace (URL)</Label>
+                      <Input id="whatsapp_feedback_link" value={form.whatsapp_feedback_link} onChange={(e) => setFormField("whatsapp_feedback_link", e.target.value)} placeholder="https://forms.gle/..." />
+                      <p className="text-[10px] text-muted-foreground">Puede ser un formulario de Google, encuesta, etc.</p>
+                    </div>
+                  </div>
+                )}
 
-          {form.whatsapp_feedback_enabled && (
-            <>
-              <div>
-                <label className="text-xs font-semibold text-foreground mb-1 block">Título de la sección ⭐</label>
-                <input value={form.whatsapp_feedback_text} onChange={(e) => setForm({ ...form, whatsapp_feedback_text: e.target.value })} className="input-touch" placeholder="Tu opinión es importante para nosotros" />
-                <p className="text-[10px] text-muted-foreground mt-1">Ej: "Tu opinión es importante para nosotros"</p>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-foreground mb-1 block">Texto antes del enlace 📝</label>
-                <input value={form.whatsapp_link_label} onChange={(e) => setForm({ ...form, whatsapp_link_label: e.target.value })} className="input-touch" placeholder="Dejanos tu recomendación aquí:" />
-                <p className="text-[10px] text-muted-foreground mt-1">Ej: "Dejanos tu recomendación aquí:"</p>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-foreground mb-1 block">Enlace (URL) 👉</label>
-                <input value={form.whatsapp_feedback_link} onChange={(e) => setForm({ ...form, whatsapp_feedback_link: e.target.value })} className="input-touch" placeholder="https://forms.gle/..." />
-                <p className="text-[10px] text-muted-foreground mt-1">Puede ser un formulario de Google, encuesta, etc.</p>
-              </div>
-            </>
-          )}
+                {/* Preview */}
+                <div className="bg-[#E5DDD5] rounded-xl p-4 border border-[#25D366]/20">
+                  <p className="text-[10px] text-muted-foreground mb-2 font-semibold flex items-center gap-1">
+                    <i className="fa-solid fa-eye" /> Vista previa del final del mensaje:
+                  </p>
+                  <div className="bg-white rounded-lg p-3 shadow-sm text-xs space-y-1 font-mono">
+                    <p>🙏 <em>{form.whatsapp_greeting || "¡Gracias por su visita!"}</em></p>
+                    {form.whatsapp_feedback_enabled && (
+                      <>
+                        <p className="pt-1" />
+                        <p>⭐ <strong>{form.whatsapp_feedback_text || "Tu opinión es importante"}</strong> ⭐</p>
+                        <p>📝 {form.whatsapp_link_label || "Dejanos tu recomendación aquí:"}</p>
+                        <p className="text-blue-600">👉 {form.whatsapp_feedback_link || "https://..."}</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
 
-          {/* Preview */}
-          <div className="bg-[#E5DDD5] rounded-xl p-4 border border-[#25D366]/20">
-            <p className="text-[10px] text-muted-foreground mb-2 font-semibold"><i className="fa-solid fa-eye mr-1" />Vista previa del final del mensaje:</p>
-            <div className="bg-white rounded-lg p-3 shadow-sm text-xs space-y-1 font-mono">
-              <p>🙏 <em>{form.whatsapp_greeting || "¡Gracias por su visita!"}</em></p>
-              {form.whatsapp_feedback_enabled && (
-                <>
-                  <p></p>
-                  <p>⭐ <strong>{form.whatsapp_feedback_text || "Tu opinión es importante"}</strong> ⭐</p>
-                  <p>📝 {form.whatsapp_link_label || "Dejanos tu recomendación aquí:"}</p>
-                  <p className="text-blue-600">👉 {form.whatsapp_feedback_link || "https://..."}</p>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+          {/* ══════ Tasa de cambio ══════ */}
+          <section id="exchange" ref={(el) => { sectionRefs.current["exchange"] = el; }} className="scroll-mt-20">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-yellow-100 flex items-center justify-center">
+                    <i className="fa-solid fa-coins text-yellow-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Tasa de cambio</CardTitle>
+                    <CardDescription>Configura el tipo de cambio actual USD / Córdobas</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  <Label htmlFor="exchange_rate">1 USD = ? C$</Label>
+                  <div className="relative max-w-xs">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-muted-foreground">C$</span>
+                    <Input
+                      id="exchange_rate"
+                      type="number"
+                      value={form.exchange_rate}
+                      min="0"
+                      step="0.0001"
+                      onChange={(e) => setFormField("exchange_rate", e.target.value)}
+                      className="text-2xl font-bold text-right pl-12 pr-4 h-14"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-lg font-bold text-muted-foreground">USD</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Tasa de cambio actual para conversiones en el POS</p>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
 
-      {/* ── Tasa de cambio ── */}
-      <div className="pos-card p-6 space-y-4">
-        <h3 className="font-bold text-foreground"><i className="fa-solid fa-coins mr-2 text-secondary" />Tasa de cambio</h3>
-        <div>
-          <label className="text-xs font-semibold text-foreground mb-1 block">1 USD = ? C$</label>
-          <input type="number" value={form.exchange_rate} min="0" step="0.0001" onChange={(e) => setForm({ ...form, exchange_rate: e.target.value })} className="input-touch text-2xl font-bold text-center max-w-xs" />
-        </div>
-      </div>
-
-      {/* ── Caja / POS ── */}
-      <div className="pos-card p-6 space-y-4">
-        <h3 className="font-bold text-foreground">
-          <i className="fa-solid fa-vault mr-2 text-secondary" />Caja / POS
-        </h3>
-        <p className="text-xs text-muted-foreground">
-          Configura el comportamiento del módulo de cierre de caja según el rol del usuario.
-        </p>
-        <div className="flex items-center justify-between p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700/40">
-          <div className="space-y-1 pr-4">
-            <label className="text-sm font-semibold text-foreground block">
-              Mostrar montos esperados durante el cierre de caja al cajero
-            </label>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Permite decidir si los usuarios con rol <strong>Cajero</strong> pueden visualizar los montos
-              que el sistema espera al momento de realizar el cierre de caja.
-              Esta opción no afecta a Supervisores ni Administradores, quienes siempre podrán ver toda la información.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setForm({ ...form, show_expected_cash_to_cashier: !form.show_expected_cash_to_cashier })}
-            className={`shrink-0 w-12 h-6 rounded-full transition-colors relative ${
-              form.show_expected_cash_to_cashier ? 'bg-emerald-500' : 'bg-muted'
-            }`}
-          >
-            <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
-              form.show_expected_cash_to_cashier ? 'translate-x-6' : ''
-            }`} />
-          </button>
-        </div>
-        <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-          <i className="fa-solid fa-circle-info text-primary" />
-          Estado actual: {form.show_expected_cash_to_cashier
-            ? <span className="text-emerald-600 font-semibold">Activado — el cajero puede ver los montos esperados</span>
-            : <span className="text-amber-600 font-semibold">Desactivado — el cajero solo ingresa su conteo; el sistema compara al finalizar</span>
-          }
-        </p>
-      </div>
-
-      <button onClick={handleSave} disabled={updateSettings.isPending || uploading} className="btn-cobrar flex items-center gap-2">
-        {updateSettings.isPending ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-floppy-disk" />}
-        Guardar configuración
-      </button>
-
-      {/* ── Exportar datos ── */}
-      <div className="pos-card p-6 space-y-4">
-        <h3 className="font-bold text-foreground"><i className="fa-solid fa-file-arrow-down mr-2 text-secondary" />Exportar datos</h3>
-        <p className="text-xs text-muted-foreground">Descarga los registros en formato CSV para análisis externo o respaldo.</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <button
-            onClick={() => exportCSV("tickets")}
-            className="touch-btn flex items-center gap-3 px-4 py-3 rounded-xl border border-border text-foreground hover:bg-muted/50 transition-colors font-medium"
-          >
-            <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0">
-              <i className="fa-solid fa-file-csv text-accent" />
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-semibold">Exportar Tickets</p>
-              <p className="text-xs text-muted-foreground">Historial de ventas en CSV</p>
-            </div>
-          </button>
-          <button
-            onClick={() => exportCSV("customers")}
-            className="touch-btn flex items-center gap-3 px-4 py-3 rounded-xl border border-border text-foreground hover:bg-muted/50 transition-colors font-medium"
-          >
-            <div className="w-9 h-9 rounded-lg bg-secondary/10 flex items-center justify-center flex-shrink-0">
-              <i className="fa-solid fa-users text-secondary" />
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-semibold">Exportar Clientes</p>
-              <p className="text-xs text-muted-foreground">Base de clientes en CSV</p>
-            </div>
-          </button>
-          <button
-            onClick={exportFullDatabaseSQL}
-            className="touch-btn flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-accent/30 text-foreground hover:bg-accent/5 transition-all font-medium sm:col-span-2"
-          >
-            <div className="w-9 h-9 rounded-lg bg-accent/20 flex items-center justify-center flex-shrink-0">
-              <i className="fa-solid fa-database text-accent" />
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-bold">Generar Respaldo Completo (SQL)</p>
-              <p className="text-xs text-muted-foreground">Descarga toda la base de datos lista para restaurar</p>
-            </div>
-          </button>
-        </div>
-      </div>
-
-      {/* ── Zona de peligro ── */}
-      <div className="rounded-2xl border-2 border-destructive/30 overflow-hidden">
-        <div className="bg-destructive/5 px-6 py-4 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-destructive/10 flex items-center justify-center">
-              <i className="fa-solid fa-skull-crossbones text-destructive" />
-            </div>
-            <div>
-              <h3 className="font-bold text-destructive">Zona de peligro</h3>
-              <p className="text-xs text-muted-foreground">Acciones irreversibles. Úsalas con precaución.</p>
-            </div>
-          </div>
-          <button
-            onClick={loadStats}
-            disabled={loadingStats}
-            className="touch-btn text-xs px-3 py-2 rounded-lg border border-border text-muted-foreground hover:bg-muted/50 flex items-center gap-2"
-          >
-            {loadingStats ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-rotate" />}
-            Ver estadísticas
-          </button>
-        </div>
-
-        {/* Stats bar */}
-        {stats && (
-          <div className="grid grid-cols-3 divide-x divide-border border-b border-destructive/20 bg-destructive/5">
-            {[
-              { label: "Tickets", value: stats.tickets, icon: "fa-receipt" },
-              { label: "Clientes", value: stats.customers, icon: "fa-users" },
-              { label: "Cierres de caja", value: stats.closures, icon: "fa-vault" },
-            ].map(({ label, value, icon }) => (
-              <div key={label} className="px-4 py-3 text-center">
-                <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                  <i className={`fa-solid ${icon}`} />{label}
+          {/* ══════ Caja / POS ══════ */}
+          <section id="cashpos" ref={(el) => { sectionRefs.current["cashpos"] = el; }} className="scroll-mt-20">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center">
+                    <i className="fa-solid fa-vault text-emerald-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Caja / POS</CardTitle>
+                    <CardDescription>
+                      Configura el comportamiento del módulo de cierre de caja según el rol del usuario.
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-start justify-between p-4 rounded-xl bg-emerald-50 border border-emerald-200">
+                  <div className="space-y-1 pr-4 flex-1">
+                    <Label className="text-sm font-semibold text-foreground">
+                      Mostrar montos esperados al cajero
+                    </Label>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Permite decidir si los usuarios con rol <strong>Cajero</strong> pueden visualizar los montos
+                      que el sistema espera al momento de realizar el cierre de caja.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.show_expected_cash_to_cashier}
+                    onCheckedChange={(v) => setFormField("show_expected_cash_to_cashier", v)}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <i className="fa-solid fa-circle-info text-primary" />
+                  {form.show_expected_cash_to_cashier ? (
+                    <span className="text-emerald-600 font-semibold">Activado — el cajero puede ver los montos esperados</span>
+                  ) : (
+                    <span className="text-amber-600 font-semibold">Desactivado — el cajero solo ingresa su conteo; el sistema compara al finalizar</span>
+                  )}
                 </p>
-                <p className="text-xl font-bold text-foreground">{value.toLocaleString()}</p>
-              </div>
-            ))}
-          </div>
-        )}
+              </CardContent>
+            </Card>
+          </section>
 
-        <div className="p-6 space-y-3">
-          {/* Delete tickets by range */}
-          <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-background border border-border hover:border-destructive/30 transition-colors">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
-                <i className="fa-solid fa-calendar-xmark text-orange-500" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">Borrar tickets por rango de fechas</p>
-                <p className="text-xs text-muted-foreground">Elimina tickets pagados en un período específico</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setDangerModal("tickets_range")}
-              className="touch-btn flex-shrink-0 px-4 py-2 rounded-xl bg-orange-500/10 text-orange-600 font-semibold text-sm hover:bg-orange-500/20 transition-colors"
-            >
-              <i className="fa-solid fa-trash-can mr-2" />Borrar
-            </button>
-          </div>
+          {/* ── Save button ── */}
+          <Button
+            onClick={handleSave}
+            disabled={updateSettings.isPending || uploading || uploadingQr}
+            size="lg"
+            className="w-full sm:w-auto text-base gap-2 h-12 px-8"
+          >
+            {updateSettings.isPending ? (
+              <i className="fa-solid fa-spinner fa-spin" />
+            ) : (
+              <i className="fa-solid fa-floppy-disk" />
+            )}
+            Guardar configuración
+          </Button>
 
-          {/* Delete all tickets */}
-          <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-background border border-border hover:border-destructive/30 transition-colors">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                <i className="fa-solid fa-file-circle-xmark text-destructive" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">Borrar todos los tickets / reportes</p>
-                <p className="text-xs text-muted-foreground">Elimina permanentemente todo el historial de ventas</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setDangerModal("tickets")}
-              className="touch-btn flex-shrink-0 px-4 py-2 rounded-xl bg-destructive/10 text-destructive font-semibold text-sm hover:bg-destructive/20 transition-colors"
-            >
-              <i className="fa-solid fa-trash-can mr-2" />Borrar
-            </button>
-          </div>
+          {/* ══════ Exportar datos ══════ */}
+          <section id="export" ref={(el) => { sectionRefs.current["export"] = el; }} className="scroll-mt-20">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-cyan-100 flex items-center justify-center">
+                    <i className="fa-solid fa-file-arrow-down text-cyan-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Exportar datos</CardTitle>
+                    <CardDescription>Descarga los registros en formato CSV o respaldo SQL completo</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Button variant="outline" onClick={() => exportCSV("tickets")} className="justify-start h-auto py-4 px-4 gap-4">
+                    <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0">
+                      <i className="fa-solid fa-file-csv text-accent" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-sm font-semibold">Exportar Tickets</p>
+                      <p className="text-xs text-muted-foreground">Historial de ventas en CSV</p>
+                    </div>
+                  </Button>
+                  <Button variant="outline" onClick={() => exportCSV("customers")} className="justify-start h-auto py-4 px-4 gap-4">
+                    <div className="w-9 h-9 rounded-lg bg-secondary/10 flex items-center justify-center flex-shrink-0">
+                      <i className="fa-solid fa-users text-secondary" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-sm font-semibold">Exportar Clientes</p>
+                      <p className="text-xs text-muted-foreground">Base de clientes en CSV</p>
+                    </div>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={exportFullDatabaseSQL}
+                    className="justify-start h-auto py-4 px-4 gap-4 sm:col-span-2 border-2 border-accent/30 hover:bg-accent/5"
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-accent/20 flex items-center justify-center flex-shrink-0">
+                      <i className="fa-solid fa-database text-accent" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-sm font-bold">Generar Respaldo Completo (SQL)</p>
+                      <p className="text-xs text-muted-foreground">Descarga toda la base de datos lista para restaurar</p>
+                    </div>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
 
-          {/* Delete inactive customers */}
-          <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-background border border-border hover:border-destructive/30 transition-colors">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                <i className="fa-solid fa-user-slash text-destructive" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">Borrar clientes sin actividad</p>
-                <p className="text-xs text-muted-foreground">Elimina clientes que no tienen ningún ticket registrado</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setDangerModal("customers_inactive")}
-              className="touch-btn flex-shrink-0 px-4 py-2 rounded-xl bg-destructive/10 text-destructive font-semibold text-sm hover:bg-destructive/20 transition-colors"
-            >
-              <i className="fa-solid fa-trash-can mr-2" />Borrar
-            </button>
-          </div>
+          {/* ══════ Zona de peligro ══════ */}
+          <section id="danger" ref={(el) => { sectionRefs.current["danger"] = el; }} className="scroll-mt-20">
+            <Card className="border-2 border-destructive/30 overflow-hidden">
+              <CardHeader className="bg-destructive/5">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-destructive/10 flex items-center justify-center">
+                      <i className="fa-solid fa-skull-crossbones text-destructive" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg text-destructive">Zona de peligro</CardTitle>
+                      <CardDescription>Acciones irreversibles. Úsalas con precaución.</CardDescription>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={loadStats}
+                    disabled={loadingStats}
+                    className="gap-1.5"
+                  >
+                    {loadingStats ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-rotate" />}
+                    Ver estadísticas
+                  </Button>
+                </div>
+              </CardHeader>
 
-          {/* Delete cash closures */}
-          <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-background border border-border hover:border-destructive/30 transition-colors">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                <i className="fa-solid fa-vault text-destructive" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">Borrar cierres de caja</p>
-                <p className="text-xs text-muted-foreground">Elimina todo el historial de cierres de turno</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setDangerModal("cash_closures")}
-              className="touch-btn flex-shrink-0 px-4 py-2 rounded-xl bg-destructive/10 text-destructive font-semibold text-sm hover:bg-destructive/20 transition-colors"
-            >
-              <i className="fa-solid fa-trash-can mr-2" />Borrar
-            </button>
-          </div>
+              {/* Stats bar */}
+              {stats && (
+                <div className="grid grid-cols-3 divide-x divide-border border-b border-destructive/20 bg-destructive/5">
+                  {[
+                    { label: "Tickets", value: stats.tickets, icon: "fa-receipt" },
+                    { label: "Clientes", value: stats.customers, icon: "fa-users" },
+                    { label: "Cierres de caja", value: stats.closures, icon: "fa-vault" },
+                  ].map(({ label, value, icon }) => (
+                    <div key={label} className="px-4 py-3 text-center">
+                      <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
+                        <i className={`fa-solid ${icon}`} />{label}
+                      </p>
+                      <p className="text-xl font-bold text-foreground">{value.toLocaleString()}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-          {/* Delete ALL data */}
-          <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-destructive/5 border-2 border-destructive/40 hover:border-destructive/60 transition-colors">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-destructive/20 flex items-center justify-center flex-shrink-0">
-                <i className="fa-solid fa-bomb text-destructive" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-destructive">Borrar TODOS los datos</p>
-                <p className="text-xs text-muted-foreground">Tickets, clientes y cierres de caja. Acción nuclear.</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setDangerModal("all_data")}
-              className="touch-btn flex-shrink-0 px-4 py-2 rounded-xl bg-destructive text-white font-bold text-sm hover:bg-red-600 transition-colors"
-            >
-              <i className="fa-solid fa-bomb mr-2" />Borrar todo
-            </button>
-          </div>
-        </div>
+              <CardContent className="space-y-3 pt-4">
+                {/* Delete tickets by range */}
+                <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-background border border-border hover:border-orange-300 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
+                      <i className="fa-solid fa-calendar-xmark text-orange-500" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">Borrar tickets por rango de fechas</p>
+                      <p className="text-xs text-muted-foreground">Elimina tickets pagados en un período específico</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDangerModal("tickets_range")}
+                    className="shrink-0 text-orange-600 border-orange-300 hover:bg-orange-50 gap-1.5"
+                  >
+                    <i className="fa-solid fa-trash-can" /> Borrar
+                  </Button>
+                </div>
+
+                {/* Delete all tickets */}
+                <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-background border border-border hover:border-destructive/30 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                      <i className="fa-solid fa-file-circle-xmark text-destructive" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">Borrar todos los tickets / reportes</p>
+                      <p className="text-xs text-muted-foreground">Elimina permanentemente todo el historial de ventas</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDangerModal("tickets")}
+                    className="shrink-0 text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5"
+                  >
+                    <i className="fa-solid fa-trash-can" /> Borrar
+                  </Button>
+                </div>
+
+                {/* Delete inactive customers */}
+                <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-background border border-border hover:border-destructive/30 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                      <i className="fa-solid fa-user-slash text-destructive" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">Borrar clientes sin actividad</p>
+                      <p className="text-xs text-muted-foreground">Elimina clientes que no tienen ningún ticket registrado</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDangerModal("customers_inactive")}
+                    className="shrink-0 text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5"
+                  >
+                    <i className="fa-solid fa-trash-can" /> Borrar
+                  </Button>
+                </div>
+
+                {/* Delete cash closures */}
+                <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-background border border-border hover:border-destructive/30 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                      <i className="fa-solid fa-vault text-destructive" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">Borrar cierres de caja</p>
+                      <p className="text-xs text-muted-foreground">Elimina todo el historial de cierres de turno</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDangerModal("cash_closures")}
+                    className="shrink-0 text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5"
+                  >
+                    <i className="fa-solid fa-trash-can" /> Borrar
+                  </Button>
+                </div>
+
+                {/* Delete ALL data */}
+                <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-destructive/5 border-2 border-destructive/40 hover:border-destructive/60 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-destructive/20 flex items-center justify-center flex-shrink-0">
+                      <i className="fa-solid fa-bomb text-destructive" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-destructive">Borrar TODOS los datos</p>
+                      <p className="text-xs text-muted-foreground">Tickets, clientes y cierres de caja. Acción nuclear.</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setDangerModal("all_data")}
+                    className="shrink-0 gap-1.5"
+                  >
+                    <i className="fa-solid fa-bomb" /> Borrar todo
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          {/* Bottom spacer */}
+          <div className="h-8" />
+        </main>
       </div>
 
-      {/* ── Toast ── */}
-      {toast && (
-        <div className={toast.type === "error" ? "toast-error" : "toast-success"}>
-          <i className={`fa-solid ${toast.type === "error" ? "fa-circle-exclamation" : "fa-circle-check"} mr-2`} />
-          {toast.msg}
-        </div>
-      )}
+      {/* ── Edit User Dialog ── */}
+      <Dialog open={editDialogOpen} onOpenChange={(open) => { if (!open) cancelEdit(); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <i className="fa-solid fa-pen text-blue-500" />
+              Editar permisos de usuario
+            </DialogTitle>
+            <DialogDescription>
+              Cambia el rol y personaliza el acceso a módulos del sistema.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 py-2">
+            {/* Role selector */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Rol del usuario</Label>
+              <Select value={editRole} onValueChange={setEditRole}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-primary" />
+                      Administrador
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="owner">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-amber-500" />
+                      Propietario
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="manager">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-500" />
+                      Gerente
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="cajero">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      Cajero
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="operator">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-slate-400" />
+                      Operador
+                    </span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Separator />
+
+            {/* Module access overrides */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold">Acceso a módulos</Label>
+                {Object.keys(editOverrides).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setEditOverrides({})}
+                    className="text-[11px] text-muted-foreground hover:text-destructive flex items-center gap-1"
+                  >
+                    <i className="fa-solid fa-rotate-left" /> Restablecer
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Los interruptores en azul indican acceso forzado (sobrescribe el valor por defecto del rol).
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {getModuleAccess(editRole).map((m) => {
+                  const overrideVal = editOverrides[m.key];
+                  const hasOverride = overrideVal !== undefined;
+                  const isForced = hasOverride && overrideVal !== m.access;
+                  return (
+                    <div
+                      key={m.key}
+                      className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                        isForced ? "bg-blue-50 border-blue-200" : "bg-background border-border"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                          isForced ? "bg-blue-100" : m.access ? "bg-green-50" : "bg-muted/30"
+                        }`}>
+                          <i className={`fa-solid ${m.icon} text-xs ${
+                            isForced ? "text-blue-600" : m.access ? "text-green-600" : "text-muted-foreground/50"
+                          }`} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">{m.label}</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {hasOverride
+                              ? overrideVal ? "Acceso forzado" : "Acceso bloqueado"
+                              : m.access ? "Acceso por defecto" : "Sin acceso"}
+                          </p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={hasOverride ? overrideVal : m.access}
+                        onCheckedChange={(checked) => {
+                          if (!hasOverride && checked === m.access) return;
+                          setEditOverrides((prev) => {
+                            const next = { ...prev };
+                            if (checked === m.access) delete next[m.key];
+                            else next[m.key] = checked;
+                            return next;
+                          });
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={cancelEdit}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => editingUserId && handleUpdateRole(editingUserId)}
+              disabled={savingRole}
+              className="gap-2"
+            >
+              {savingRole ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-check" />}
+              Guardar cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Deactivate User Confirmation ── */}
+      <Dialog open={deactivateDialogOpen} onOpenChange={setDeactivateDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                deactivateTarget?.active ? "bg-destructive/10" : "bg-emerald-100"
+              }`}>
+                <i className={`fa-solid ${deactivateTarget?.active ? "fa-user-slash text-destructive" : "fa-user-check text-emerald-600"}`} />
+              </div>
+              {deactivateTarget?.active ? "Desactivar usuario" : "Activar usuario"}
+            </DialogTitle>
+            <DialogDescription>
+              {deactivateTarget?.active
+                ? `El usuario ${deactivateTarget?.full_name || "sin nombre"} no podrá acceder al sistema hasta que sea reactivado.`
+                : `El usuario ${deactivateTarget?.full_name || "sin nombre"} podrá acceder al sistema nuevamente.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setDeactivateDialogOpen(false); setDeactivateTarget(null); }}>
+              Cancelar
+            </Button>
+            <Button
+              variant={deactivateTarget?.active ? "destructive" : "default"}
+              onClick={handleToggleActive}
+              className="gap-2"
+            >
+              <i className={`fa-solid ${deactivateTarget?.active ? "fa-user-slash" : "fa-user-check"}`} />
+              {deactivateTarget?.active ? "Sí, desactivar" : "Sí, activar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Danger Modals ── */}
       {dangerModal === "tickets" && (
@@ -1242,13 +1679,13 @@ export default function Settings() {
           onClose={() => setDangerModal(null)}
         >
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-semibold text-foreground mb-1 block">Desde</label>
-              <input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} className="input-touch" />
+            <div className="space-y-1.5">
+              <Label>Desde</Label>
+              <Input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} />
             </div>
-            <div>
-              <label className="text-xs font-semibold text-foreground mb-1 block">Hasta</label>
-              <input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} className="input-touch" />
+            <div className="space-y-1.5">
+              <Label>Hasta</Label>
+              <Input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} />
             </div>
           </div>
         </DangerModal>
