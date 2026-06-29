@@ -395,7 +395,7 @@ export default function CashClose() {
   const userRole = profile?.role ?? "";
   const isPrivileged = userRole === "admin" || userRole === "owner";
   const settingEnabled = (settings as any)?.show_expected_cash_to_cashier ?? true;
-  const canSeeExpected = isPrivileged;
+  const canSeeExpected = isPrivileged || settingEnabled;
 
   // ── Save ───────────────────────────────────────
   const showToast = (msg: string, type: "success" | "error" = "success") => {
