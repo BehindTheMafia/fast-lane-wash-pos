@@ -585,7 +585,27 @@ export default function Settings() {
         </Tabs>
       </div>
 
-      <div className="flex gap-6">
+      {/* ── Mobile section nav (horizontal scroll) ── */}
+      <div className="lg:hidden overflow-x-auto -mx-6 px-6 mb-4 scrollbar-none">
+        <div className="flex gap-1 pb-2">
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => scrollToSection(s.id)}
+              className={`shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                activeSection === s.id
+                  ? "bg-accent text-accent-foreground"
+                  : "bg-muted/50 text-muted-foreground"
+              }`}
+            >
+              <i className={`fa-solid ${s.icon} text-[10px]`} />
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-6">
         {/* ── Section navigation sidebar ── */}
         <aside className="hidden lg:block w-56 shrink-0">
           <nav className="sticky top-6 space-y-0.5">
@@ -605,26 +625,6 @@ export default function Settings() {
             ))}
           </nav>
         </aside>
-
-        {/* ── Mobile section nav (horizontal scroll) ── */}
-        <div className="lg:hidden overflow-x-auto -mx-6 px-6 mb-2 scrollbar-none">
-          <div className="flex gap-1 pb-2">
-            {SECTIONS.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => scrollToSection(s.id)}
-                className={`shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
-                  activeSection === s.id
-                    ? "bg-accent text-accent-foreground"
-                    : "bg-muted/50 text-muted-foreground"
-                }`}
-              >
-                <i className={`fa-solid ${s.icon} text-[10px]`} />
-                {s.label}
-              </button>
-            ))}
-          </div>
-        </div>
 
         {/* ── Main content ── */}
         <main className="flex-1 min-w-0 space-y-6">

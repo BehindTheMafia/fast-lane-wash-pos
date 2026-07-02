@@ -6,6 +6,7 @@ import { useVehicleTypes } from "@/hooks/useVehicleTypes";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { niFormatDate, niFormatLongDate, niNow } from "@/utils/niDate";
 import MembershipCard from "@/components/memberships/MembershipCard";
+import MembershipAttendanceModal from "@/components/memberships/MembershipAttendanceModal";
 import MembershipRenewalModal from "@/components/memberships/MembershipRenewalModal";
 import PaymentModal from "@/components/pos/PaymentModal";
 import TicketPrint from "@/components/pos/TicketPrint";
@@ -36,12 +37,14 @@ export default function Memberships() {
   const [membershipBasePrice, setMembershipBasePrice] = useState(0);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [filter, setFilter] = useState<FilterType>('active');
+  const [membershipSearch, setMembershipSearch] = useState("");
   const [renewingMembership, setRenewingMembership] = useState<any>(null);
   const [showRenewalPayment, setShowRenewalPayment] = useState(false);
   const [renewalVehicleTypeId, setRenewalVehicleTypeId] = useState<number>(2);
   const [renewalPrice, setRenewalPrice] = useState<number>(0);
   const [editingMembership, setEditingMembership] = useState<any>(null);
   const [deletingMembership, setDeletingMembership] = useState<Membership | null>(null);
+  const [viewingAttendance, setViewingAttendance] = useState<Membership | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -570,7 +573,7 @@ export default function Memberships() {
     }
   };
 
-  // Filter memberships based on selected filter
+  // Filter memberships based on selected filter + search
   // NEVER show pending memberships as separate cards — they are embedded in the active card
   const filteredMemberships = allMemberships?.filter((m) => {
     const { status } = getMembershipWithStatus(m);
@@ -579,11 +582,24 @@ export default function Memberships() {
     if (status === 'pending') return false;
 
     if (filter === 'active') {
-      return status === 'active' || status === 'expiring_soon';
+      if (status !== 'active' && status !== 'expiring_soon') return false;
     }
     if (filter === 'expired') {
-      return status === 'expired';
+      if (status !== 'expired') return false;
     }
+
+    // Apply search filter
+    if (membershipSearch.trim()) {
+      const s = membershipSearch.toLowerCase();
+      const customerName = m.customers?.name?.toLowerCase() || "";
+      const planName = m.membership_plans?.name?.toLowerCase() || "";
+      const plate = m.customers?.plate?.toLowerCase() || "";
+      const phone = m.customers?.phone?.toLowerCase() || "";
+      if (!customerName.includes(s) && !planName.includes(s) && !plate.includes(s) && !phone.includes(s)) {
+        return false;
+      }
+    }
+
     return true;
   }) || [];
 
@@ -659,11 +675,31 @@ export default function Memberships() {
         </button>
       </div>
 
+      {/* Search */}
+      <div className="flex gap-2 max-w-sm">
+        <input
+          value={membershipSearch}
+          onChange={(e) => setMembershipSearch(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && setMembershipSearch(membershipSearch)}
+          className="input-touch flex-1"
+          placeholder="Buscar por cliente, plan, placa o teléfono..."
+        />
+        <button
+          onClick={() => setMembershipSearch(membershipSearch)}
+          className="touch-btn bg-secondary/10 text-secondary px-4 py-2 rounded-xl font-semibold flex items-center gap-2 hover:bg-secondary/20"
+        >
+          <i className="fa-solid fa-magnifying-glass" />Buscar
+        </button>
+      </div>
+
       {/* Memberships Grid */}
       <div>
         <h3 className="font-bold text-foreground mb-3">
           <i className="fa-solid fa-users mr-2 text-secondary" />
           Membresías {filter === 'all' ? '' : filter === 'active' ? 'activas' : 'expiradas'}
+          <span className="text-base font-normal text-muted-foreground ml-2">
+            ({filteredMemberships.length}{allMemberships ? ` de ${allMemberships.filter(m => { const { status } = getMembershipWithStatus(m); return status !== 'pending'; }).length}` : ''})
+          </span>
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredMemberships.map((m) => (
@@ -671,6 +707,7 @@ export default function Memberships() {
               key={m.id}
               membership={m}
               pendingRenewal={pendingByCustomer[m.customer_id]}
+              onViewDetails={setViewingAttendance}
               onRenew={(id) => {
                 const membership = allMemberships?.find((mem) => mem.id === Number(id));
                 if (membership) {
@@ -1111,6 +1148,13 @@ export default function Memberships() {
           </div>
         </div>
       </div>
+    )}
+
+    {viewingAttendance && (
+      <MembershipAttendanceModal
+        membership={viewingAttendance}
+        onClose={() => setViewingAttendance(null)}
+      />
     )}
 
     <PermissionModal

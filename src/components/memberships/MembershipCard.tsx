@@ -6,13 +6,14 @@ import { niFormatDate, niFormatTime } from "@/utils/niDate";
 interface MembershipCardProps {
     membership: Membership;
     pendingRenewal?: Membership; // The queued renewal for this customer (if any)
+    onViewDetails?: (membership: Membership) => void;
     onRenew?: (membershipId: string) => void;
     onEdit?: (membership: Membership) => void;
     onDelete?: (membership: Membership) => void;
     onCancelRenewal?: (membership: Membership) => void;
 }
 
-export default function MembershipCard({ membership, pendingRenewal, onRenew, onEdit, onDelete, onCancelRenewal }: MembershipCardProps) {
+export default function MembershipCard({ membership, pendingRenewal, onViewDetails, onRenew, onEdit, onDelete, onCancelRenewal }: MembershipCardProps) {
     const { getMembershipWithStatus } = useMemberships();
     const membershipWithStatus = getMembershipWithStatus(membership);
     const { days_remaining, status } = membershipWithStatus;
@@ -44,7 +45,10 @@ export default function MembershipCard({ membership, pendingRenewal, onRenew, on
         : '';
 
     return (
-        <div className={`pos-card p-4 ${isExpired ? 'opacity-75' : ''}`}>
+        <div
+            className={`pos-card p-4 ${isExpired ? 'opacity-75' : ''} ${onViewDetails ? 'cursor-pointer hover:ring-2 hover:ring-primary/20 transition-all' : ''}`}
+            onClick={() => onViewDetails?.(membership)}
+        >
             <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
                     <h4 className="font-bold text-foreground">
@@ -146,7 +150,7 @@ export default function MembershipCard({ membership, pendingRenewal, onRenew, on
                     </p>
                     {onCancelRenewal && (
                         <button
-                            onClick={() => onCancelRenewal(pendingRenewal)}
+                            onClick={(e) => { e.stopPropagation(); onCancelRenewal(pendingRenewal); }}
                             className="w-full mt-1 py-1.5 rounded-lg bg-red-500/10 text-red-500 text-xs font-semibold hover:bg-red-500/20 flex items-center justify-center gap-1"
                         >
                             <i className="fa-solid fa-xmark" />
@@ -166,7 +170,7 @@ export default function MembershipCard({ membership, pendingRenewal, onRenew, on
                 {/* Renew Button — only if NO pending renewal exists */}
                 {!hasPendingRenewal && onRenew && (
                     <button
-                        onClick={() => onRenew(String(membership.id))}
+                        onClick={(e) => { e.stopPropagation(); onRenew(String(membership.id)); }}
                         className={`touch-btn px-3 py-1 rounded-lg text-xs font-semibold ${
                             isExpired 
                                 ? 'bg-primary text-primary-foreground hover:bg-primary/90' 
@@ -183,7 +187,7 @@ export default function MembershipCard({ membership, pendingRenewal, onRenew, on
             <div className="flex items-center gap-2 pt-3 border-t border-border">
                 {onEdit && (
                     <button
-                        onClick={() => onEdit(membership)}
+                        onClick={(e) => { e.stopPropagation(); onEdit(membership); }}
                         className="touch-btn flex-1 py-2 rounded-lg bg-secondary/10 text-secondary text-xs font-semibold hover:bg-secondary/20 flex items-center justify-center gap-1"
                     >
                         <i className="fa-solid fa-pen-to-square" />
@@ -192,7 +196,7 @@ export default function MembershipCard({ membership, pendingRenewal, onRenew, on
                 )}
                 {onDelete && (
                     <button
-                        onClick={() => onDelete(membership)}
+                        onClick={(e) => { e.stopPropagation(); onDelete(membership); }}
                         className="touch-btn flex-1 py-2 rounded-lg bg-destructive/10 text-destructive text-xs font-semibold hover:bg-destructive/20 flex items-center justify-center gap-1"
                     >
                         <i className="fa-solid fa-trash-can" />

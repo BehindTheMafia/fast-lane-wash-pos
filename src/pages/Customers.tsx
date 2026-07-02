@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import PermissionModal from "@/components/PermissionModal";
 import CustomerFormModal from "@/components/customers/CustomerFormModal";
+import LoyaltyDetailModal from "@/components/customers/LoyaltyDetailModal";
 
 interface Customer {
   id: number;
@@ -22,14 +23,21 @@ export default function Customers() {
   const { isAdmin, isOwner, isOperator } = useAuth();
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [totalCustomers, setTotalCustomers] = useState(0);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
+  const [loyaltyDetailCustomer, setLoyaltyDetailCustomer] = useState<Customer | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const canDelete = isAdmin || isOwner || isOperator;
+
+  const loadCount = async () => {
+    const { count } = await supabase.from("customers").select("*", { count: "exact", head: true });
+    if (count !== null) setTotalCustomers(count);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -40,6 +48,7 @@ export default function Customers() {
     setLoading(false);
   };
 
+  useEffect(() => { loadCount(); }, []);
   useEffect(() => { load(); }, [search]);
 
   const handleNew = () => {
@@ -81,6 +90,7 @@ export default function Customers() {
     <div className="p-6 space-y-6 animate-fade-in">
       <h2 className="text-2xl font-bold text-foreground">
         <i className="fa-solid fa-users mr-3 text-secondary" />Clientes
+        {!loading && <span className="text-base font-normal text-muted-foreground ml-2">({totalCustomers} total)</span>}
       </h2>
 
       <div className="flex flex-wrap gap-4">
@@ -140,26 +150,31 @@ export default function Customers() {
                     <td className="p-3 text-muted-foreground">{c.email}</td>
                     <td className="p-3">
                       {!c.is_general && (
-                        <div className="flex flex-col items-center gap-1">
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className="font-semibold text-primary">{visits} servicios</span>
-                            {freeWashesAvailable > 0 && (
-                              <span className="px-2 py-0.5 rounded-full bg-accent/20 text-accent font-bold">
-                                <i className="fa-solid fa-gift mr-1" />
-                                {freeWashesAvailable} gratis
-                              </span>
-                            )}
+                        <button
+                          onClick={() => setLoyaltyDetailCustomer(c)}
+                          className="w-full text-left touch-btn"
+                        >
+                          <div className="flex flex-col items-center gap-1">
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="font-semibold text-primary">{visits} servicios</span>
+                              {freeWashesAvailable > 0 && (
+                                <span className="px-2 py-0.5 rounded-full bg-accent/20 text-accent font-bold">
+                                  <i className="fa-solid fa-gift mr-1" />
+                                  {freeWashesAvailable} gratis
+                                </span>
+                              )}
+                            </div>
+                            <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-primary to-accent transition-all duration-300"
+                                style={{ width: `${progressPercent}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-muted-foreground">
+                              {8 - progressToNextFree} servicios para pasteado gratis
+                            </span>
                           </div>
-                          <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-primary to-accent transition-all duration-300"
-                              style={{ width: `${progressPercent}%` }}
-                            />
-                          </div>
-                          <span className="text-xs text-muted-foreground">
-                            {8 - progressToNextFree} servicios para pasteado gratis
-                          </span>
-                        </div>
+                        </button>
                       )}
                     </td>
                     <td className="p-3">
@@ -240,6 +255,15 @@ export default function Customers() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Loyalty Detail Modal */}
+      {loyaltyDetailCustomer && (
+        <LoyaltyDetailModal
+          customer={loyaltyDetailCustomer}
+          onClose={() => setLoyaltyDetailCustomer(null)}
+          onUpdate={load}
+        />
       )}
 
       {/* Toast */}
