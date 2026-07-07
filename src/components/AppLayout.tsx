@@ -24,6 +24,7 @@ const navItems: NavItem[] = [
   { label: "Cierre de Caja", icon: "fa-vault", path: "/cash-close" },
   { label: "Clientes", icon: "fa-users", path: "/customers" },
   { label: "Membresías", icon: "fa-id-card", path: "/memberships", carWashOnly: true },
+  { label: "Lealtad", icon: "fa-star", path: "/loyalty", carWashOnly: true },
   { label: "Recordatorios", icon: "fa-bell", path: "/reminders", carWashOnly: true },
   { label: "Inventario", icon: "fa-boxes-stacked", path: "/inventory", adminOrOwner: true },
   { label: "Servicios", icon: "fa-list-check", path: "/services", adminOnly: true },

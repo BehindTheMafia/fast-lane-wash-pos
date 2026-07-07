@@ -386,6 +386,10 @@ export type Database = {
                     email: string | null
                     id: number
                     is_general: boolean
+                    loyalty_free_washes_earned: number
+                    loyalty_free_washes_used: number
+                    loyalty_last_visit: string | null
+                    loyalty_visits: number
                     name: string
                     phone: string | null
                     plate: string | null
@@ -395,6 +399,10 @@ export type Database = {
                     email?: string | null
                     id?: number
                     is_general?: boolean
+                    loyalty_free_washes_earned?: number
+                    loyalty_free_washes_used?: number
+                    loyalty_last_visit?: string | null
+                    loyalty_visits?: number
                     name: string
                     phone?: string | null
                     plate?: string | null
@@ -404,6 +412,10 @@ export type Database = {
                     email?: string | null
                     id?: number
                     is_general?: boolean
+                    loyalty_free_washes_earned?: number
+                    loyalty_free_washes_used?: number
+                    loyalty_last_visit?: string | null
+                    loyalty_visits?: number
                     name?: string
                     phone?: string | null
                     plate?: string | null

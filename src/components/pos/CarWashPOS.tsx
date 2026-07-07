@@ -13,6 +13,18 @@ import MembershipSelector from "@/components/pos/MembershipSelector";
 import { useMemberships } from "@/hooks/useMemberships";
 import { isServiceEligible, ELIGIBLE_SERVICE_NAMES } from "@/lib/membershipUtils";
 import { checkServiceInventory, recordServiceInventory } from "@/hooks/useCarWashInventory";
+import {
+  useAvailableRewards,
+  useRecordLoyaltyV3Wash,
+  useRedeemLoyaltyReward,
+  useValidateLoyaltyRedemption,
+  findBlockingReward,
+  REWARD_SERVICE_MAP,
+} from "@/hooks/useLoyaltyV3";
+import RewardBlockModal from "@/components/loyalty/RewardBlockModal";
+import LoyaltySelector from "@/components/pos/LoyaltySelector";
+import type { LoyaltyReward, LoyaltyTicketItem } from "@/hooks/useLoyaltyV3";
+export type { LoyaltyTicketItem } from "@/hooks/useLoyaltyV3";
 
 // Vehicle types are now loaded dynamically from DB via useVehicleTypes()
 
@@ -24,6 +36,11 @@ interface TicketItem {
   price: number;
   discountPercent: number; // Discount as percentage (0-100)
   businessLine?: "car_wash" | "barbershop";
+  // Loyalty v3 fields
+  isLoyaltyRedemption?: boolean;
+  loyaltyRewardId?: number;
+  loyaltyRewardName?: string;
+  loyaltyOriginalPrice?: number;
 }
 
 interface Customer {
@@ -42,6 +59,19 @@ export default function CarWashPOS() {
   const { data: vehicleTypes } = useVehicleTypes();
   const { data: settings } = useBusinessSettings();
   const { user } = useAuth();
+
+  // Combine normal services and extras for loyalty reward lookup
+  const allServicesAndExtras = useMemo(() => {
+    const listSvc = services ?? [];
+    const listExt = extras ?? [];
+    return [...listSvc, ...listExt];
+  }, [services, extras]);
+
+  const allServicePrices = useMemo(() => {
+    const listSvcPrices = services?.flatMap((s: any) => s.service_prices ?? []) ?? [];
+    const listExtPrices = extras?.flatMap((s: any) => s.service_prices ?? []) ?? [];
+    return [...listSvcPrices, ...listExtPrices];
+  }, [services, extras]);
 
   const [selectedVehicleId, setSelectedVehicleId] = useState<number>(0);
   const [selectedServiceId, setSelectedServiceId] = useState<number>(0);
@@ -64,12 +94,24 @@ export default function CarWashPOS() {
   const [showBarberSection, setShowBarberSection] = useState(false);
   const [showMobileCart, setShowMobileCart] = useState(false);
 
-  // Loyalty program v2 states
+  // Loyalty program v2 states (legacy — kept for backward compat, display hidden)
   const [loyaltyFreeWashes, setLoyaltyFreeWashes] = useState(0);
   const [usingLoyaltyWash, setUsingLoyaltyWash] = useState(false);
   const [loyaltyProgress, setLoyaltyProgress] = useState(0);
 
+  // Loyalty v3: reward block state
+  const [rewardBlockModal, setRewardBlockModal] = useState<{ show: boolean; rewardId: number | null; serviceName: string }>({ show: false, rewardId: null, serviceName: "" });
+  const [selectedLoyaltyReward, setSelectedLoyaltyReward] = useState<LoyaltyReward | null>(null);
+
   const { memberships, recordWash, getMembershipWithStatus } = useMemberships(customer?.id?.toString());
+
+  // Loyalty v3 hooks
+  const customerId = customer && !customer.is_general ? Number(customer.id) : null;
+  const { data: availableRewardsV3 = [] } = useAvailableRewards(customerId);
+  const recordLoyaltyV3 = useRecordLoyaltyV3Wash();
+  const redeemLoyaltyV3 = useRedeemLoyaltyReward();
+  const validateLoyaltyV3 = useValidateLoyaltyRedemption();
+  const { isAdmin, isOwner } = useAuth();
 
   // Filter active memberships with remaining washes
   const activeMemberships = memberships?.filter((m) => {
@@ -186,6 +228,51 @@ export default function CarWashPOS() {
   const totalDiscount = ticketItems.reduce((s, i) => s + (i.price * i.discountPercent / 100), 0);
   const total = subtotal - totalDiscount;
 
+  const applyRewardToTicket = (reward: LoyaltyReward) => {
+    const pattern = REWARD_SERVICE_MAP[reward.reward_slug];
+    if (!pattern || !allServicesAndExtras) {
+      showToast("Mapeo de servicio de recompensa no disponible", "error");
+      return;
+    }
+    const service = allServicesAndExtras.find((s: any) =>
+      s.name.toLowerCase().includes(pattern.toLowerCase())
+    );
+    if (!service) {
+      showToast(`No se encontró el servicio para el premio: ${pattern}`, "error");
+      return;
+    }
+
+    let price = 0;
+    const priceEntry = allServicePrices.find(
+      (p: any) => p.service_id === service.id && p.vehicle_type_id === selectedVehicleId
+    );
+    
+    if (!priceEntry) {
+      const anyPrice = allServicePrices.find((p: any) => p.service_id === service.id);
+      price = anyPrice ? Number(anyPrice.price) : 0;
+    } else {
+      price = Number(priceEntry.price);
+    }
+
+    setSelectedLoyaltyReward(reward);
+    setTicketItems(prev => [
+      ...prev.filter(i => i.serviceId !== service.id && !i.isLoyaltyRedemption),
+      {
+        serviceId: service.id,
+        serviceName: service.name,
+        vehicleTypeId: selectedVehicleId || 0,
+        vehicleLabel: vehicleTypes?.find(v => v.id === selectedVehicleId)?.name ?? "",
+        price: price,
+        discountPercent: 100,
+        isLoyaltyRedemption: true,
+        loyaltyRewardId: reward.id,
+        loyaltyRewardName: reward.reward_name,
+        loyaltyOriginalPrice: price,
+      },
+    ]);
+    showToast(`🎁 Premio aplicado: ${reward.reward_name}`);
+  };
+
   const newTicket = () => {
     setTicketItems([]);
     setSelectedServiceId(0);
@@ -193,6 +280,7 @@ export default function CarWashPOS() {
     setSelectedMembershipId(null);
     setSelectedMembership(null);
     setUsingLoyaltyWash(false);
+    setSelectedLoyaltyReward(null);
     supabase.from("customers").select("*").eq("is_general", true).maybeSingle().then(({ data }) => {
       if (data) setCustomer(data as any as Customer);
     });
@@ -276,10 +364,38 @@ export default function CarWashPOS() {
         }
       }
 
+      // Loyalty v3: server-side validation before ticket creation
+      const loyaltyRedemptionItem = homeItems.find(i => i.isLoyaltyRedemption && i.loyaltyRewardId);
+      if (loyaltyRedemptionItem && customerId) {
+        try {
+          const validation = await validateLoyaltyV3.mutateAsync({
+            rewardId: loyaltyRedemptionItem.loyaltyRewardId!,
+            customerId,
+            serviceName: loyaltyRedemptionItem.serviceName,
+          });
+          if (!validation.valid) {
+            throw new Error(
+              validation.error_msg ||
+              `Premio inválido: ${validation.error ?? 'error desconocido'}`
+            );
+          }
+        } catch (valErr: any) {
+          // If it's our validation error, propagate; if RPC not found yet, warn but continue
+          if (valErr.message?.includes('Premio inválido') || valErr.message?.includes('mismatch')) {
+            throw valErr;
+          }
+          console.warn('[LoyaltyV3] Validation RPC not available yet, skipping:', valErr.message);
+        }
+      }
+
       // Generate ticket number
       const ticketNumber = `T-${Date.now().toString(36).toUpperCase()}`;
 
       // Create the ticket (home business line only)
+      const isLoyaltyRedemption = !!loyaltyRedemptionItem;
+      const loyaltyOriginalAmount = loyaltyRedemptionItem?.loyaltyOriginalPrice ?? 0;
+      const loyaltyRewardId = loyaltyRedemptionItem?.loyaltyRewardId ?? null;
+
       const { data: ticket, error: ticketErr } = await supabase
         .from("tickets")
         .insert({
@@ -292,6 +408,9 @@ export default function CarWashPOS() {
           status: "paid",
           business_line: "car_wash",
           created_at: niNow(),
+          is_loyalty_redemption: isLoyaltyRedemption,
+          loyalty_reward_id: loyaltyRewardId,
+          loyalty_original_amount: loyaltyOriginalAmount,
         } as any)
         .select()
         .single();
@@ -304,11 +423,12 @@ export default function CarWashPOS() {
         await (supabase as any).from("ticket_items").insert({
           ticket_id: (ticket as any).id,
           item_type: "service",
-          service_id: item.serviceId,
+          service_id: typeof item.serviceId === 'number' ? item.serviceId : null,
           quantity: 1,
           price: item.price,
           service_name_snapshot: item.serviceName || null,
           price_snapshot: item.price,
+          discount_reason: item.isLoyaltyRedemption ? 'loyalty_redemption' : null,
         });
       }
 
@@ -498,6 +618,52 @@ export default function CarWashPOS() {
           console.error('Error with loyalty program:', err);
         }
       }
+
+      // Loyalty v3: register wash for matching programs (Premium / Nítido)
+      // Exclude loyalty-free (legacy) and loyalty-reward (redemption items) from wash counter
+      if (customer && !customer.is_general) {
+        const realItems = ticketItems.filter(
+          i => i.serviceId !== 'loyalty-free' &&
+               i.serviceId !== 'loyalty-reward' &&
+               !i.isLoyaltyRedemption &&
+               typeof i.serviceId === 'number'
+        );
+        for (const item of realItems) {
+          try {
+            const result = await recordLoyaltyV3.mutateAsync({
+              customerId: Number(customer.id),
+              ticketId: (ticket as any).id,
+              serviceId: Number(item.serviceId),
+              userId: user?.id,
+            });
+            if (result.recorded && result.rewards_earned && result.rewards_earned.length > 0) {
+              const rewardNames = result.rewards_earned.map((r: any) => r.reward_name).join(", ");
+              setTimeout(() => {
+                showToast(`🎁 ¡Premio ganado! ${rewardNames}`, "success");
+              }, 1000);
+            }
+          } catch (lvErr) {
+            console.error('[LoyaltyV3] Error recording wash:', lvErr);
+          }
+        }
+
+        // If a loyalty reward was applied as a free item, mark it redeemed now
+        const loyaltyRewardItem = ticketItems.find(i => i.isLoyaltyRedemption);
+        if (loyaltyRewardItem && selectedLoyaltyReward) {
+          try {
+            await redeemLoyaltyV3.mutateAsync({
+              rewardId: selectedLoyaltyReward.id,
+              customerId: Number(customer.id),
+              ticketId: (ticket as any).id,
+              userId: user?.id,
+              notes: 'Canjeado en POS junto con servicio',
+            });
+          } catch (rdErr) {
+            console.error('[LoyaltyV3] Error redeeming reward:', rdErr);
+          }
+        }
+      }
+
 
       setLastTicket({
         ...ticket,
@@ -881,6 +1047,44 @@ export default function CarWashPOS() {
           </div>
         )}
 
+        {/* Loyalty rewards selector — same area as membership */}
+        {customer && !customer.is_general && !selectedMembership && (
+          <LoyaltySelector
+            customerId={customerId}
+            customerName={customer.name}
+            selectedVehicleId={selectedVehicleId}
+            vehicleLabel={vehicleTypes?.find(v => v.id === selectedVehicleId)?.name ?? ""}
+            services={allServicesAndExtras.map((s: any) => ({ id: s.id, name: s.name }))}
+            servicePrices={allServicePrices}
+            selectedReward={selectedLoyaltyReward}
+            onRewardSelect={(reward, loyaltyItem) => {
+              setSelectedLoyaltyReward(reward);
+              if (reward && loyaltyItem) {
+                // Replace any previous loyalty-reward item with the real service + discountPercent=100
+                setTicketItems(prev => [
+                  ...prev.filter(i => i.serviceId !== 'loyalty-reward' && !i.isLoyaltyRedemption),
+                  {
+                    serviceId: loyaltyItem.serviceId,
+                    serviceName: loyaltyItem.serviceName,
+                    vehicleTypeId: loyaltyItem.vehicleTypeId,
+                    vehicleLabel: loyaltyItem.vehicleLabel,
+                    price: loyaltyItem.price,
+                    discountPercent: 100, // Net = C$0
+                    isLoyaltyRedemption: true,
+                    loyaltyRewardId: loyaltyItem.loyaltyRewardId,
+                    loyaltyRewardName: loyaltyItem.loyaltyRewardName,
+                    loyaltyOriginalPrice: loyaltyItem.loyaltyOriginalPrice,
+                  },
+                ]);
+                showToast(`🎁 Premio aplicado: ${reward.reward_name}`);
+              } else {
+                // Remove loyalty item from ticket
+                setTicketItems(prev => prev.filter(i => !i.isLoyaltyRedemption));
+              }
+            }}
+          />
+        )}
+
         {/* Items */}
         <div className="flex-1 overflow-auto p-4 space-y-2">
           {ticketItems.length === 0 && (
@@ -974,7 +1178,25 @@ export default function CarWashPOS() {
             </div>
           </div>
           <button
-            onClick={() => ticketItems.length > 0 && setShowPayment(true)}
+            onClick={() => {
+              if (ticketItems.length === 0) return;
+              // Loyalty v3: check if any ticket item is blocked by an available reward
+              if (customerId) {
+                const realItems = ticketItems.filter(
+                  i => i.serviceId !== 'loyalty-free' && i.serviceId !== 'loyalty-reward'
+                );
+                for (const item of realItems) {
+                  // Skip if reward already applied for this item type
+                  if (selectedLoyaltyReward) continue;
+                  const blocking = findBlockingReward(availableRewardsV3, item.serviceName);
+                  if (blocking) {
+                    setRewardBlockModal({ show: true, rewardId: blocking.id, serviceName: item.serviceName });
+                    return; // blocked — do NOT open payment modal
+                  }
+                }
+              }
+              setShowPayment(true);
+            }}
             disabled={ticketItems.length === 0}
             className="btn-cobrar w-full h-16 flex items-center justify-center gap-3 disabled:opacity-50 text-xl font-bold transition-all duration-200 hover:scale-[1.02] active:scale-95 disabled:hover:scale-100"
           >
@@ -999,6 +1221,28 @@ export default function CarWashPOS() {
           onClose={() => setShowCustomer(false)}
         />
       )}
+      {/* Loyalty v3: Reward Block Modal */}
+      {rewardBlockModal.show && (() => {
+        const blockingReward = availableRewardsV3.find(r => r.id === rewardBlockModal.rewardId);
+        if (!blockingReward) return null;
+        return (
+          <RewardBlockModal
+            reward={blockingReward}
+            serviceName={rewardBlockModal.serviceName}
+            isAdmin={isAdmin}
+            isOwner={isOwner}
+            onRedeem={() => {
+              setRewardBlockModal({ show: false, rewardId: null, serviceName: "" });
+              applyRewardToTicket(blockingReward);
+            }}
+            onCancel={() => setRewardBlockModal({ show: false, rewardId: null, serviceName: "" })}
+            onAdminOverride={() => {
+              setRewardBlockModal({ show: false, rewardId: null, serviceName: "" });
+              setShowPayment(true);
+            }}
+          />
+        );
+      })()}
       {showCustomChargeModal && (
         <div className="modal-overlay" onClick={() => setShowCustomChargeModal(false)}>
           <div className="modal-content animate-scale-in" onClick={(e) => e.stopPropagation()}>

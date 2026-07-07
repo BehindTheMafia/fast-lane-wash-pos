@@ -211,6 +211,15 @@ export default function TicketPrint({ ticket, onClose }: Props) {
 
       <div className="border-t-2 border-dashed border-border print:border-black my-3 print:my-2" />
 
+      {/* Loyalty Redemption Badge */}
+      {ticket.is_loyalty_redemption && (
+        <div className="flex justify-center mb-3 print:mb-2">
+          <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black uppercase tracking-wider border border-amber-300 print:border-black print:text-black print:bg-white">
+            <i className="fa-solid fa-gift mr-1" />Canje Programa de Lealtad
+          </span>
+        </div>
+      )}
+
       {/* Items */}
       {(() => {
         const allItems = ticket.items || [];
@@ -299,7 +308,15 @@ export default function TicketPrint({ ticket, onClose }: Props) {
             </div>
             {displayDiscount > 0 && (
               <div className="flex justify-between text-destructive print:text-black font-semibold">
-                <span>Descuento:</span>
+                <span>
+                  {ticket.is_loyalty_redemption
+                    ? <span className="flex items-center gap-1">
+                        <i className="fa-solid fa-gift text-[9px]" />
+                        Descuento Programa de Lealtad:
+                      </span>
+                    : "Descuento:"
+                  }
+                </span>
                 <span>-C${displayDiscount.toFixed(2)}</span>
               </div>
             )}

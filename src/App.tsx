@@ -18,6 +18,7 @@ import Reminders from "@/pages/Reminders";
 import Settings from "@/pages/Settings";
 import Inventory from "@/pages/Inventory";
 import NotFound from "@/pages/NotFound";
+import Loyalty from "@/pages/Loyalty";
 import DBValidation from "@/pages/DBValidation";
 import CreateAdmin from "@/pages/CreateAdmin";
 
@@ -79,6 +80,7 @@ const App = () => (
             <Route path="/services" element={<ProtectedRoute><AdminRoute><Services /></AdminRoute></ProtectedRoute>} />
             <Route path="/inventory" element={<ProtectedRoute><AdminOrOwnerRoute><Inventory /></AdminOrOwnerRoute></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><AdminRoute><Settings /></AdminRoute></ProtectedRoute>} />
+            <Route path="/loyalty" element={<ProtectedRoute><Loyalty /></ProtectedRoute>} />
             <Route path="/db-validation" element={<DBValidation />} />
             <Route path="/create-admin" element={<CreateAdmin />} />
             <Route path="*" element={<NotFound />} />
