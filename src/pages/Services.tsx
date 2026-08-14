@@ -40,7 +40,7 @@ const ICONS = [
 ];
 
 function EmptyForm(isExtra: boolean) {
-  return { name: "", description: "", icon: "fa-soap", is_extra: isExtra, prices: {} as Record<string, string> };
+  return { name: "", description: "", icon: "fa-soap", is_extra: isExtra, prices: {} as Record<string, string>, loyalty_program: "" };
 }
 
 function ServicesCarWash() {
@@ -84,7 +84,7 @@ function ServicesCarWash() {
       prices[String(p.vehicle_type_id)] = String(p.price);
     });
     setEditing(svc);
-    setForm({ name: svc.name, description: svc.description || "", icon: svc.icon || "fa-soap", is_extra: svc.is_extra || false, prices });
+    setForm({ name: svc.name, description: svc.description || "", icon: svc.icon || "fa-soap", is_extra: svc.is_extra || false, prices, loyalty_program: svc.loyalty_program || "" });
     // Load existing product assignments for non-extra services
     if (!svc.is_extra && svc.business_line === "car_wash") {
       const { data } = await supabase
@@ -115,6 +115,7 @@ function ServicesCarWash() {
       is_extra: form.is_extra,
       is_active: true,
       business_line: "car_wash",
+      loyalty_program: form.loyalty_program || null,
     };
 
     let svcId: string;
@@ -133,8 +134,8 @@ function ServicesCarWash() {
     for (const [vtId, rawPrice] of Object.entries(form.prices)) {
       const price = parseFloat(rawPrice as string) || 0;
       await supabase.from("service_prices").upsert(
-        { service_id: svcId, vehicle_type_id: parseInt(vtId), price } as any,
-        { onConflict: "service_id,vehicle_type_id" }
+        { service_id: svcId, vehicle_type_id: parseInt(vtId), price, variant_label: "Estándar", variant_sort: 0 } as any,
+        { onConflict: "service_id,vehicle_type_id,variant_sort" }
       );
     }
 
@@ -251,6 +252,24 @@ function ServicesCarWash() {
           ))}
         </div>
       </div>
+
+      {/* Loyalty program — only for base car_wash services */}
+      {!isExtra && (
+        <div>
+          <label className="text-xs font-semibold text-secondary mb-1 block">
+            <i className="fa-solid fa-star mr-1" /> Programa de lealtad
+          </label>
+          <select
+            value={form.loyalty_program}
+            onChange={e => setForm({ ...form, loyalty_program: e.target.value })}
+            className="input-touch w-full"
+          >
+            <option value="">Ninguno</option>
+            <option value="premium">Premium</option>
+            <option value="nitido">Nítido</option>
+          </select>
+        </div>
+      )}
 
       {/* Prices by vehicle type */}
       <div>
