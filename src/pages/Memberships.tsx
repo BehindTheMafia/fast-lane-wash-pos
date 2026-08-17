@@ -246,6 +246,33 @@ export default function Memberships() {
         throw paymentErr;
       }
 
+      // Save mixed payment breakdown so Reports can show the desglose
+      if (paymentData.method === "mixed" && Array.isArray(paymentData.mixedPayments) && paymentData.mixedPayments.length > 0) {
+        for (const part of paymentData.mixedPayments) {
+          const amountNio =
+            paymentData.currency === "USD"
+              ? Number((part.amount * exchangeRate).toFixed(2))
+              : part.amount;
+          const changeNio =
+            paymentData.currency === "USD"
+              ? Number((part.change * exchangeRate).toFixed(2))
+              : part.change;
+          const { error: partErr } = await (supabase as any).from("ticket_mixed_payments").insert({
+            ticket_id: (ticket as any).id,
+            method: part.method,
+            currency: paymentData.currency,
+            amount: part.amount,
+            exchange_rate: exchangeRate,
+            amount_nio: amountNio,
+            applied_nio: amountNio,
+            change_nio: changeNio,
+          });
+          if (partErr) {
+            console.error("[Memberships] ticket_mixed_payments insert error:", partErr.message);
+          }
+        }
+      }
+
       // Create ticket_item for the service (so it shows in reports)
       // Store the BASE price (before discount) so Reports can calculate the discount
       const { error: ticketItemErr } = await supabase.from("ticket_items").insert({
@@ -424,6 +451,33 @@ export default function Memberships() {
       } as any);
 
       if (paymentErr) throw paymentErr;
+
+      // Save mixed payment breakdown so Reports can show the desglose
+      if (paymentData.method === "mixed" && Array.isArray(paymentData.mixedPayments) && paymentData.mixedPayments.length > 0) {
+        for (const part of paymentData.mixedPayments) {
+          const amountNio =
+            paymentData.currency === "USD"
+              ? Number((part.amount * exchangeRate).toFixed(2))
+              : part.amount;
+          const changeNio =
+            paymentData.currency === "USD"
+              ? Number((part.change * exchangeRate).toFixed(2))
+              : part.change;
+          const { error: partErr } = await (supabase as any).from("ticket_mixed_payments").insert({
+            ticket_id: (ticket as any).id,
+            method: part.method,
+            currency: paymentData.currency,
+            amount: part.amount,
+            exchange_rate: exchangeRate,
+            amount_nio: amountNio,
+            applied_nio: amountNio,
+            change_nio: changeNio,
+          });
+          if (partErr) {
+            console.error("[Memberships] renewal ticket_mixed_payments insert error:", partErr.message);
+          }
+        }
+      }
 
       // Create ticket_item with snapshot
       const { error: ticketItemErr } = await supabase.from('ticket_items').insert({

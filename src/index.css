@@ -50,6 +50,32 @@
     --sidebar-accent-foreground: 38 92% 91%;
     --sidebar-border: 203 60% 25%;
     --sidebar-ring: 207 37% 57%;
+
+    /* ── EL RÁPIDO AUTOLAVADO: Sistema de Color Global ── */
+    --brand-primary: #002C47;
+    --brand-secondary: #1E3E5F;
+    --brand-complementary: #456A83;
+    --brand-cream-primary: #FEF2DD;
+    --brand-cream-secondary: #FEEDD3;
+    --brand-border: #E8DECC;
+    --brand-white: #FFFFFF;
+    --brand-text-primary: #002C47;
+    --brand-text-secondary: #456A83;
+
+    /* ── Programa Premium ── */
+    --premium-primary: #7F0000;
+    --premium-secondary: #381C26;
+    --premium-accent: #C89B5A;
+    --premium-bg: #FFF1DF;
+    --premium-text: #002C47;
+
+    /* ── Programa Nítido ── */
+    --nitido-primary: #0B4968;
+    --nitido-secondary: #456A83;
+    --nitido-accent: #7DB7D5;
+    --nitido-accent-light: #BFD9E5;
+    --nitido-bg: #F1F7FA;
+    --nitido-text: #002C47;
   }
 }
 
