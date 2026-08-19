@@ -612,18 +612,44 @@ export default function Reports() {
       </h2>
 
       {/* Filters */}
-      <div className="pos-card p-4 flex flex-wrap items-end gap-4">
-        <div>
-          <label className="block text-xs font-semibold text-foreground mb-1">Desde</label>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="input-touch" />
+      <div className="pos-card p-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-3 items-end">
+          <div className="sm:col-span-1 md:col-span-4">
+            <label className="block text-xs font-semibold text-foreground mb-1.5 flex items-center gap-1.5">
+              <i className="fa-regular fa-calendar text-secondary text-[11px]" />
+              <span>Desde</span>
+            </label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="w-full h-11 px-3 bg-background border border-border rounded-xl text-sm font-medium text-foreground focus:ring-2 focus:ring-accent outline-none transition-all"
+            />
+          </div>
+
+          <div className="sm:col-span-1 md:col-span-4">
+            <label className="block text-xs font-semibold text-foreground mb-1.5 flex items-center gap-1.5">
+              <i className="fa-regular fa-calendar-check text-secondary text-[11px]" />
+              <span>Hasta</span>
+            </label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="w-full h-11 px-3 bg-background border border-border rounded-xl text-sm font-medium text-foreground focus:ring-2 focus:ring-accent outline-none transition-all"
+            />
+          </div>
+
+          <div className="sm:col-span-2 md:col-span-4">
+            <button
+              onClick={loadReport}
+              className="w-full h-11 bg-accent text-accent-foreground rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md hover:bg-accent/90 active:scale-[0.98] transition-all cursor-pointer"
+            >
+              <i className="fa-solid fa-magnifying-glass text-xs" />
+              <span>Consultar Reporte</span>
+            </button>
+          </div>
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-foreground mb-1">Hasta</label>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="input-touch" />
-        </div>
-        <button onClick={loadReport} className="touch-btn bg-accent text-accent-foreground px-6 py-3 rounded-xl font-semibold flex items-center gap-2">
-          <i className="fa-solid fa-magnifying-glass" />Consultar
-        </button>
       </div>
 
       {loading ? (
@@ -658,29 +684,37 @@ export default function Reports() {
           </div>
 
           {/* Interactive charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="pos-card p-4">
-              <h3 className="font-bold text-sm text-foreground mb-2">
-                <i className="fa-solid fa-chart-line mr-2 text-secondary" />
-                Ventas en el período
-              </h3>
-              <p className="text-xs text-muted-foreground mb-3">
-                {chartGranularity === "minute"
-                  ? "Por minuto · hora exacta (HH:mm:ss) en tooltip"
-                  : "Por día"} · Córdobas (C$)
-              </p>
-              <ReportsSalesTrendChart data={salesTrendData} granularity={chartGranularity} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
+            <div className="pos-card p-4 h-full flex flex-col justify-between space-y-3">
+              <div>
+                <h3 className="font-bold text-sm text-foreground mb-1">
+                  <i className="fa-solid fa-chart-line mr-2 text-secondary" />
+                  Ventas en el período
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  {chartGranularity === "minute"
+                    ? "Por minuto · hora exacta (HH:mm:ss) en tooltip"
+                    : "Por día"} · Córdobas (C$)
+                </p>
+              </div>
+              <div className="flex-1 flex flex-col justify-between">
+                <ReportsSalesTrendChart data={salesTrendData} granularity={chartGranularity} />
+              </div>
             </div>
             {!isBarbershop && (
-              <div className="pos-card p-4">
-                <h3 className="font-bold text-sm text-foreground mb-2">
-                  <i className="fa-solid fa-car mr-2 text-secondary" />
-                  Vehículos por día
-                </h3>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Visitas por tipo de vehículo en cada fecha del período
-                </p>
-                <ReportsVehicleByDayChart data={vehicleByDayChartData} />
+              <div className="pos-card p-4 h-full flex flex-col justify-between space-y-3">
+                <div>
+                  <h3 className="font-bold text-sm text-foreground mb-1">
+                    <i className="fa-solid fa-car mr-2 text-secondary" />
+                    Vehículos por día
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Visitas por tipo de vehículo en cada fecha del período
+                  </p>
+                </div>
+                <div className="flex-1 flex flex-col justify-between">
+                  <ReportsVehicleByDayChart data={vehicleByDayChartData} />
+                </div>
               </div>
             )}
           </div>

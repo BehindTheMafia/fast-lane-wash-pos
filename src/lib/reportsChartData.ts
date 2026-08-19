@@ -170,23 +170,23 @@ export function buildVehicleVisitsByDayData(
     const dayKey = niDateKey(t.created_at);
     if (!dayKeySet.has(dayKey)) return;
 
-    const vehicleName = t.vehicle_types?.name || "N/A";
-    totalsByName.set(vehicleName, (totalsByName.get(vehicleName) || 0) + 1);
+    const rawName = t.vehicle_types?.name?.trim();
+    if (!rawName || rawName === "N/A" || rawName.toLowerCase() === "otros") return;
+
+    totalsByName.set(rawName, (totalsByName.get(rawName) || 0) + 1);
 
     const dayMap = countsByDay.get(dayKey)!;
-    dayMap.set(vehicleName, (dayMap.get(vehicleName) || 0) + 1);
+    dayMap.set(rawName, (dayMap.get(rawName) || 0) + 1);
   });
 
   const sortedNames = Array.from(totalsByName.entries())
     .sort((a, b) => b[1] - a[1])
     .map(([name]) => name);
 
-  const topNames = new Set(sortedNames.slice(0, VEHICLE_BY_DAY_TOP_N));
-  const hasOthers = sortedNames.length > VEHICLE_BY_DAY_TOP_N;
-
-  const vehicleTypes: { slug: string; label: string }[] = sortedNames
-    .slice(0, VEHICLE_BY_DAY_TOP_N)
-    .map((name) => ({ slug: slugifyVehicle(name), label: name }));
+  const vehicleTypes: { slug: string; label: string }[] = sortedNames.map((name) => ({
+    slug: slugifyVehicle(name),
+    label: name,
+  }));
 
   const usedSlugs = new Set<string>();
   vehicleTypes.forEach((vt) => {
@@ -199,15 +199,10 @@ export function buildVehicleVisitsByDayData(
     usedSlugs.add(slug);
   });
 
-  if (hasOthers) {
-    vehicleTypes.push({ slug: "otros", label: "Otros" });
-  }
-
-  const nameToSlug = (name: string): string => {
-    if (!topNames.has(name)) return "otros";
-    const found = vehicleTypes.find((v) => v.label === name);
-    return found?.slug ?? "otros";
-  };
+  const nameToSlugMap = new Map<string, string>();
+  vehicleTypes.forEach((vt) => {
+    nameToSlugMap.set(vt.label, vt.slug);
+  });
 
   const rows: VehicleByDayRow[] = dayKeys.map((dayKey) => {
     const row: VehicleByDayRow = {
@@ -221,8 +216,10 @@ export function buildVehicleVisitsByDayData(
     const dayMap = countsByDay.get(dayKey);
     if (dayMap) {
       dayMap.forEach((count, vehicleName) => {
-        const slug = nameToSlug(vehicleName);
-        row[slug] = (Number(row[slug]) || 0) + count;
+        const slug = nameToSlugMap.get(vehicleName);
+        if (slug) {
+          row[slug] = (Number(row[slug]) || 0) + count;
+        }
       });
     }
 
