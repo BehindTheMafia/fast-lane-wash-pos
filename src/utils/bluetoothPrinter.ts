@@ -139,6 +139,34 @@ export async function printTicketBluetooth(ticket: any) {
                 .line(`TOTAL USD: $${totalUSD.toFixed(2)}`)
                 .newline();
 
+            // 5b. Loyalty Redemption Block
+            if (ticket.is_loyalty_redemption) {
+                const loyaltyItem = (Array.isArray(ticket.items) ? ticket.items : [])
+                    .find((i: any) => i.isLoyaltyRedemption || i.discount_reason === 'loyalty_redemption');
+                const rewardName = loyaltyItem?.loyaltyRewardName ?? ticket.loyalty_reward_name ?? null;
+                const originalPrice = Number(loyaltyItem?.loyaltyOriginalPrice ?? ticket.loyalty_original_amount ?? 0);
+                const discPct = Number(loyaltyItem?.discountPercent ?? 100);
+
+                encoder
+                    .line(hr)
+                    .align('center')
+                    .size('small')
+                    .line('*** CANJE PROGRAMA DE LEALTAD ***');
+
+                if (rewardName) {
+                    encoder.bold(true).line(rewardName).bold(false);
+                }
+
+                if (discPct === 100) {
+                    encoder.line('SERVICIO GRATIS - C$0.00');
+                } else {
+                    encoder.line(`Precio original: C$${originalPrice.toFixed(2)}`);
+                    encoder.line(`Descuento ${discPct}%: -C$${(originalPrice * discPct / 100).toFixed(2)}`);
+                }
+
+                encoder.align('left').size('normal').newline();
+            }
+
             // 6. Información de Pago
             if (ticket.payment) {
                 const paySymbol = ticket.payment.currency === 'USD' ? '$' : 'C$';

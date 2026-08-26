@@ -279,6 +279,7 @@ export default function Loyalty() {
                           program={program}
                           progress={progress}
                           rewards={programRewards}
+                          customerId={selectedCustomer.id}
                         />
                       );
                     })

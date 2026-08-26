@@ -189,6 +189,11 @@ export default function LoyaltyHistory({ washLog, redemptions, loading }: Props)
                       </td>
                       <td className="px-4 py-3 font-bold" style={{ color: "#002C47" }}>
                         {r.loyalty_rewards?.reward_name ?? "—"}
+                        {r.loyalty_rewards?.selected_option && (
+                          <span className="block text-xs font-normal mt-0.5" style={{ color: "#456A83" }}>
+                            Opción: {r.loyalty_rewards.selected_option.replace(/_/g, " ")}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 font-medium" style={{ color: "#002C47" }}>
                         {r.loyalty_rewards?.loyalty_programs?.name ?? "—"}

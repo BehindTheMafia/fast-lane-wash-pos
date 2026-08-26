@@ -1,4 +1,5 @@
 import type { LoyaltyReward } from "@/hooks/useLoyaltyV3";
+import { REWARD_DISCOUNT_MAP } from "@/hooks/useLoyaltyV3";
 
 interface Props {
   reward: LoyaltyReward;
@@ -65,8 +66,12 @@ export default function RewardBlockModal({
         <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 mb-5">
           <p className="text-xs text-destructive font-semibold flex items-start gap-2">
             <i className="fa-solid fa-triangle-exclamation mt-0.5" />
-            No se puede cobrar un servicio que el cliente ya tiene como premio gratuito.
-            Canjea el premio o cancela la operación.
+            {(() => {
+              const discPct = REWARD_DISCOUNT_MAP[reward.reward_slug] ?? 100;
+              return discPct === 100
+                ? "No se puede cobrar un servicio que el cliente ya tiene como premio gratuito. Canjea el premio o cancela la operación."
+                : `Este cliente tiene un ${discPct}% de descuento en este servicio. Canjea el premio para aplicar el descuento, o cancela.`;
+            })()}
           </p>
         </div>
 

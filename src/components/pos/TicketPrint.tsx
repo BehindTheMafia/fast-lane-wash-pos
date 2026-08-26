@@ -115,6 +115,9 @@ export default function TicketPrint({ ticket, onClose }: Props) {
     if (discount > 0) message += `🏷️ *DESCUENTO:* -C$${discount.toFixed(2)}\n`;
     message += `💵 *TOTAL:* C$${total.toFixed(2)}\n`;
     message += `🌎 *TOTAL USD:* $${totalUSD.toFixed(2)}\n`;
+    if (ticket.is_loyalty_redemption) {
+      message += `🎁 *CANJE LEALTAD:* Premio aplicado en este servicio\n`;
+    }
 
     // Payment method info
     if (ticket.payment?.method === "mixed" && ticket.payment?.mixedPayments?.length) {
@@ -213,10 +216,35 @@ export default function TicketPrint({ ticket, onClose }: Props) {
 
       {/* Loyalty Redemption Badge */}
       {ticket.is_loyalty_redemption && (
-        <div className="flex justify-center mb-3 print:mb-2">
+        <div className="flex flex-col items-center mb-3 print:mb-2 gap-1.5">
           <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black uppercase tracking-wider border border-amber-300 print:border-black print:text-black print:bg-white">
             <i className="fa-solid fa-gift mr-1" />Canje Programa de Lealtad
           </span>
+          {/* Show reward name if available */}
+          {(() => {
+            const loyaltyItem = (ticket.items ?? []).find((i: any) => i.isLoyaltyRedemption || i.discount_reason === 'loyalty_redemption');
+            const rewardName = loyaltyItem?.loyaltyRewardName ?? ticket.loyalty_reward_name ?? null;
+            const originalPrice = loyaltyItem?.loyaltyOriginalPrice ?? ticket.loyalty_original_amount ?? null;
+            const discPct = loyaltyItem?.discountPercent ?? null;
+            if (!rewardName) return null;
+            return (
+              <div className="text-center space-y-0.5">
+                <p className="text-[10px] font-bold text-amber-800 print:text-black">
+                  {rewardName}
+                </p>
+                {originalPrice > 0 && discPct != null && discPct < 100 && (
+                  <p className="text-[9px] text-muted-foreground print:text-gray-600">
+                    Precio original: C${Number(originalPrice).toFixed(2)} · Descuento: {discPct}%
+                  </p>
+                )}
+                {discPct === 100 && (
+                  <p className="text-[9px] font-bold text-green-700 print:text-black">
+                    ✓ SERVICIO GRATIS
+                  </p>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 

@@ -1,13 +1,16 @@
-import type { LoyaltyProgress, LoyaltyProgram, LoyaltyReward } from "@/hooks/useLoyaltyV3";
+import { useState } from "react";
+import type { LoyaltyProgress, LoyaltyProgram, LoyaltyReward, LoyaltyRewardOption } from "@/hooks/useLoyaltyV3";
 import { getLoyaltyTheme } from "./loyaltyTheme";
+import RewardOptionModal from "./RewardOptionModal";
 
 interface Props {
   progress: LoyaltyProgress | undefined;
   program: LoyaltyProgram;
   rewards: LoyaltyReward[];
+  customerId?: number;
 }
 
-export default function LoyaltyProgramCard({ progress, program, rewards }: Props) {
+export default function LoyaltyProgramCard({ progress, program, rewards, customerId }: Props) {
   const theme = getLoyaltyTheme(program.slug);
   const cycleSize = program.cycle_size;
   const inCycle = progress?.washes_in_cycle ?? 0;
@@ -15,14 +18,55 @@ export default function LoyaltyProgramCard({ progress, program, rewards }: Props
   const cycleNum = progress?.cycle_number ?? 0;
   const pct = Math.round((inCycle / cycleSize) * 100);
 
+  const [choiceModal, setChoiceModal] = useState<{
+    reward: LoyaltyReward;
+    allGroupRewards: LoyaltyReward[];
+    programOptions: LoyaltyRewardOption[];
+  } | null>(null);
+
   const availableRewards = rewards.filter(
     (r) => r.program_id === program.id && r.status === "available"
   );
 
+  // Group available rewards by option_group
+  // For each choice group: show ONE card with "Elige" button
+  // Fixed rewards (no option_group): show normally
+  const choiceGroups = new Map<string, LoyaltyReward[]>();
+  const fixedAvailable: LoyaltyReward[] = [];
+
+  for (const r of availableRewards) {
+    if (r.option_group) {
+      const grp = choiceGroups.get(r.option_group) ?? [];
+      grp.push(r);
+      choiceGroups.set(r.option_group, grp);
+    } else {
+      fixedAvailable.push(r);
+    }
+  }
+
+  // Choice groups where selection is already made (only one remains available = selected)
+  const selectedChoiceRewards = availableRewards.filter(r => r.option_group && r.selected_option);
+
   // Next reward threshold calculation
-  const sortedRewardDefs = [...program.rewards].sort((a, b) => a.at - b.at);
-  const nextReward = sortedRewardDefs.find((r) => r.at > inCycle);
-  const washesUntilNext = nextReward ? nextReward.at - inCycle : 0;
+  const sortedMilestones = [...program.rewards].sort((a, b) => a.at - b.at);
+  const nextMilestone = sortedMilestones.find((r) => r.at > inCycle);
+  const nextRewardLabel = nextMilestone?.options?.[0]?.reward ?? nextMilestone?.reward ?? null;
+  const washesUntilNext = nextMilestone ? nextMilestone.at - inCycle : 0;
+
+  const handleChoiceClick = (groupRewards: LoyaltyReward[]) => {
+    // Find milestone JSONB options for this group
+    const firstReward = groupRewards[0];
+    // Identify milestone by matching any option slug
+    const milestone = program.rewards.find(m =>
+      m.options?.some(opt => opt.reward_slug === firstReward.reward_slug || opt.reward_slug === firstReward.option_slug)
+    );
+    if (!milestone?.options) return;
+    setChoiceModal({
+      reward: firstReward,
+      allGroupRewards: groupRewards,
+      programOptions: milestone.options,
+    });
+  };
 
   return (
     <div
@@ -58,14 +102,28 @@ export default function LoyaltyProgramCard({ progress, program, rewards }: Props
           {/* Available rewards badge */}
           {availableRewards.length > 0 && (
             <div className="flex flex-col items-end gap-1">
-              {availableRewards.map((r) => (
+              {/* Choice groups not yet selected */}
+              {[...choiceGroups.entries()].map(([grp]) => {
+                const rewards = choiceGroups.get(grp)!;
+                const alreadySelected = rewards.some(r => r.selected_option);
+                if (alreadySelected) return null;
+                return (
+                  <span
+                    key={grp}
+                    className="text-xs px-3 py-1 rounded-full font-bold shadow-md flex items-center gap-1.5 animate-pulse"
+                    style={{ backgroundColor: "#FFFFFF", color: theme.primary }}
+                  >
+                    <i className="fa-solid fa-star text-xs" style={{ color: theme.accent }} />
+                    ¡Elige tu premio!
+                  </span>
+                );
+              })}
+              {/* Fixed or selected rewards */}
+              {[...fixedAvailable, ...selectedChoiceRewards].map((r) => (
                 <span
                   key={r.id}
                   className="text-xs px-3 py-1 rounded-full font-bold shadow-md flex items-center gap-1.5 animate-pulse"
-                  style={{
-                    backgroundColor: "#FFFFFF",
-                    color: theme.primary,
-                  }}
+                  style={{ backgroundColor: "#FFFFFF", color: theme.primary }}
                 >
                   <i className="fa-solid fa-gift text-xs" style={{ color: theme.accent }} />
                   Premio disponible
@@ -89,14 +147,10 @@ export default function LoyaltyProgramCard({ progress, program, rewards }: Props
             </span>
           </div>
 
-          {/* Track and fill */}
           <div className="w-full h-3.5 rounded-full overflow-hidden" style={{ backgroundColor: "#F3EFE6" }}>
             <div
               className="h-full rounded-full transition-all duration-700"
-              style={{
-                width: `${pct}%`,
-                background: theme.progressGradient,
-              }}
+              style={{ width: `${pct}%`, background: theme.progressGradient }}
             />
           </div>
 
@@ -104,11 +158,11 @@ export default function LoyaltyProgramCard({ progress, program, rewards }: Props
             <span className="font-medium" style={{ color: "#456A83" }}>
               {pct}% del ciclo completado
             </span>
-            {nextReward && (
+            {nextMilestone && (
               <span className="font-medium" style={{ color: "#456A83" }}>
                 {washesUntilNext} {washesUntilNext === 1 ? "lavada" : "lavadas"} para{" "}
                 <span className="font-bold" style={{ color: theme.primary }}>
-                  {nextReward.reward}
+                  {nextRewardLabel}
                 </span>
               </span>
             )}
@@ -136,13 +190,13 @@ export default function LoyaltyProgramCard({ progress, program, rewards }: Props
                     backgroundColor: isDone ? theme.dotActiveBg : "#FEF2DD",
                     color: isDone ? "#FFFFFF" : "#002C47",
                     border: isRewardPos
-                      ? `2px solid ${isDone ? theme.accent : theme.accent}`
+                      ? `2px solid ${theme.accent}`
                       : `1.5px solid ${isDone ? theme.primary : "#E8DECC"}`,
                     boxShadow: isRewardPos && isDone ? `0 0 10px ${theme.accent}60` : "none",
                   }}
                   title={
                     isRewardPos
-                      ? program.rewards.find((r) => r.at === washPos)?.reward
+                      ? program.rewards.find((r) => r.at === washPos)?.options?.[0]?.reward ?? program.rewards.find((r) => r.at === washPos)?.reward
                       : `Lavada ${washPos}`
                   }
                 >
@@ -165,11 +219,15 @@ export default function LoyaltyProgramCard({ progress, program, rewards }: Props
           <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "#456A83" }}>
             Recompensas del programa
           </p>
-          {program.rewards.map((r) => {
-            const isReached = inCycle >= r.at;
+          {program.rewards.map((m) => {
+            const isReached = inCycle >= m.at;
+            const isChoice = m.type === "choice";
+            const label = isChoice
+              ? `${m.at} lavadas → Elige: ${m.options?.map(o => o.reward).join(" ó ")}`
+              : `${m.at} lavadas → ${m.options?.[0]?.reward ?? m.reward}`;
             return (
               <div
-                key={r.reward_slug}
+                key={m.at}
                 className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs transition-colors"
                 style={{
                   backgroundColor: isReached ? theme.bg : "#FEF2DD",
@@ -178,8 +236,7 @@ export default function LoyaltyProgramCard({ progress, program, rewards }: Props
               >
                 <span className="flex items-center gap-2 font-medium" style={{ color: "#002C47" }}>
                   <i className="fa-solid fa-gift" style={{ color: theme.accent }} />
-                  <span className="font-bold">{r.at} lavadas</span>
-                  <span style={{ color: "#456A83" }}>→ {r.reward}</span>
+                  <span>{label}</span>
                 </span>
 
                 {isReached ? (
@@ -189,7 +246,7 @@ export default function LoyaltyProgramCard({ progress, program, rewards }: Props
                   </span>
                 ) : (
                   <span className="font-medium" style={{ color: "#456A83" }}>
-                    {r.at - inCycle} restantes
+                    {m.at - inCycle} restantes
                   </span>
                 )}
               </div>
@@ -203,14 +260,50 @@ export default function LoyaltyProgramCard({ progress, program, rewards }: Props
             <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "#002C47" }}>
               Beneficios listos para canjear
             </p>
-            {availableRewards.map((r) => (
+
+            {/* Choice groups — not yet selected */}
+            {[...choiceGroups.entries()].map(([grp, grpRewards]) => {
+              const alreadySelected = grpRewards.some(r => r.selected_option);
+              if (alreadySelected) return null;
+              return (
+                <div
+                  key={grp}
+                  className="flex items-center gap-3 p-3.5 rounded-xl shadow-xs"
+                  style={{ backgroundColor: theme.bg, border: `1px solid ${theme.badgeBorder}` }}
+                >
+                  <div
+                    className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-xs"
+                    style={{ backgroundColor: theme.primary }}
+                  >
+                    <i className="fa-solid fa-star text-white text-sm" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm" style={{ color: "#002C47" }}>
+                      🎁 Premio de 5 lavadas
+                    </p>
+                    <p className="text-xs" style={{ color: "#456A83" }}>
+                      Debes elegir una de las 2 opciones disponibles
+                    </p>
+                  </div>
+                  {customerId && (
+                    <button
+                      onClick={() => handleChoiceClick(grpRewards)}
+                      className="shrink-0 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:opacity-80 active:scale-95"
+                      style={{ backgroundColor: theme.primary, color: "#FFFFFF" }}
+                    >
+                      Elegir
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Fixed rewards */}
+            {fixedAvailable.map((r) => (
               <div
                 key={r.id}
                 className="flex items-center gap-3 p-3.5 rounded-xl shadow-xs"
-                style={{
-                  backgroundColor: theme.bg,
-                  border: `1px solid ${theme.badgeBorder}`,
-                }}
+                style={{ backgroundColor: theme.bg, border: `1px solid ${theme.badgeBorder}` }}
               >
                 <div
                   className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-xs"
@@ -228,19 +321,58 @@ export default function LoyaltyProgramCard({ progress, program, rewards }: Props
                 </div>
                 <span
                   className="text-xs px-2.5 py-1 rounded-full font-bold"
-                  style={{
-                    backgroundColor: theme.badgeBg,
-                    color: theme.primary,
-                    border: `1px solid ${theme.badgeBorder}`,
-                  }}
+                  style={{ backgroundColor: theme.badgeBg, color: theme.primary, border: `1px solid ${theme.badgeBorder}` }}
                 >
                   Disponible
+                </span>
+              </div>
+            ))}
+
+            {/* Selected choice rewards */}
+            {selectedChoiceRewards.map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center gap-3 p-3.5 rounded-xl shadow-xs"
+                style={{ backgroundColor: theme.bg, border: `1px solid ${theme.badgeBorder}` }}
+              >
+                <div
+                  className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-xs"
+                  style={{ backgroundColor: theme.primary }}
+                >
+                  <i className="fa-solid fa-gift text-white text-sm" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-sm truncate" style={{ color: "#002C47" }}>
+                    {r.reward_name}
+                  </p>
+                  <p className="text-xs" style={{ color: "#456A83" }}>
+                    Opción seleccionada · {new Date(r.earned_at).toLocaleDateString("es-NI")}
+                  </p>
+                </div>
+                <span
+                  className="text-xs px-2.5 py-1 rounded-full font-bold"
+                  style={{ backgroundColor: "#D1FAE5", color: "#065F46", border: "1px solid #A7F3D0" }}
+                >
+                  ✓ Elegido
                 </span>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Choice Modal */}
+      {choiceModal && customerId && (
+        <RewardOptionModal
+          reward={choiceModal.reward}
+          allGroupRewards={choiceModal.allGroupRewards}
+          programOptions={choiceModal.programOptions}
+          customerId={customerId}
+          programSlug={program.slug}
+          onClose={() => setChoiceModal(null)}
+          onSuccess={() => setChoiceModal(null)}
+        />
+      )}
     </div>
   );
 }

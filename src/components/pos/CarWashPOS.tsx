@@ -20,6 +20,7 @@ import {
   useValidateLoyaltyRedemption,
   findBlockingReward,
   REWARD_SERVICE_MAP,
+  REWARD_DISCOUNT_MAP,
 } from "@/hooks/useLoyaltyV3";
 import RewardBlockModal from "@/components/loyalty/RewardBlockModal";
 import LoyaltySelector from "@/components/pos/LoyaltySelector";
@@ -254,6 +255,8 @@ export default function CarWashPOS() {
       price = Number(priceEntry.price);
     }
 
+    const discountPct = REWARD_DISCOUNT_MAP[reward.reward_slug] ?? 100;
+
     setSelectedLoyaltyReward(reward);
     setTicketItems(prev => [
       ...prev.filter(i => i.serviceId !== service.id && !i.isLoyaltyRedemption),
@@ -263,7 +266,7 @@ export default function CarWashPOS() {
         vehicleTypeId: selectedVehicleId || 0,
         vehicleLabel: vehicleTypes?.find(v => v.id === selectedVehicleId)?.name ?? "",
         price: price,
-        discountPercent: 100,
+        discountPercent: discountPct,
         isLoyaltyRedemption: true,
         loyaltyRewardId: reward.id,
         loyaltyRewardName: reward.reward_name,
@@ -1060,7 +1063,7 @@ export default function CarWashPOS() {
             onRewardSelect={(reward, loyaltyItem) => {
               setSelectedLoyaltyReward(reward);
               if (reward && loyaltyItem) {
-                // Replace any previous loyalty-reward item with the real service + discountPercent=100
+              // Replace any previous loyalty-reward item; discountPercent comes from REWARD_DISCOUNT_MAP via LoyaltySelector
                 setTicketItems(prev => [
                   ...prev.filter(i => i.serviceId !== 'loyalty-reward' && !i.isLoyaltyRedemption),
                   {
@@ -1069,7 +1072,7 @@ export default function CarWashPOS() {
                     vehicleTypeId: loyaltyItem.vehicleTypeId,
                     vehicleLabel: loyaltyItem.vehicleLabel,
                     price: loyaltyItem.price,
-                    discountPercent: 100, // Net = C$0
+                    discountPercent: loyaltyItem.discountPercent, // 100 = free, 40 = 40% off
                     isLoyaltyRedemption: true,
                     loyaltyRewardId: loyaltyItem.loyaltyRewardId,
                     loyaltyRewardName: loyaltyItem.loyaltyRewardName,
@@ -1115,24 +1118,33 @@ export default function CarWashPOS() {
                   <i className="fa-solid fa-trash-can text-sm" />
                 </button>
               </div>
-              {/* Discount input - only for real services */}
+              {/* Discount — loyalty items are read-only; normal services are editable */}
               {item.serviceId !== 'loyalty-free' && (
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-muted-foreground flex-1">Descuento:</label>
-                  <input
-                    type="number"
-                    value={item.discountPercent || 0}
-                    onChange={(e) => {
-                      const newDiscountPercent = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
-                      setTicketItems(prev => prev.map((it, i) => i === idx ? { ...it, discountPercent: newDiscountPercent } : it));
-                    }}
-                    className="w-24 px-2 py-1 bg-background border border-border rounded text-xs text-right"
-                    min={0}
-                    max={100}
-                    step={1}
-                  />
-                  <span className="text-xs text-muted-foreground">%</span>
-                </div>
+                item.isLoyaltyRedemption ? (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground flex-1">Descuento Lealtad:</label>
+                    <span className="px-2 py-1 rounded text-xs font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                      {item.discountPercent === 100 ? "GRATIS (100%)" : `${item.discountPercent}% desc.`}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground flex-1">Descuento:</label>
+                    <input
+                      type="number"
+                      value={item.discountPercent || 0}
+                      onChange={(e) => {
+                        const newDiscountPercent = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                        setTicketItems(prev => prev.map((it, i) => i === idx ? { ...it, discountPercent: newDiscountPercent } : it));
+                      }}
+                      className="w-24 px-2 py-1 bg-background border border-border rounded text-xs text-right"
+                      min={0}
+                      max={100}
+                      step={1}
+                    />
+                    <span className="text-xs text-muted-foreground">%</span>
+                  </div>
+                )
               )}
             </div>
           ))}

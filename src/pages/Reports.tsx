@@ -506,6 +506,11 @@ export default function Reports() {
     .filter((t: any) => !t.is_membership_sale && !t.is_membership_usage)
     .reduce((s, t) => s + Number(t.total), 0);
 
+  // Loyalty redemption metrics
+  const loyaltyTickets = tickets.filter((t: any) => t.is_loyalty_redemption);
+  const loyaltyCanjesCount = loyaltyTickets.length;
+  const loyaltyOriginalTotal = loyaltyTickets.reduce((s: number, t: any) => s + Number(t.loyalty_original_amount || 0), 0);
+
   // Summary aggregations — single source of truth: payments + ticket_mixed_payments
   const byService: Record<string, { count: number; total: number }> = {};
   const byVehicle: Record<string, { count: number; total: number }> = {};
@@ -657,7 +662,7 @@ export default function Reports() {
       ) : (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="pos-card p-6 text-center">
               <p className="text-sm text-secondary">Total ventas</p>
               <p className="text-2xl font-bold text-foreground">C${totalNIO.toFixed(2)}</p>
@@ -681,6 +686,17 @@ export default function Reports() {
               <p className="text-2xl font-bold text-foreground">C${regularSalesTotal.toFixed(2)}</p>
               <p className="text-sm text-muted-foreground">{tickets.filter((t: any) => !t.is_membership_sale && !t.is_membership_usage).length} tickets</p>
             </div>
+            {/* Loyalty redemptions card */}
+            {loyaltyCanjesCount > 0 && (
+              <div className="pos-card p-6 text-center border-amber-300/40" style={{ borderColor: "#C89B5A" }}>
+                <p className="text-sm text-secondary flex items-center justify-center gap-1.5">
+                  <i className="fa-solid fa-star text-amber-500 text-xs" />
+                  Canjes Lealtad
+                </p>
+                <p className="text-2xl font-bold" style={{ color: "#7F0000" }}>C${loyaltyOriginalTotal.toFixed(2)}</p>
+                <p className="text-sm text-muted-foreground">{loyaltyCanjesCount} canje{loyaltyCanjesCount > 1 ? "s" : ""}</p>
+              </div>
+            )}
           </div>
 
           {/* Interactive charts */}
@@ -860,6 +876,11 @@ export default function Reports() {
                             {t.is_membership_usage && (
                               <span className="px-2 py-0.5 rounded-full text-xs bg-accent/20 text-accent font-semibold" title="Uso de Membresía">
                                 <i className="fa-solid fa-check-circle mr-1" />Uso
+                              </span>
+                            )}
+                            {t.is_loyalty_redemption && (
+                              <span className="px-2 py-0.5 rounded-full text-xs font-semibold" title="Canje Programa de Lealtad" style={{ backgroundColor: "#FEF2DD", color: "#7F0000", border: "1px solid #C89B5A" }}>
+                                <i className="fa-solid fa-star mr-1" />Canje
                               </span>
                             )}
                           </div>
