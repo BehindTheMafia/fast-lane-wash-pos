@@ -16,7 +16,6 @@ export default function LoyaltyProgramCard({ progress, program, rewards, custome
   const inCycle = progress?.washes_in_cycle ?? 0;
   const totalWashes = progress?.total_washes ?? 0;
   const cycleNum = progress?.cycle_number ?? 0;
-  const pct = Math.round((inCycle / cycleSize) * 100);
 
   const [choiceModal, setChoiceModal] = useState<{
     reward: LoyaltyReward;
@@ -27,6 +26,34 @@ export default function LoyaltyProgramCard({ progress, program, rewards, custome
   const availableRewards = rewards.filter(
     (r) => r.program_id === program.id && r.status === "available"
   );
+
+  // Helper to find reward status for a given milestone
+  const getMilestoneRewardStatus = (m: (typeof program.rewards)[0]) => {
+    const matchingReward = rewards.find(
+      (r) =>
+        r.program_id === program.id &&
+        (m.options?.some(
+          (o) =>
+            o.reward_slug === r.reward_slug ||
+            o.reward_slug === r.option_slug
+        ) ||
+          r.reward_slug === m.reward_slug)
+    );
+    const isRedeemed = matchingReward?.status === "redeemed";
+    const isAvailable = matchingReward?.status === "available";
+    const isReached = inCycle >= m.at || isRedeemed || isAvailable;
+    return { matchingReward, isRedeemed, isAvailable, isReached };
+  };
+
+  // Determine effective washes in cycle: if a milestone was redeemed, customer has reached at least that milestone count
+  const maxRedeemedAt = program.rewards.reduce((max, m) => {
+    const { isRedeemed } = getMilestoneRewardStatus(m);
+    return isRedeemed ? Math.max(max, m.at) : max;
+  }, 0);
+
+  const effectiveInCycle = Math.max(inCycle, maxRedeemedAt);
+  const effectiveTotalWashes = Math.max(totalWashes, maxRedeemedAt);
+  const pct = Math.min(100, Math.round((effectiveInCycle / cycleSize) * 100));
 
   // Group available rewards by option_group
   // For each choice group: show ONE card with "Elige" button
@@ -47,11 +74,15 @@ export default function LoyaltyProgramCard({ progress, program, rewards, custome
   // Choice groups where selection is already made (only one remains available = selected)
   const selectedChoiceRewards = availableRewards.filter(r => r.option_group && r.selected_option);
 
-  // Next reward threshold calculation
+  // Next reward threshold calculation: target next milestone that hasn't been redeemed
   const sortedMilestones = [...program.rewards].sort((a, b) => a.at - b.at);
-  const nextMilestone = sortedMilestones.find((r) => r.at > inCycle);
+  const nextMilestone = sortedMilestones.find((m) => {
+    const { isRedeemed } = getMilestoneRewardStatus(m);
+    return !isRedeemed && m.at > effectiveInCycle;
+  });
+
   const nextRewardLabel = nextMilestone?.options?.[0]?.reward ?? nextMilestone?.reward ?? null;
-  const washesUntilNext = nextMilestone ? nextMilestone.at - inCycle : 0;
+  const washesUntilNext = nextMilestone ? Math.max(1, nextMilestone.at - effectiveInCycle) : 0;
 
   const handleChoiceClick = (groupRewards: LoyaltyReward[]) => {
     // Find milestone JSONB options for this group
@@ -95,7 +126,7 @@ export default function LoyaltyProgramCard({ progress, program, rewards, custome
               </span>
             </div>
             <p className="text-white/80 text-xs font-medium pl-0.5">
-              {totalWashes} lavadas acumuladas · Ciclo #{cycleNum + 1}
+              {effectiveTotalWashes} lavadas acumuladas · Ciclo #{cycleNum + 1}
             </p>
           </div>
 
@@ -143,7 +174,7 @@ export default function LoyaltyProgramCard({ progress, program, rewards, custome
               Lavadas en ciclo actual
             </span>
             <span className="text-sm font-black font-montserrat" style={{ color: theme.primary }}>
-              {inCycle} / {cycleSize}
+              {effectiveInCycle} / {cycleSize}
             </span>
           </div>
 
@@ -177,8 +208,11 @@ export default function LoyaltyProgramCard({ progress, program, rewards, custome
           <div className="flex items-center gap-2 flex-wrap">
             {Array.from({ length: cycleSize }).map((_, i) => {
               const washPos = i + 1;
-              const isDone = washPos <= inCycle;
-              const isRewardPos = program.rewards.some((r) => r.at === washPos);
+              const milestoneForPos = program.rewards.find((r) => r.at === washPos);
+              const milestoneStatus = milestoneForPos ? getMilestoneRewardStatus(milestoneForPos) : null;
+              const isDone = washPos <= effectiveInCycle || milestoneStatus?.isReached || milestoneStatus?.isRedeemed;
+              const isRewardPos = !!milestoneForPos;
+              const isRedeemed = milestoneStatus?.isRedeemed;
 
               return (
                 <div
@@ -196,13 +230,13 @@ export default function LoyaltyProgramCard({ progress, program, rewards, custome
                   }}
                   title={
                     isRewardPos
-                      ? program.rewards.find((r) => r.at === washPos)?.options?.[0]?.reward ?? program.rewards.find((r) => r.at === washPos)?.reward
+                      ? milestoneForPos?.options?.[0]?.reward ?? milestoneForPos?.reward
                       : `Lavada ${washPos}`
                   }
                 >
                   {isRewardPos ? (
                     <i
-                      className="fa-solid fa-gift text-xs"
+                      className={`fa-solid ${isRedeemed ? "fa-check" : "fa-gift"} text-xs`}
                       style={{ color: isDone ? "#FFFFFF" : theme.accent }}
                     />
                   ) : (
@@ -220,7 +254,7 @@ export default function LoyaltyProgramCard({ progress, program, rewards, custome
             Recompensas del programa
           </p>
           {program.rewards.map((m) => {
-            const isReached = inCycle >= m.at;
+            const { isRedeemed, isAvailable, isReached } = getMilestoneRewardStatus(m);
             const isChoice = m.type === "choice";
             const label = isChoice
               ? `${m.at} lavadas → Elige: ${m.options?.map(o => o.reward).join(" ó ")}`
@@ -239,14 +273,24 @@ export default function LoyaltyProgramCard({ progress, program, rewards, custome
                   <span>{label}</span>
                 </span>
 
-                {isReached ? (
+                {isRedeemed ? (
+                  <span className="font-bold flex items-center gap-1.5" style={{ color: theme.primary }}>
+                    <i className="fa-solid fa-receipt text-xs" style={{ color: theme.accent }} />
+                    Canjeado
+                  </span>
+                ) : isAvailable ? (
+                  <span className="font-bold flex items-center gap-1.5" style={{ color: "#7F0000" }}>
+                    <i className="fa-solid fa-star text-xs" style={{ color: "#C89B5A" }} />
+                    ¡Premio Disponible!
+                  </span>
+                ) : isReached ? (
                   <span className="font-bold flex items-center gap-1.5" style={{ color: theme.primary }}>
                     <i className="fa-solid fa-circle-check" style={{ color: theme.accent }} />
                     Alcanzado
                   </span>
                 ) : (
                   <span className="font-medium" style={{ color: "#456A83" }}>
-                    {m.at - inCycle} restantes
+                    {Math.max(1, m.at - effectiveInCycle)} restantes
                   </span>
                 )}
               </div>
