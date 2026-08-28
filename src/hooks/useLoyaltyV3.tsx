@@ -184,7 +184,7 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
     queryKey: ["customer_loyalty", customerId],
     enabled: !!customerId,
     queryFn: async () => {
-      const [progressRes, rewardsRes, washLogRes, redemptionsRes] =
+      const [progressRes, rewardsRes, washLogRes, redemptionsRes, ticketsRes, programsRes] =
         await Promise.all([
           (supabase as any)
             .from("loyalty_progress")
@@ -198,7 +198,7 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
           (supabase as any)
             .from("loyalty_wash_log")
             .select(
-              "*, loyalty_programs(*), loyalty_rewards(*), tickets(id, ticket_number, status), services(name)"
+              "*, loyalty_programs(*), loyalty_rewards(*), tickets(id, ticket_number, status, created_at), services(id, name, loyalty_program)"
             )
             .eq("customer_id", customerId)
             .order("created_at", { ascending: false })
@@ -208,21 +208,95 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
             .select("*, tickets(id, ticket_number, status, created_at), loyalty_rewards(*, loyalty_programs(*))")
             .eq("customer_id", customerId)
             .order("redeemed_at", { ascending: false }),
+          (supabase as any)
+            .from("tickets")
+            .select("id, ticket_number, status, created_at, business_line, total, is_loyalty_redemption, ticket_items(*, services(id, name, loyalty_program))")
+            .eq("customer_id", customerId)
+            .eq("status", "paid")
+            .eq("business_line", "car_wash")
+            .order("created_at", { ascending: true }),
+          (supabase as any)
+            .from("loyalty_programs")
+            .select("*")
+            .eq("active", true),
         ]);
 
       const rawWashLog = (washLogRes.data ?? []) as any[];
       const rawRewards = (rewardsRes.data ?? []) as any[];
       const rawProgress = (progressRes.data ?? []) as LoyaltyProgress[];
       const rawRedemptions = (redemptionsRes.data ?? []) as LoyaltyRedemption[];
+      const paidTickets = (ticketsRes.data ?? []) as any[];
+      const allPrograms = (programsRes.data ?? []) as LoyaltyProgram[];
 
       // Filter wash logs: only include washes from existing, non-deleted tickets
-      const validWashLog = rawWashLog
-        .filter((log) => log.ticket_id && log.tickets)
-        .sort((a, b) => {
-          const dateA = new Date(a.tickets?.created_at || a.created_at).getTime();
-          const dateB = new Date(b.tickets?.created_at || b.created_at).getTime();
-          return dateB - dateA;
-        }) as LoyaltyWashLog[];
+      const existingWashMap = new Map<number, any>();
+      rawWashLog.forEach((log) => {
+        if (log.ticket_id && log.tickets) {
+          existingWashMap.set(Number(log.ticket_id), log);
+        }
+      });
+
+      // Build unified list of valid washes from paid tickets in Reports
+      const unifiedWashLogs: LoyaltyWashLog[] = [];
+
+      for (const ticket of paidTickets) {
+        if (existingWashMap.has(Number(ticket.id))) {
+          unifiedWashLogs.push(existingWashMap.get(Number(ticket.id)));
+        } else {
+          // Ticket exists in Reports but was missing from wash log (e.g. created with redemption)
+          const firstServiceItem = (ticket.ticket_items || []).find((ti: any) => ti.services || ti.service_name_snapshot);
+          const progSlug = firstServiceItem?.services?.loyalty_program || "premium";
+          const prog = allPrograms.find((p) => p.slug === progSlug) || allPrograms[0];
+
+          unifiedWashLogs.push({
+            id: -Number(ticket.id),
+            customer_id: Number(customerId),
+            program_id: prog?.id ?? 1,
+            ticket_id: Number(ticket.id),
+            service_id: firstServiceItem?.service_id ?? null,
+            wash_number: 0,
+            reward_earned_id: null,
+            created_at: ticket.created_at,
+            user_id: null,
+            loyalty_programs: prog,
+            loyalty_rewards: null,
+            tickets: {
+              id: ticket.id,
+              ticket_number: ticket.ticket_number,
+              status: ticket.status,
+              created_at: ticket.created_at,
+            },
+            services: firstServiceItem?.services ? { name: firstServiceItem.services.name } : { name: firstServiceItem?.service_name_snapshot || "Servicio Premium" },
+          });
+        }
+      }
+
+      // If no paid tickets found in tickets table, fallback to valid existing logs
+      const combinedLogs = unifiedWashLogs.length > 0 ? unifiedWashLogs : Array.from(existingWashMap.values());
+
+      // Sort chronologically ascending to assign accurate wash_number sequence per program
+      combinedLogs.sort((a, b) => {
+        const dateA = new Date(a.tickets?.created_at || a.created_at).getTime();
+        const dateB = new Date(b.tickets?.created_at || b.created_at).getTime();
+        return dateA - dateB;
+      });
+
+      const programCounters: Record<number, number> = {};
+      combinedLogs.forEach((log) => {
+        const progId = log.program_id;
+        const prog = allPrograms.find((p) => p.id === progId);
+        const cycleSize = prog?.cycle_size || 9;
+        programCounters[progId] = (programCounters[progId] || 0) + 1;
+        const inCycle = ((programCounters[progId] - 1) % cycleSize) + 1;
+        log.wash_number = inCycle;
+      });
+
+      // Now sort descending for display (most recent first)
+      const validWashLog = [...combinedLogs].sort((a, b) => {
+        const dateA = new Date(a.tickets?.created_at || a.created_at).getTime();
+        const dateB = new Date(b.tickets?.created_at || b.created_at).getTime();
+        return dateB - dateA;
+      });
 
       // Filter rewards: available rewards whose generating ticket was deleted are excluded
       const validRewards = rawRewards.filter((reward) => {
@@ -235,6 +309,7 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
       // Compute actual progress per program from valid wash logs
       const programIds = Array.from(
         new Set([
+          ...allPrograms.map((p) => p.id),
           ...rawProgress.map((p) => p.program_id),
           ...validWashLog.map((w) => w.program_id),
         ])
@@ -245,8 +320,8 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
       for (const progId of programIds) {
         const progWashes = validWashLog.filter((w) => w.program_id === progId);
         const existingProgress = rawProgress.find((p) => p.program_id === progId);
-        const programInfo = existingProgress?.loyalty_programs || progWashes[0]?.loyalty_programs;
-        const cycleSize = programInfo?.cycle_size || 10;
+        const programInfo = allPrograms.find((p) => p.id === progId) || existingProgress?.loyalty_programs || progWashes[0]?.loyalty_programs;
+        const cycleSize = programInfo?.cycle_size || 9;
 
         const totalWashes = progWashes.length;
         const washesInCycle = totalWashes % cycleSize;
@@ -263,7 +338,7 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
           loyalty_programs: programInfo,
         });
 
-        // Self-heal DB: synchronize loyalty_progress in DB if it was desynced by deleted tickets
+        // Self-heal DB: synchronize loyalty_progress in DB if it was desynced
         if (
           existingProgress &&
           (existingProgress.total_washes !== totalWashes ||

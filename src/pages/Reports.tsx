@@ -873,7 +873,8 @@ export default function Reports() {
                     </tr>
                   )}
                   {filteredTickets.map((t: any, idx: number) => {
-                    const serviceNames = t.ticket_items?.map((ti: any) => ti.services?.name || ti.service_name_snapshot).filter(Boolean).join(", ") || "—";
+                    const rawServiceNames = t.ticket_items?.map((ti: any) => ti.services?.name || ti.service_name_snapshot).filter(Boolean).join(", ");
+                    const serviceNames = rawServiceNames || (t.is_loyalty_redemption ? "Servicio Premium (Canje)" : "—");
                     const vehicleName = (t.vehicle_types as any)?.name || "—";
                     const paymentMethods = t.payments?.map((p: any) => methodLabels[p.payment_method] || p.payment_method).join(", ") || "—";
                     const cashierName = t.cashier_name || "—";

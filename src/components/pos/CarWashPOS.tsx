@@ -623,12 +623,11 @@ export default function CarWashPOS() {
       }
 
       // Loyalty v3: register wash for matching programs (Premium / Nítido)
-      // Exclude loyalty-free (legacy) and loyalty-reward (redemption items) from wash counter
+      // Exclude loyalty-free (legacy), but count any actual service performed
       if (customer && !customer.is_general) {
         const realItems = ticketItems.filter(
           i => i.serviceId !== 'loyalty-free' &&
                i.serviceId !== 'loyalty-reward' &&
-               !i.isLoyaltyRedemption &&
                typeof i.serviceId === 'number'
         );
         for (const item of realItems) {
