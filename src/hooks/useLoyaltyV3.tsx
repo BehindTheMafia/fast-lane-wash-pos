@@ -70,7 +70,7 @@ export interface LoyaltyRedemption {
   notes: string | null;
   overridden_by_admin: boolean;
   loyalty_rewards?: LoyaltyReward;
-  tickets?: { ticket_number: string } | null;
+  tickets?: { id?: number; ticket_number: string; status?: string; created_at?: string } | null;
 }
 
 export interface LoyaltyWashLog {
@@ -85,7 +85,7 @@ export interface LoyaltyWashLog {
   user_id: string | null;
   loyalty_programs?: LoyaltyProgram;
   loyalty_rewards?: LoyaltyReward | null;
-  tickets?: { ticket_number: string } | null;
+  tickets?: { id?: number; ticket_number: string; status?: string; created_at?: string } | null;
   services?: { name: string } | null;
 }
 
@@ -205,7 +205,7 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
             .limit(100),
           (supabase as any)
             .from("loyalty_redemptions")
-            .select("*, tickets(ticket_number), loyalty_rewards(*, loyalty_programs(*))")
+            .select("*, tickets(id, ticket_number, status, created_at), loyalty_rewards(*, loyalty_programs(*))")
             .eq("customer_id", customerId)
             .order("redeemed_at", { ascending: false }),
         ]);
@@ -216,7 +216,13 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
       const rawRedemptions = (redemptionsRes.data ?? []) as LoyaltyRedemption[];
 
       // Filter wash logs: only include washes from existing, non-deleted tickets
-      const validWashLog = rawWashLog.filter((log) => log.ticket_id && log.tickets) as LoyaltyWashLog[];
+      const validWashLog = rawWashLog
+        .filter((log) => log.ticket_id && log.tickets)
+        .sort((a, b) => {
+          const dateA = new Date(a.tickets?.created_at || a.created_at).getTime();
+          const dateB = new Date(b.tickets?.created_at || b.created_at).getTime();
+          return dateB - dateA;
+        }) as LoyaltyWashLog[];
 
       // Filter rewards: available rewards whose generating ticket was deleted are excluded
       const validRewards = rawRewards.filter((reward) => {

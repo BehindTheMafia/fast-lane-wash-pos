@@ -343,7 +343,10 @@ export default function LoyaltyDetailModal({ customer, onClose, onUpdate }: Prop
                                 {log.tickets?.ticket_number || `ID: ${log.ticket_id}`}
                               </td>
                               <td className="p-2 text-right text-muted-foreground">
-                                {new Date(log.created_at).toLocaleDateString("es-NI")} {new Date(log.created_at).toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" })}
+                                {(() => {
+                                  const d = log.tickets?.created_at || log.created_at;
+                                  return `${new Date(d).toLocaleDateString("es-NI")} ${new Date(d).toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" })}`;
+                                })()}
                               </td>
                             </tr>
                           ))}

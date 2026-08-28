@@ -74,6 +74,7 @@ export default function LoyaltyHistory({ washLog, redemptions, loading }: Props)
                 <tbody>
                   {washLog.map((log, idx) => {
                     const theme = getLoyaltyTheme(log.loyalty_programs?.slug);
+                    const logDate = log.tickets?.created_at || log.created_at;
                     return (
                       <tr
                         key={log.id}
@@ -84,13 +85,13 @@ export default function LoyaltyHistory({ washLog, redemptions, loading }: Props)
                         }}
                       >
                         <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: "#456A83" }}>
-                          {new Date(log.created_at).toLocaleDateString("es-NI", {
+                          {new Date(logDate).toLocaleDateString("es-NI", {
                             day: "2-digit",
                             month: "short",
                             year: "2-digit",
                           })}
                           <span className="block text-[10px]" style={{ color: "#456A83" }}>
-                            {new Date(log.created_at).toLocaleTimeString("es-NI", {
+                            {new Date(logDate).toLocaleTimeString("es-NI", {
                               hour: "2-digit",
                               minute: "2-digit",
                             })}
@@ -207,7 +208,7 @@ export default function LoyaltyHistory({ washLog, redemptions, loading }: Props)
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs font-semibold" style={{ color: "#456A83" }}>
-                        {r.ticket_id ? `#${r.ticket_id}` : "—"}
+                        {r.tickets?.ticket_number ?? (r.ticket_id ? `#${r.ticket_id}` : "—")}
                       </td>
                       <td className="px-4 py-3 text-xs max-w-[180px] truncate" style={{ color: "#456A83" }}>
                         {r.notes ?? "—"}
