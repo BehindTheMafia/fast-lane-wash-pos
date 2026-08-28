@@ -192,13 +192,13 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
             .eq("customer_id", customerId),
           (supabase as any)
             .from("loyalty_rewards")
-            .select("*, loyalty_programs(*)")
+            .select("*, loyalty_programs(*), tickets(id, ticket_number, status)")
             .eq("customer_id", customerId)
             .order("earned_at", { ascending: false }),
           (supabase as any)
             .from("loyalty_wash_log")
             .select(
-              "*, loyalty_programs(*), loyalty_rewards(*), tickets(ticket_number), services(name)"
+              "*, loyalty_programs(*), loyalty_rewards(*), tickets(id, ticket_number, status), services(name)"
             )
             .eq("customer_id", customerId)
             .order("created_at", { ascending: false })
@@ -210,11 +210,79 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
             .order("redeemed_at", { ascending: false }),
         ]);
 
+      const rawWashLog = (washLogRes.data ?? []) as any[];
+      const rawRewards = (rewardsRes.data ?? []) as any[];
+      const rawProgress = (progressRes.data ?? []) as LoyaltyProgress[];
+      const rawRedemptions = (redemptionsRes.data ?? []) as LoyaltyRedemption[];
+
+      // Filter wash logs: only include washes from existing, non-deleted tickets
+      const validWashLog = rawWashLog.filter((log) => log.ticket_id && log.tickets) as LoyaltyWashLog[];
+
+      // Filter rewards: available rewards whose generating ticket was deleted are excluded
+      const validRewards = rawRewards.filter((reward) => {
+        if (reward.status === "available" && reward.ticket_id && !reward.tickets) {
+          return false;
+        }
+        return true;
+      }) as LoyaltyReward[];
+
+      // Compute actual progress per program from valid wash logs
+      const programIds = Array.from(
+        new Set([
+          ...rawProgress.map((p) => p.program_id),
+          ...validWashLog.map((w) => w.program_id),
+        ])
+      );
+
+      const computedProgress: LoyaltyProgress[] = [];
+
+      for (const progId of programIds) {
+        const progWashes = validWashLog.filter((w) => w.program_id === progId);
+        const existingProgress = rawProgress.find((p) => p.program_id === progId);
+        const programInfo = existingProgress?.loyalty_programs || progWashes[0]?.loyalty_programs;
+        const cycleSize = programInfo?.cycle_size || 10;
+
+        const totalWashes = progWashes.length;
+        const washesInCycle = totalWashes % cycleSize;
+        const cycleNumber = Math.floor(totalWashes / cycleSize);
+
+        computedProgress.push({
+          id: existingProgress?.id ?? progId,
+          customer_id: Number(customerId),
+          program_id: progId,
+          washes_in_cycle: washesInCycle,
+          total_washes: totalWashes,
+          cycle_number: cycleNumber,
+          updated_at: existingProgress?.updated_at || new Date().toISOString(),
+          loyalty_programs: programInfo,
+        });
+
+        // Self-heal DB: synchronize loyalty_progress in DB if it was desynced by deleted tickets
+        if (
+          existingProgress &&
+          (existingProgress.total_washes !== totalWashes ||
+            existingProgress.washes_in_cycle !== washesInCycle ||
+            existingProgress.cycle_number !== cycleNumber)
+        ) {
+          (supabase as any)
+            .from("loyalty_progress")
+            .update({
+              washes_in_cycle: washesInCycle,
+              total_washes: totalWashes,
+              cycle_number: cycleNumber,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", existingProgress.id)
+            .then(() => {})
+            .catch(() => {});
+        }
+      }
+
       return {
-        progress: (progressRes.data ?? []) as LoyaltyProgress[],
-        rewards: (rewardsRes.data ?? []) as LoyaltyReward[],
-        washLog: (washLogRes.data ?? []) as LoyaltyWashLog[],
-        redemptions: (redemptionsRes.data ?? []) as LoyaltyRedemption[],
+        progress: computedProgress.length > 0 ? computedProgress : rawProgress,
+        rewards: validRewards,
+        washLog: validWashLog,
+        redemptions: rawRedemptions,
       } as CustomerLoyaltySummary;
     },
   });
@@ -232,11 +300,17 @@ export function useAvailableRewards(customerId: number | null | undefined) {
     queryFn: async () => {
       const { data, error } = await (supabase as any)
         .from("loyalty_rewards")
-        .select("*, loyalty_programs(*)")
+        .select("*, loyalty_programs(*), tickets(id, status)")
         .eq("customer_id", customerId)
         .eq("status", "available");
       if (error) throw error;
-      return (data ?? []) as LoyaltyReward[];
+
+      // Filter out rewards whose generating ticket was deleted
+      const valid = (data ?? []).filter((r: any) => {
+        if (r.ticket_id && !r.tickets) return false;
+        return true;
+      });
+      return valid as LoyaltyReward[];
     },
   });
 }

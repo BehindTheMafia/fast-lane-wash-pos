@@ -242,6 +242,22 @@ export default function Reports() {
         }
       }
 
+      // 3b. Reverse loyalty progress / wash log / un-redeemed rewards
+      try {
+        const { data: loyaltyResult, error: loyaltyErr } = await (supabase as any).rpc(
+          "reverse_loyalty_on_ticket_delete",
+          { p_ticket_id: deletingTicket.id }
+        );
+        if (loyaltyErr) {
+          console.error("[Reports] Error reversing loyalty:", loyaltyErr.message);
+        } else if (loyaltyResult?.reversed) {
+          console.log("[Reports] Loyalty reversed:", loyaltyResult);
+        }
+      } catch (loyErr: any) {
+        console.error("[Reports] Loyalty reversal exception:", loyErr.message);
+        // Non-fatal: continue with ticket deletion
+      }
+
       // 4. Delete ticket (cascade will handle ticket_items and payments)
       const { error } = await supabase
         .from("tickets")
