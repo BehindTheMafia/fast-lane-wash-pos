@@ -7,14 +7,42 @@
  *    The Settings page (/settings) is ALWAYS accessible to admin users
  *    so they can adjust the expiry date or disable the manual lock.
  *    A sign-out button is always visible so any user can log out.
+ *
+ * Resilience:
+ *  - If the system_config table does not exist yet (migration not applied),
+ *    the guard defaults to UNBLOCKED so the app remains usable.
+ *  - An ErrorBoundary wraps the inner guard so a crash never blanks the screen.
  */
 
 import { useSubscription } from "@/hooks/useSubscription";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocation } from "react-router-dom";
-import { useState } from "react";
+import { useState, Component, type ReactNode, type ErrorInfo } from "react";
 
 const CONTACT_NUMBERS = "5703-7623 / 5816-4405";
+
+// ─── Error Boundary ───────────────────────────────────────────────────────────
+// If anything inside the guard crashes (e.g. missing table), render children
+// so the app keeps working.
+class GuardErrorBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode; fallback: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.warn("SubscriptionGuard crashed — bypassing guard:", error, info);
+  }
+  render() {
+    if (this.state.hasError) return this.props.fallback;
+    return this.props.children;
+  }
+}
 
 // ─── Lock Screen ──────────────────────────────────────────────────────────────
 function SystemLockScreen({ isAdmin }: { isAdmin: boolean }) {
@@ -91,15 +119,16 @@ function SystemLockScreen({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-// ─── Guard ────────────────────────────────────────────────────────────────────
-export function SubscriptionGuard({ children }: { children: React.ReactNode }) {
-  const { isBlocked, isLoading } = useSubscription();
+// ─── Inner Guard (may throw if Supabase table missing) ────────────────────────
+function SubscriptionGuardInner({ children }: { children: React.ReactNode }) {
+  const { isBlocked, isLoading, hasError } = useSubscription();
   const { isAdmin, loading: authLoading } = useAuth();
   const location = useLocation();
 
   // Admin users at /settings can ALWAYS access it — never block them here.
   // They need to reach Settings to be able to fix the subscription config.
-  if (isAdmin && location.pathname === "/settings") {
+  const isOnSettings = location.pathname === "/settings";
+  if (isAdmin && isOnSettings) {
     return <>{children}</>;
   }
 
@@ -110,10 +139,25 @@ export function SubscriptionGuard({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
+  // If the subscription data could not be fetched (table missing, network
+  // error, etc.) → fail open so the app stays usable.
+  if (hasError) {
+    return <>{children}</>;
+  }
+
   // Confirmed blocked → show full-screen lock (children not rendered)
   if (isBlocked) {
     return <SystemLockScreen isAdmin={isAdmin} />;
   }
 
   return <>{children}</>;
+}
+
+// ─── Public Guard (wrapped with error boundary) ──────────────────────────────
+export function SubscriptionGuard({ children }: { children: React.ReactNode }) {
+  return (
+    <GuardErrorBoundary fallback={<>{children}</>}>
+      <SubscriptionGuardInner>{children}</SubscriptionGuardInner>
+    </GuardErrorBoundary>
+  );
 }

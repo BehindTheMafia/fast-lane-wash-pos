@@ -22,6 +22,7 @@ export interface SubscriptionConfig {
 export interface SubscriptionStatus extends SubscriptionConfig {
   isBlocked: boolean;           // derived: should the system be locked?
   isLoading: boolean;
+  hasError: boolean;            // true if we couldn't fetch config (e.g. missing table)
 }
 
 // ─── Config keys ─────────────────────────────────────────────────────────────
@@ -47,14 +48,23 @@ export function useSubscription(): SubscriptionStatus & {
   const [expiryDate, setExpiryDate] = useState<string | null>(null);
   const [manualLock, setManualLock] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   const fetchConfig = useCallback(async () => {
     setIsLoading(true);
+    setHasError(false);
     try {
-      const { data } = await (supabase as any)
+      const { data, error } = await (supabase as any)
         .from("system_config")
         .select("key, value")
         .in("key", [KEY_EXPIRY, KEY_LOCKED]);
+
+      if (error) {
+        // Table doesn't exist or query failed
+        console.warn("useSubscription: query error —", error.message);
+        setHasError(true);
+        return;
+      }
 
       if (data) {
         const map: Record<string, string> = {};
@@ -66,6 +76,7 @@ export function useSubscription(): SubscriptionStatus & {
       }
     } catch (e) {
       console.warn("useSubscription: could not fetch config", e);
+      setHasError(true);
     } finally {
       setIsLoading(false);
     }
@@ -94,7 +105,9 @@ export function useSubscription(): SubscriptionStatus & {
     manualLock,
     isBlocked: computeIsBlocked(expiryDate, manualLock),
     isLoading,
+    hasError,
     saveConfig,
     refresh: fetchConfig,
   };
 }
+
