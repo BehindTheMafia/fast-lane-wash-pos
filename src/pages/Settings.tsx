@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { niFormatDate } from "@/utils/niDate";
 import { FULL_DATABASE_SCHEMA } from "@/utils/backupSchema";
 import { supabase } from "@/integrations/supabase/client";
+import { useSubscription } from "@/hooks/useSubscription";
 
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -151,6 +152,7 @@ const SECTIONS = [
   { id: "exchange",      label: "Tasa de cambio",      icon: "fa-coins" },
   { id: "cashpos",       label: "Caja / POS",          icon: "fa-vault" },
   { id: "export",        label: "Exportar datos",      icon: "fa-file-arrow-down" },
+  { id: "subscription",  label: "Suscripción",         icon: "fa-shield-halved" },
   { id: "danger",        label: "Zona de peligro",     icon: "fa-skull-crossbones" },
 ] as const;
 
@@ -185,6 +187,35 @@ export default function Settings() {
   const [rangeTo, setRangeTo] = useState(() => new Date().toISOString().split("T")[0]);
   const [stats, setStats] = useState<{ tickets: number; customers: number; closures: number } | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
+
+  // ── Subscription / access-control state ──
+  const subscription = useSubscription();
+  const [subExpiryDate, setSubExpiryDate] = useState<string>("");
+  const [subManualLock, setSubManualLock] = useState(false);
+  const [savingSubscription, setSavingSubscription] = useState(false);
+
+  // Sync local form state when hook loads
+  useEffect(() => {
+    if (!subscription.isLoading) {
+      setSubExpiryDate(subscription.expiryDate ?? "");
+      setSubManualLock(subscription.manualLock);
+    }
+  }, [subscription.isLoading, subscription.expiryDate, subscription.manualLock]);
+
+  const handleSaveSubscription = async () => {
+    setSavingSubscription(true);
+    try {
+      await subscription.saveConfig({
+        expiryDate: subExpiryDate.trim() === "" ? null : subExpiryDate,
+        manualLock: subManualLock,
+      });
+      toast.success("Configuración de suscripción guardada");
+    } catch {
+      toast.error("Error al guardar la suscripción");
+    } finally {
+      setSavingSubscription(false);
+    }
+  };
 
   // ── Section nav scroll tracking ──
   const [activeSection, setActiveSection] = useState("");
@@ -1272,6 +1303,149 @@ export default function Settings() {
             )}
             Guardar configuración
           </Button>
+
+          {/* ══════ Suscripción / Control de acceso ══════ */}
+          <section id="subscription" ref={(el) => { sectionRefs.current["subscription"] = el; }} className="scroll-mt-20">
+            <Card className="border-2 border-violet-200/60 dark:border-violet-800/40 overflow-hidden">
+              <CardHeader className="bg-violet-50/50 dark:bg-violet-950/20">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center">
+                    <i className="fa-solid fa-shield-halved text-violet-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg text-violet-900 dark:text-violet-100">Suscripción / Control de acceso</CardTitle>
+                    <CardDescription>
+                      Define la fecha de expiración del producto y controla el acceso manual al sistema.
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="space-y-5 pt-5">
+
+                {/* ── Current status banner ── */}
+                {(() => {
+                  const blocked = subscription.isBlocked;
+                  return (
+                    <div className={`flex items-center gap-3 p-4 rounded-xl border-2 ${
+                      blocked
+                        ? "bg-destructive/5 border-destructive/30"
+                        : "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800/40"
+                    }`}>
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        blocked ? "bg-destructive/10" : "bg-emerald-100 dark:bg-emerald-900/40"
+                      }`}>
+                        <i className={`fa-solid text-xl ${
+                          blocked ? "fa-lock text-destructive" : "fa-lock-open text-emerald-600"
+                        }`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-bold ${
+                          blocked ? "text-destructive" : "text-emerald-700 dark:text-emerald-400"
+                        }`}>
+                          {blocked ? "Sistema BLOQUEADO" : "Sistema ACTIVO"}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {subscription.manualLock
+                            ? "Bloqueo manual activado por el administrador"
+                            : subscription.expiryDate
+                              ? subscription.isBlocked
+                                ? `Suscripción expiró el ${subscription.expiryDate}`
+                                : `Suscripción activa hasta el ${subscription.expiryDate}`
+                              : "Sin fecha de expiración configurada"
+                          }
+                        </p>
+                      </div>
+                      {subscription.isLoading && (
+                        <i className="fa-solid fa-spinner fa-spin text-muted-foreground" />
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <Separator />
+
+                {/* ── Expiry date picker ── */}
+                <div className="space-y-2">
+                  <Label htmlFor="sub-expiry-date" className="text-sm font-semibold">
+                    <i className="fa-solid fa-calendar-days mr-2 text-violet-500" />
+                    Fecha de expiración
+                  </Label>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <Input
+                      id="sub-expiry-date"
+                      type="date"
+                      value={subExpiryDate}
+                      onChange={(e) => setSubExpiryDate(e.target.value)}
+                      className="max-w-xs"
+                    />
+                    {subExpiryDate && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSubExpiryDate("")}
+                        className="text-xs text-muted-foreground hover:text-destructive gap-1.5 h-9"
+                      >
+                        <i className="fa-solid fa-xmark" /> Quitar fecha
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    El sistema se bloqueará automáticamente al día siguiente de esta fecha. Déjala vacía para no usar expiración por fecha.
+                  </p>
+                </div>
+
+                {/* ── Manual lock toggle ── */}
+                <div className={`flex items-start justify-between p-4 rounded-xl border transition-colors ${
+                  subManualLock
+                    ? "bg-destructive/5 border-destructive/30"
+                    : "bg-background border-border hover:border-violet-200"
+                }`}>
+                  <div className="space-y-1 pr-4 flex-1">
+                    <Label className="text-sm font-semibold">
+                      <i className="fa-solid fa-hand mr-2 text-destructive" />
+                      Bloqueo manual
+                    </Label>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Activa este interruptor para bloquear inmediatamente el sistema,
+                      independientemente de la fecha de expiración. Útil para suspender
+                      el acceso en cualquier momento.
+                    </p>
+                    {subManualLock && (
+                      <p className="text-xs font-semibold text-destructive mt-1 flex items-center gap-1">
+                        <i className="fa-solid fa-triangle-exclamation" />
+                        El sistema quedará bloqueado al guardar
+                      </p>
+                    )}
+                  </div>
+                  <Switch
+                    checked={subManualLock}
+                    onCheckedChange={setSubManualLock}
+                  />
+                </div>
+
+                {/* ── Save subscription config ── */}
+                <div className="flex items-center justify-between pt-2">
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    <i className="fa-solid fa-circle-info text-violet-500" />
+                    Solo administradores pueden acceder a Settings cuando el sistema está bloqueado.
+                  </p>
+                  <Button
+                    onClick={handleSaveSubscription}
+                    disabled={savingSubscription}
+                    className="gap-2 bg-violet-600 hover:bg-violet-700 text-white shrink-0 ml-4"
+                  >
+                    {savingSubscription
+                      ? <i className="fa-solid fa-spinner fa-spin" />
+                      : <i className="fa-solid fa-floppy-disk" />
+                    }
+                    Guardar suscripción
+                  </Button>
+                </div>
+
+              </CardContent>
+            </Card>
+          </section>
 
           {/* ══════ Exportar datos ══════ */}
           <section id="export" ref={(el) => { sectionRefs.current["export"] = el; }} className="scroll-mt-20">

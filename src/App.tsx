@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { BusinessLineProvider } from "@/contexts/BusinessLineContext";
+import { SubscriptionGuard } from "@/components/SubscriptionGuard";
 import AppLayout from "@/components/AppLayout";
 import Login from "@/pages/Login";
 import POS from "@/pages/POS";
@@ -49,7 +50,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
-  return <AppLayout>{children}</AppLayout>;
+  return (
+    <AppLayout>
+      <SubscriptionGuard>{children}</SubscriptionGuard>
+    </AppLayout>
+  );
 }
 
 function RootRedirect() {
