@@ -5,6 +5,7 @@ import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import { useAuth } from "@/hooks/useAuth";
 import { niFormatDate } from "@/utils/niDate";
 import { FULL_DATABASE_SCHEMA } from "@/utils/backupSchema";
+import { getTicketVisitCategories, type TicketServiceItem } from "@/lib/customerVisitCategories";
 import { supabase } from "@/integrations/supabase/client";
 import { useSubscription } from "@/hooks/useSubscription";
 
@@ -452,24 +453,76 @@ export default function Settings() {
       downloadCSV("tickets_export.csv", [headers, ...rows]);
       toast.success(`${data.length} tickets exportados`);
     } else {
-      const { data } = await supabase
-        .from("customers")
-        .select("name, phone, plate, email, loyalty_visits, loyalty_free_washes_earned, loyalty_free_washes_used, created_at")
-        .eq("is_general", false)
-        .order("name");
+      try {
+        const pageSize = 500;
+        const customers: Array<{
+          id: number;
+          name: string;
+          phone: string | null;
+          plate: string | null;
+          email: string | null;
+          loyalty_free_washes_earned: number;
+          loyalty_free_washes_used: number;
+          created_at: string;
+        }> = [];
 
-      if (!data?.length) { toast.error("No hay clientes para exportar"); return; }
+        for (let offset = 0; ; offset += pageSize) {
+          const { data, error } = await supabase
+            .from("customers")
+            .select("id, name, phone, plate, email, loyalty_free_washes_earned, loyalty_free_washes_used, created_at")
+            .eq("is_general", false)
+            .order("id")
+            .range(offset, offset + pageSize - 1);
+          if (error) throw error;
+          customers.push(...(data || []));
+          if (!data || data.length < pageSize) break;
+        }
 
-      const headers = ["Nombre", "Teléfono", "Placa", "Correo", "Visitas", "Lavados Gratis Ganados", "Lavados Gratis Usados", "Registrado"];
-      const rows = data.map((c: any) => [
-        c.name, c.phone || "", c.plate || "", c.email || "",
-        c.loyalty_visits || 0,
-        c.loyalty_free_washes_earned || 0,
-        c.loyalty_free_washes_used || 0,
-        new Date(c.created_at).toLocaleDateString("es-NI"),
-      ]);
-      downloadCSV("clientes_export.csv", [headers, ...rows]);
-      toast.success(`${data.length} clientes exportados`);
+        if (!customers.length) { toast.error("No hay clientes para exportar"); return; }
+
+        // Reports muestra un ticket pagado por fila en "Detalle de tickets".
+        // Contamos solo los de autolavado por customer_id en todo el historial.
+        // Los tipos de lavado vienen de los ítems que Reports muestra en Servicio.
+        const visitsByCustomer = new Map<number, { total: number; premium: number; nitido: number; breve: number }>();
+        for (let offset = 0; ; offset += pageSize) {
+          const { data, error } = await supabase
+            .from("tickets")
+            .select("id, customer_id, ticket_items(item_type, service_name_snapshot, services(name, is_extra))")
+            .eq("status", "paid")
+            .eq("business_line", "car_wash")
+            .not("customer_id", "is", null)
+            .order("id")
+            .range(offset, offset + pageSize - 1);
+          if (error) throw error;
+          for (const ticket of (data || []) as unknown as Array<{ customer_id: number; ticket_items: TicketServiceItem[] }>) {
+            const visits = visitsByCustomer.get(ticket.customer_id) || { total: 0, premium: 0, nitido: 0, breve: 0 };
+            visits.total += 1;
+            for (const category of getTicketVisitCategories(ticket.ticket_items || [])) {
+              visits[category] += 1;
+            }
+            visitsByCustomer.set(ticket.customer_id, visits);
+          }
+          if (!data || data.length < pageSize) break;
+        }
+
+        customers.sort((a, b) => a.name.localeCompare(b.name, "es"));
+        const headers = ["Nombre", "Teléfono", "Placa", "Correo", "Visitas", "Visitas Premium", "Visitas Nítido", "Visitas Breve", "Lavados Gratis Ganados", "Lavados Gratis Usados", "Registrado"];
+        const rows = customers.map((c) => [
+          c.name, c.phone || "", c.plate || "", c.email || "",
+          visitsByCustomer.get(c.id)?.total || 0,
+          visitsByCustomer.get(c.id)?.premium || 0,
+          visitsByCustomer.get(c.id)?.nitido || 0,
+          visitsByCustomer.get(c.id)?.breve || 0,
+          c.loyalty_free_washes_earned || 0,
+          c.loyalty_free_washes_used || 0,
+          new Date(c.created_at).toLocaleDateString("es-NI"),
+        ]);
+        downloadCSV("clientes_export.csv", [headers, ...rows]);
+        toast.success(`${customers.length} clientes exportados`);
+      } catch (error) {
+        console.error("Error exportando clientes:", error);
+        toast.error("No se pudieron exportar los clientes");
+      }
     }
   };
 
@@ -1478,7 +1531,7 @@ export default function Settings() {
                     </div>
                     <div className="text-left">
                       <p className="text-sm font-semibold">Exportar Clientes</p>
-                      <p className="text-xs text-muted-foreground">Base de clientes en CSV</p>
+                      <p className="text-xs text-muted-foreground">Clientes y visitas por servicio en CSV</p>
                     </div>
                   </Button>
                   <Button

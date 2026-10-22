@@ -7,6 +7,7 @@ import PermissionModal from "@/components/PermissionModal";
 import ReportsSalesTrendChart from "@/components/reports/ReportsSalesTrendChart";
 import ReportsVehicleByDayChart from "@/components/reports/ReportsVehicleByDayChart";
 import { buildSalesTrendData, buildVehicleVisitsByDayData } from "@/lib/reportsChartData";
+import { fetchReportRows, fetchReportRowsForIds } from "@/lib/fetchReportRows";
 import { niToday, niFormatDate, niFormatTime } from "@/utils/niDate";
 import { reverseServiceInventory } from "@/hooks/useCarWashInventory";
 import { useBusinessLine } from "@/contexts/BusinessLineContext";
@@ -43,45 +44,49 @@ export default function Reports() {
     const fromISO = `${dateFrom}T00:00:00-06:00`;
     const toISO = `${dateTo}T23:59:59-06:00`;
 
-    // 1. Fetch tickets (without payments join for reliability)
-    const { data: rawTickets, error: ticketsError } = await supabase
-      .from("tickets")
-      .select("*, vehicle_types(name)")
-      .eq("business_line", businessLine)
-      .gte("created_at", fromISO)
-      .lte("created_at", toISO)
-      .eq("status", "paid")
-      .order("created_at", { ascending: false });
+    try {
+      // Match every paid ticket in the selected date range, not just the first API page.
+      const rawTickets = await fetchReportRows((from, to) => supabase
+        .from("tickets")
+        .select("*, vehicle_types(name)")
+        .eq("business_line", businessLine)
+        .gte("created_at", fromISO)
+        .lte("created_at", toISO)
+        .eq("status", "paid")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to));
 
-    console.log("[Reports] tickets query:", { from: fromISO, to: toISO, count: rawTickets?.length ?? 0, error: ticketsError?.message ?? null });
+      console.log("[Reports] tickets query:", { from: fromISO, to: toISO, count: rawTickets.length });
 
-    if (ticketsError) {
-      console.error("Error loading tickets:", ticketsError);
-      setTickets([]);
-      setLoading(false);
-      return;
-    }
+      if (rawTickets.length === 0) {
+        setTickets([]);
+        setMixedPartsMap({});
+        return;
+      }
 
-    if (!rawTickets || rawTickets.length === 0) {
-      setTickets([]);
-      setLoading(false);
-      return;
-    }
+      const ticketIds = rawTickets.map((t: any) => t.id);
+      const customerIds = [...new Set(rawTickets.map((t: any) => t.customer_id).filter(Boolean))];
+      const userIds = [...new Set(rawTickets.map((t: any) => t.user_id).filter(Boolean))];
 
-    const ticketIds = rawTickets.map((t: any) => t.id);
-
-    // 2. Fetch payments separately for these tickets
-    const { data: paymentsRaw, error: paymentsErr } = await supabase
-      .from("payments")
-      .select("*")
-      .in("ticket_id", ticketIds);
-
-    if (paymentsErr) console.error("[Reports] payments error:", paymentsErr.message);
+      // Related rows are also paginated; a long report can have more than 1,000 items.
+      const [paymentsRaw, allItems, membershipWashes, customers, profiles] = await Promise.all([
+        fetchReportRowsForIds(ticketIds, (chunk, from, to) => supabase
+          .from("payments").select("*").in("ticket_id", chunk).order("id").range(from, to)),
+        fetchReportRowsForIds(ticketIds, (chunk, from, to) => (supabase as any)
+          .from("ticket_items").select("*, services(name)").in("ticket_id", chunk).order("id").range(from, to)),
+        fetchReportRowsForIds(ticketIds, (chunk, from, to) => supabase
+          .from("membership_washes").select("ticket_id, membership_id").in("ticket_id", chunk).order("id").range(from, to)),
+        fetchReportRowsForIds(customerIds, (chunk, from, to) => supabase
+          .from("customers").select("id, name, plate, phone").in("id", chunk).order("id").range(from, to)),
+        fetchReportRowsForIds(userIds, (chunk, from, to) => supabase
+          .from("profiles").select("id, full_name").in("id", chunk).order("id").range(from, to)),
+      ]);
 
     // Build a payments map: ticket_id -> payments[]
     // Use String() keys to prevent UUID/number type mismatch
     const paymentsMap: Record<string, any[]> = {};
-    (paymentsRaw || []).forEach((p: any) => {
+    paymentsRaw.forEach((p: any) => {
       const key = String(p.ticket_id);
       if (!paymentsMap[key]) paymentsMap[key] = [];
       paymentsMap[key].push(p);
@@ -93,46 +98,31 @@ export default function Reports() {
       payments: paymentsMap[String(t.id)] || [],
     }));
 
-    // 3. Fetch ticket_items with service names
-    const { data: allItems } = await (supabase as any)
-      .from("ticket_items")
-      .select("*, services(name)")
-      .in("ticket_id", ticketIds);
-
-    // Fetch membership washes to identify membership usage
-    const { data: membershipWashes } = await supabase
-      .from("membership_washes")
-      .select("ticket_id, membership_id")
-      .in("ticket_id", ticketIds);
-
     // Create map of ticket_id -> has membership usage
     const membershipWashMap: Record<string, boolean> = {};
-    (membershipWashes || []).forEach((mw: any) => {
+    membershipWashes.forEach((mw: any) => {
       if (mw.ticket_id) {
         membershipWashMap[mw.ticket_id] = true;
       }
     });
 
-    // Fetch customers for tickets that have customer_id
-    const customerIds = [...new Set(rawTickets.map((t: any) => t.customer_id).filter(Boolean))];
-    const { data: customers } = customerIds.length > 0
-      ? await supabase.from("customers").select("id, name, plate, phone").in("id", customerIds)
-      : { data: [] };
     const customerMap: Record<string, any> = {};
-    (customers || []).forEach((c: any) => { customerMap[c.id] = c; });
+    customers.forEach((c: any) => { customerMap[c.id] = c; });
 
-    // Fetch profiles for cashier names
-    const userIds = [...new Set(rawTickets.map((t: any) => t.user_id).filter(Boolean))];
-    const { data: profiles } = userIds.length > 0
-      ? await supabase.from("profiles").select("id, full_name").in("id", userIds)
-      : { data: [] };
     const profileMap: Record<string, string> = {};
-    (profiles || []).forEach((p: any) => { profileMap[p.id] = p.full_name || ""; });
+    profiles.forEach((p: any) => { profileMap[p.id] = p.full_name || ""; });
+
+    const itemsMap: Record<string, any[]> = {};
+    allItems.forEach((item: any) => {
+      const key = String(item.ticket_id);
+      if (!itemsMap[key]) itemsMap[key] = [];
+      itemsMap[key].push(item);
+    });
 
     // Merge items, profile, customer, and membership info into tickets
     const enriched = rawTicketsWithPayments.map((t: any) => ({
       ...t,
-      ticket_items: (allItems || []).filter((ti: any) => String(ti.ticket_id) === String(t.id)),
+      ticket_items: itemsMap[String(t.id)] || [],
       cashier_name: profileMap[t.user_id] || "—",
       customer_data: t.customer_id ? customerMap[t.customer_id] : null,
       customer_name: t.customer_id ? (customerMap[t.customer_id]?.name || "—") : "—",
@@ -146,14 +136,13 @@ export default function Reports() {
       .map((t: any) => t.id);
 
     if (mixedTicketIds.length > 0) {
-      const { data: mixedRows, error: mixedRowsErr } = await (supabase as any)
-        .from("ticket_mixed_payments")
-        .select("ticket_id, method, amount, currency, applied_nio")
-        .in("ticket_id", mixedTicketIds);
-
-      if (mixedRowsErr) console.error("[Reports] ticket_mixed_payments error:", mixedRowsErr.message);
-
-      if (mixedRows) {
+      try {
+        const mixedRows = await fetchReportRowsForIds(mixedTicketIds, (chunk, from, to) => (supabase as any)
+          .from("ticket_mixed_payments")
+          .select("ticket_id, method, amount, currency, applied_nio")
+          .in("ticket_id", chunk)
+          .order("id")
+          .range(from, to));
         const partsMap: Record<string, { method: string; amount: number; currency: string; applied_nio: number }[]> = {};
         mixedRows.forEach((row: any) => {
           const tid = String(row.ticket_id);
@@ -166,13 +155,23 @@ export default function Reports() {
           });
         });
         setMixedPartsMap(partsMap);
+      } catch (error) {
+        console.error("[Reports] ticket_mixed_payments error:", error);
+        setMixedPartsMap({});
       }
     } else {
       setMixedPartsMap({});
     }
 
     setTickets(enriched);
-    setLoading(false);
+    } catch (error) {
+      console.error("Error loading tickets:", error);
+      showToast("Error al cargar todos los tickets del reporte");
+      setTickets([]);
+      setMixedPartsMap({});
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { loadReport(); loadCatalogs(); }, [businessLine]);

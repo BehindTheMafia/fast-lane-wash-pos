@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { getLoyaltyEligibleVisitItems, type TicketServiceItem } from "@/lib/customerVisitCategories";
+import { fetchReportRows } from "@/lib/fetchReportRows";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -184,7 +186,7 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
     queryKey: ["customer_loyalty", customerId],
     enabled: !!customerId,
     queryFn: async () => {
-      const [progressRes, rewardsRes, washLogRes, redemptionsRes, ticketsRes, programsRes] =
+      const [progressRes, rewardsRes, washLogRes, redemptionsRes, paidTickets, programsRes] =
         await Promise.all([
           (supabase as any)
             .from("loyalty_progress")
@@ -208,31 +210,36 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
             .select("*, tickets(id, ticket_number, status, created_at), loyalty_rewards(*, loyalty_programs(*))")
             .eq("customer_id", customerId)
             .order("redeemed_at", { ascending: false }),
-          (supabase as any)
+          fetchReportRows<any>((from, to) => (supabase as any)
             .from("tickets")
-            .select("id, ticket_number, status, created_at, business_line, total, is_loyalty_redemption, ticket_items(*, services(id, name, loyalty_program))")
+            .select("id, ticket_number, status, created_at, business_line, total, is_loyalty_redemption, ticket_items(*, services(id, name, is_extra, loyalty_program))")
             .eq("customer_id", customerId)
             .eq("status", "paid")
             .eq("business_line", "car_wash")
-            .order("created_at", { ascending: true }),
+            .order("created_at", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, to)),
           (supabase as any)
             .from("loyalty_programs")
             .select("*")
             .eq("active", true),
         ]);
 
+      for (const result of [progressRes, rewardsRes, washLogRes, redemptionsRes, programsRes]) {
+        if (result.error) throw result.error;
+      }
+
       const rawWashLog = (washLogRes.data ?? []) as any[];
       const rawRewards = (rewardsRes.data ?? []) as any[];
       const rawProgress = (progressRes.data ?? []) as LoyaltyProgress[];
       const rawRedemptions = (redemptionsRes.data ?? []) as LoyaltyRedemption[];
-      const paidTickets = (ticketsRes.data ?? []) as any[];
       const allPrograms = (programsRes.data ?? []) as LoyaltyProgram[];
 
       // Filter wash logs: only include washes from existing, non-deleted tickets
-      const existingWashMap = new Map<number, any>();
+      const existingWashMap = new Map<string, any>();
       rawWashLog.forEach((log) => {
         if (log.ticket_id && log.tickets) {
-          existingWashMap.set(Number(log.ticket_id), log);
+          existingWashMap.set(`${Number(log.ticket_id)}:${log.program_id}`, log);
         }
       });
 
@@ -240,20 +247,22 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
       const unifiedWashLogs: LoyaltyWashLog[] = [];
 
       for (const ticket of paidTickets) {
-        if (existingWashMap.has(Number(ticket.id))) {
-          unifiedWashLogs.push(existingWashMap.get(Number(ticket.id)));
-        } else {
-          // Ticket exists in Reports but was missing from wash log (e.g. created with redemption)
-          const firstServiceItem = (ticket.ticket_items || []).find((ti: any) => ti.services || ti.service_name_snapshot);
-          const progSlug = firstServiceItem?.services?.loyalty_program || "premium";
-          const prog = allPrograms.find((p) => p.slug === progSlug) || allPrograms[0];
-
+        const eligibleItems = getLoyaltyEligibleVisitItems((ticket.ticket_items || []) as TicketServiceItem[]);
+        for (const { category, item } of eligibleItems) {
+          const prog = allPrograms.find((p) => p.slug === category);
+          if (!prog) continue;
+          const existingLog = existingWashMap.get(`${Number(ticket.id)}:${prog.id}`);
+          if (existingLog) {
+            unifiedWashLogs.push(existingLog);
+            continue;
+          }
+          // Reconstruct a missing log only for a wash eligible for this program.
           unifiedWashLogs.push({
-            id: -Number(ticket.id),
+            id: -(Number(ticket.id) * 10 + (category === "nitido" ? 2 : 1)),
             customer_id: Number(customerId),
-            program_id: prog?.id ?? 1,
+            program_id: prog.id,
             ticket_id: Number(ticket.id),
-            service_id: firstServiceItem?.service_id ?? null,
+            service_id: item.service_id ?? null,
             wash_number: 0,
             reward_earned_id: null,
             created_at: ticket.created_at,
@@ -266,13 +275,12 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
               status: ticket.status,
               created_at: ticket.created_at,
             },
-            services: firstServiceItem?.services ? { name: firstServiceItem.services.name } : { name: firstServiceItem?.service_name_snapshot || "Servicio Premium" },
+            services: item.services ? { name: item.services.name } : { name: item.service_name_snapshot || prog.name },
           });
         }
       }
 
-      // If no paid tickets found in tickets table, fallback to valid existing logs
-      const combinedLogs = unifiedWashLogs.length > 0 ? unifiedWashLogs : Array.from(existingWashMap.values());
+      const combinedLogs = unifiedWashLogs;
 
       // Sort chronologically ascending to assign accurate wash_number sequence per program
       combinedLogs.sort((a, b) => {
