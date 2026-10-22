@@ -31,6 +31,7 @@ export default function Loyalty() {
   const {
     data: loyaltyData,
     isLoading: loyaltyLoading,
+    isError: loyaltyError,
     refetch: refetchLoyalty,
   } = useCustomerLoyalty(selectedCustomer?.id);
   const redeemMutation = useRedeemLoyaltyReward();
@@ -256,6 +257,13 @@ export default function Loyalty() {
           {loyaltyLoading ? (
             <div className="flex items-center justify-center py-16">
               <i className="fa-solid fa-spinner fa-spin text-3xl" style={{ color: "#002C47" }} />
+            </div>
+          ) : loyaltyError ? (
+            <div className="rounded-xl border bg-white p-6 text-center">
+              <p className="font-semibold">No se pudo cargar el historial de lealtad.</p>
+              <button type="button" className="mt-3 text-sm font-bold underline" onClick={() => refetchLoyalty()}>
+                Reintentar
+              </button>
             </div>
           ) : (
             <>

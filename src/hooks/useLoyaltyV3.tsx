@@ -194,7 +194,7 @@ export function useCustomerLoyalty(customerId: number | null | undefined) {
             .eq("customer_id", customerId),
           (supabase as any)
             .from("loyalty_rewards")
-            .select("*, loyalty_programs(*), tickets(id, ticket_number, status)")
+            .select("*, loyalty_programs(*), tickets!loyalty_rewards_ticket_id_fkey(id, ticket_number, status)")
             .eq("customer_id", customerId)
             .order("earned_at", { ascending: false }),
           (supabase as any)
@@ -389,7 +389,7 @@ export function useAvailableRewards(customerId: number | null | undefined) {
     queryFn: async () => {
       const { data, error } = await (supabase as any)
         .from("loyalty_rewards")
-        .select("*, loyalty_programs(*), tickets(id, status)")
+        .select("*, loyalty_programs(*), tickets!loyalty_rewards_ticket_id_fkey(id, status)")
         .eq("customer_id", customerId)
         .eq("status", "available");
       if (error) throw error;
