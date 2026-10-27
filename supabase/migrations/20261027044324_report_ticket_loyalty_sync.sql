@@ -419,7 +419,7 @@ BEGIN
    IF original IS NULL OR original<0 OR discount IS NULL OR discount<0 OR discount>100 THEN RAISE EXCEPTION 'Precio inválido'; END IF;
    line:=coalesce(item->>'business_line','car_wash');sid:=(item->>'service_id')::bigint;
    IF line NOT IN ('car_wash','barbershop') THEN RAISE EXCEPTION 'Área inválida'; END IF;
-   IF sid IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.services WHERE id=sid AND business_line=line AND is_active) THEN RAISE EXCEPTION 'Servicio inválido'; END IF;
+   IF sid IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.services WHERE id=sid AND business_line::text=line AND is_active) THEN RAISE EXCEPTION 'Servicio inválido'; END IF;
    price:=round(original*(1-discount/100),2);
    IF line='car_wash' THEN home_total:=home_total+price; ELSE cross_total:=cross_total+price; END IF;
    IF coalesce((item->>'is_loyalty_redemption')::boolean,false) THEN
