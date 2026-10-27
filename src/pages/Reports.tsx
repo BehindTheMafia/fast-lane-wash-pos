@@ -27,8 +27,10 @@ export default function Reports() {
   const [tickets, setTickets] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
+  const [vehicleTypes, setVehicleTypes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingTicket, setEditingTicket] = useState<any>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [deletingTicket, setDeletingTicket] = useState<any>(null);
   const [reprintTicket, setReprintTicket] = useState<any>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -180,12 +182,15 @@ export default function Reports() {
   useEffect(() => { loadReport(); loadCatalogs(); }, [businessLine]);
 
   const loadCatalogs = async () => {
-    const [{ data: svcs }, { data: custs }] = await Promise.all([
-      supabase.from("services").select("id, name").eq("is_active", true).order("name"),
-      supabase.from("customers").select("id, name").eq("is_general", false).order("name"),
+    const [{ data: svcs }, { data: custs }, { data: vehicles }] = await Promise.all([
+      supabase.from("services").select("id, name, service_prices(vehicle_type_id, price, variant_sort)")
+        .eq("is_active", true).eq("is_extra", false).eq("business_line", businessLine).order("name"),
+      supabase.from("customers").select("id, name, is_general").order("name"),
+      supabase.from("vehicle_types").select("id, name, is_active").order("sort_order"),
     ]);
     setServices(svcs || []);
     setCustomers(custs || []);
+    setVehicleTypes(vehicles || []);
   };
 
   useTicketRefresh(loadReport);
@@ -210,14 +215,44 @@ export default function Reports() {
   };
 
   const handleEditSave = async () => {
-    if (!editingTicket) return;
+    if (!editingTicket || savingEdit) return;
+    const items = editingTicket.ticket_items || [];
+    const payments = editingTicket.payments || [];
+    const protectedTicket = editingTicket.is_membership_sale || editingTicket.is_membership_usage || editingTicket.is_loyalty_redemption;
+    const singleItem = items.length === 1 && items[0]?.item_type === "service";
+    const mixedPayment = payments.length !== 1 || payments[0]?.payment_method === "mixed" || !!mixedPartsMap[String(editingTicket.id)]?.length;
+    const originalServiceId = items[0]?.service_id ?? null;
+    const serviceId = editingTicket._editServiceId ?? originalServiceId;
+    const vehicleTypeId = editingTicket._editVehicleTypeId ?? editingTicket.vehicle_type_id;
+    const serviceChanged = serviceId !== originalServiceId;
+    const vehicleChanged = vehicleTypeId !== editingTicket.vehicle_type_id;
+    const canEditMoney = !protectedTicket && singleItem && !mixedPayment;
+    const paymentChanged = editingTicket._editPaymentMethod && editingTicket._editPaymentMethod !== payments[0]?.payment_method;
+    const currencyChanged = editingTicket._editCurrency && editingTicket._editCurrency !== payments[0]?.currency;
+    if (protectedTicket) { showToast("Este ticket tiene membresía o canje; conserva su registro original"); return; }
+    if (!Number.isFinite(Number(editingTicket.total)) || Number(editingTicket.total) < 0) {
+      showToast("Ingresa un total válido"); return;
+    }
+    if (!canEditMoney && Number(editingTicket.total) !== Number(editingTicket._originalTotal ?? editingTicket.total)) {
+      showToast("No se puede modificar el total de este ticket"); return;
+    }
+    if (mixedPayment && (paymentChanged || currencyChanged)) { showToast("No se puede modificar el pago de este ticket"); return; }
+    if (serviceChanged && !singleItem) { showToast("Solo se puede cambiar el servicio de tickets con un concepto"); return; }
+    if ((serviceChanged || vehicleChanged) && serviceId != null && businessLine === "car_wash") {
+      const selected = services.find((s: any) => s.id === serviceId);
+      if (selected && !selected.service_prices?.some((p: any) => p.vehicle_type_id === vehicleTypeId && Number(p.price) >= 0)) {
+        showToast("Ese servicio no está disponible para el tipo de vehículo elegido"); return;
+      }
+      if (serviceChanged && !selected) { showToast("Selecciona un servicio activo del catálogo"); return; }
+    }
+    setSavingEdit(true);
     try {
       const changes: Record<string, unknown> = {
         vehicle_plate: editingTicket.vehicle_plate ?? editingTicket.plate,
         total: Number(editingTicket.total),
         customer_id: editingTicket._editCustomerId ?? editingTicket.customer_id,
-        vehicle_type_id: editingTicket._editVehicleTypeId ?? editingTicket.vehicle_type_id,
-        service_id: editingTicket._editServiceId,
+        vehicle_type_id: vehicleTypeId,
+        service_id: serviceChanged ? serviceId : undefined,
       };
       if (editingTicket._editPaymentMethod && editingTicket._editPaymentMethod !== editingTicket.payments?.[0]?.payment_method) {
         changes.payment_method = editingTicket._editPaymentMethod;
@@ -243,6 +278,8 @@ export default function Reports() {
         errMsg = "Error de permisos (RLS): El usuario no tiene autorización para editar este pago o ticket. Favor contactar al administrador para habilitar las políticas de edición.";
       }
       showToast("Error al actualizar ticket: " + errMsg);
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -522,6 +559,21 @@ export default function Reports() {
 
   const formatDate = (iso: string) => niFormatDate(iso, { day: "2-digit", month: "2-digit", year: "numeric" });
   const formatTime = (iso: string) => niFormatTime(iso);
+
+  const editItem = editingTicket?.ticket_items?.[0];
+  const editPayment = editingTicket?.payments?.[0];
+  const editProtected = !!(editingTicket?.is_membership_sale || editingTicket?.is_membership_usage || editingTicket?.is_loyalty_redemption);
+  const editSingleService = editingTicket?.ticket_items?.length === 1 && editItem?.item_type === "service";
+  const editSinglePayment = editingTicket?.payments?.length === 1 && editPayment?.payment_method !== "mixed" && !mixedPartsMap[String(editingTicket?.id)]?.length;
+  const editMoneyAllowed = editSingleService && editSinglePayment && !editProtected;
+  const editServiceId = editingTicket?._editServiceId ?? editItem?.service_id;
+  const editVehicleTypeId = editingTicket?._editVehicleTypeId ?? editingTicket?.vehicle_type_id;
+  const editSelectedService = services.find((s: any) => s.id === Number(editServiceId));
+  const editTariff = editSelectedService?.service_prices
+    ?.filter((p: any) => p.vehicle_type_id === Number(editVehicleTypeId))
+    .sort((a: any, b: any) => a.variant_sort - b.variant_sort)[0];
+  const editCurrency = editingTicket?._editCurrency ?? editPayment?.currency ?? "NIO";
+  const editRate = Number(editPayment?.exchange_rate) || Number(settings?.exchange_rate) || 36.5;
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
@@ -869,9 +921,15 @@ export default function Reports() {
                               <i className="fa-solid fa-print" />
                             </button>
                             <button
-                              onClick={() => setEditingTicket({ ...t })}
+                              onClick={() => {
+                                if (isCajero) { setShowPermissionModal(true); return; }
+                                if (t.is_membership_sale || t.is_membership_usage || t.is_loyalty_redemption) {
+                                  showToast("Los tickets de membresía y canje conservan su registro original"); return;
+                                }
+                                setEditingTicket({ ...t, _originalTotal: t.total });
+                              }}
                               className="touch-btn p-2 text-secondary hover:bg-secondary/10 rounded"
-                              title="Editar"
+                              title={t.is_membership_sale || t.is_membership_usage || t.is_loyalty_redemption ? "Ticket de membresía o canje protegido" : "Editar"}
                             >
                               <i className="fa-solid fa-pen" />
                             </button>
@@ -936,6 +994,11 @@ export default function Reports() {
             </div>
 
             <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+              {!editMoneyAllowed && (
+                <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-xs text-yellow-800">
+                  {editSingleService ? "El pago de este ticket tiene un desglose especial o falta su registro. Puedes corregir cliente y vehículo; el total y el pago se conservan." : "Este ticket contiene varios conceptos. Puedes corregir cliente y vehículo; el servicio, total y pago se conservan."}
+                </div>
+              )}
 
               {/* Total + Currency */}
               <div className="grid grid-cols-2 gap-3">
@@ -944,9 +1007,9 @@ export default function Reports() {
                   <input
                     type="number"
                     value={editingTicket.total ?? 0}
-                    onChange={(e) => setEditingTicket({ ...editingTicket, total: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) => setEditingTicket({ ...editingTicket, total: e.target.value })}
                     className="input-touch w-full"
-                    step="0.01" min="0"
+                    step="0.01" min="0" disabled={!editMoneyAllowed || savingEdit}
                   />
                 </div>
                 <div>
@@ -954,13 +1017,13 @@ export default function Reports() {
                   <select
                     value={editingTicket._editCurrency ?? editingTicket.payments?.[0]?.currency ?? "NIO"}
                     onChange={(e) => setEditingTicket({ ...editingTicket, _editCurrency: e.target.value })}
-                    className="input-touch w-full"
+                    className="input-touch w-full" disabled={!editMoneyAllowed || savingEdit}
                   >
                     <option value="NIO">C$ Córdobas (NIO)</option>
                     <option value="USD">$ Dólares (USD)</option>
                   </select>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Tasa: C${settings?.exchange_rate || 36.5} por $1 USD
+                    Tasa registrada: C${editRate} por $1 USD
                   </p>
                 </div>
               </div>
@@ -971,13 +1034,23 @@ export default function Reports() {
                 <select
                   value={editingTicket._editPaymentMethod ?? editingTicket.payments?.[0]?.payment_method ?? "cash"}
                   onChange={(e) => setEditingTicket({ ...editingTicket, _editPaymentMethod: e.target.value })}
-                  className="input-touch w-full"
+                  className="input-touch w-full" disabled={!editMoneyAllowed || savingEdit}
                 >
                   <option value="cash">Efectivo</option>
                   <option value="card">Tarjeta</option>
                   <option value="transfer">Transferencia</option>
+                  {editPayment?.payment_method === "mixed" && <option value="mixed">Mixto</option>}
                 </select>
               </div>
+
+              {editMoneyAllowed && (Number(editingTicket.total) !== Number(editingTicket._originalTotal) || editCurrency !== (editPayment?.currency || "NIO")) && (
+                <p className="text-xs text-muted-foreground">
+                  El pago se recalculará a {editCurrency === "USD" ? "$" : "C$"}{(editCurrency === "USD" ? Number(editingTicket.total) / editRate : Number(editingTicket.total)).toFixed(2)}. Se reiniciarán efectivo recibido y cambio.
+                </p>
+              )}
+              {editMoneyAllowed && editingTicket._editPaymentMethod && editingTicket._editPaymentMethod !== editPayment?.payment_method && (
+                <p className="text-xs text-muted-foreground">Al corregir solo el método se conservan el importe recibido y el cambio registrados.</p>
+              )}
 
               {/* Service */}
               <div>
@@ -985,13 +1058,22 @@ export default function Reports() {
                 <select
                   value={editingTicket._editServiceId ?? editingTicket.ticket_items?.[0]?.service_id ?? ""}
                   onChange={(e) => setEditingTicket({ ...editingTicket, _editServiceId: Number(e.target.value) })}
-                  className="input-touch w-full"
+                  className="input-touch w-full" disabled={!editSingleService || editProtected || savingEdit}
                 >
-                  <option value="">— Sin cambiar —</option>
+                  {!editItem?.service_id && <option value="">{editItem?.service_name_snapshot || "Sin servicio asignado"}</option>}
+                  {editItem?.service_id && !editSelectedService && <option value={editItem.service_id}>{editItem.service_name_snapshot || "Servicio anterior"} (inactivo)</option>}
                   {services.map((s: any) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
+                {businessLine === "car_wash" && editSingleService && editSelectedService && (
+                  <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>{editTariff ? `Tarifa actual para ${vehicleTypes.find((v: any) => v.id === Number(editVehicleTypeId))?.name || "vehículo"}: C$${Number(editTariff.price).toFixed(2)}` : "Este servicio no tiene tarifa para el vehículo seleccionado"}</span>
+                    {editTariff && editMoneyAllowed && Number(editTariff.price) !== Number(editingTicket.total) && (
+                      <button type="button" className="font-semibold text-secondary whitespace-nowrap" onClick={() => setEditingTicket({ ...editingTicket, total: Number(editTariff.price) })}>Aplicar tarifa</button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Cliente */}
@@ -999,12 +1081,13 @@ export default function Reports() {
                 <label className="block text-sm font-semibold text-foreground mb-1">Cliente</label>
                 <select
                   value={editingTicket._editCustomerId ?? editingTicket.customer_id ?? ""}
-                  onChange={(e) => setEditingTicket({ ...editingTicket, _editCustomerId: e.target.value || null })}
-                  className="input-touch w-full"
+                  onChange={(e) => setEditingTicket({ ...editingTicket, _editCustomerId: Number(e.target.value) })}
+                  className="input-touch w-full" disabled={savingEdit}
                 >
-                  <option value="">Cliente General</option>
+                  {!editingTicket.customer_id && <option value="">— Sin cliente —</option>}
+                  {editingTicket.customer_id && !customers.some((c: any) => c.id === editingTicket.customer_id) && <option value={editingTicket.customer_id}>{editingTicket.customer_name || "Cliente anterior"}</option>}
                   {customers.map((c: any) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                    <option key={c.id} value={c.id}>{c.name}{c.is_general ? " (General)" : ""}</option>
                   ))}
                 </select>
               </div>
@@ -1016,7 +1099,7 @@ export default function Reports() {
                   type="text"
                   value={editingTicket.vehicle_plate || ""}
                   onChange={(e) => setEditingTicket({ ...editingTicket, vehicle_plate: e.target.value })}
-                  className="input-touch w-full"
+                  className="input-touch w-full" disabled={savingEdit}
                   placeholder="Ej: ABC-123"
                 />
               </div>
@@ -1027,24 +1110,14 @@ export default function Reports() {
                 <select
                   value={editingTicket._editVehicleTypeId ?? editingTicket.vehicle_type_id ?? ""}
                   onChange={(e) => setEditingTicket({ ...editingTicket, _editVehicleTypeId: Number(e.target.value) || null })}
-                  className="input-touch w-full"
+                  className="input-touch w-full" disabled={savingEdit}
                 >
-                  <option value="">— Sin cambiar —</option>
-                  <option value={1}>Moto</option>
-                  <option value={2}>Sedán</option>
-                  <option value={3}>SUV</option>
-                  <option value={4}>Pick up</option>
-                  <option value={5}>Microbús</option>
-                  <option value={6}>Taxi</option>
+                  {!editingTicket.vehicle_type_id && <option value="">— Sin tipo de vehículo —</option>}
+                  {vehicleTypes.filter((v: any) => v.is_active || v.id === editingTicket.vehicle_type_id).map((v: any) => (
+                    <option key={v.id} value={v.id}>{v.name}{!v.is_active ? " (inactivo)" : ""}</option>
+                  ))}
                 </select>
               </div>
-
-              {(!editingTicket.payments || editingTicket.payments.length === 0) && (
-                <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-xs text-yellow-700">
-                  <i className="fa-solid fa-triangle-exclamation mr-1" />
-                  Este ticket no tiene pago registrado. Se creará uno nuevo al guardar.
-                </div>
-              )}
             </div>
 
             <div className="flex gap-2 mt-6">
@@ -1055,10 +1128,10 @@ export default function Reports() {
                 Cancelar
               </button>
               <button
-                onClick={handleEditSave}
-                className="flex-1 py-3 rounded-xl bg-accent text-accent-foreground font-semibold hover:bg-accent/90 transition-colors"
+                onClick={handleEditSave} disabled={savingEdit}
+                className="flex-1 py-3 rounded-xl bg-accent text-accent-foreground font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50"
               >
-                <i className="fa-solid fa-save mr-2" />Guardar
+                <i className="fa-solid fa-save mr-2" />{savingEdit ? "Guardando…" : "Guardar"}
               </button>
             </div>
           </div>
