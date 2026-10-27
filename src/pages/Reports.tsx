@@ -30,6 +30,7 @@ export default function Reports() {
   const [vehicleTypes, setVehicleTypes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingTicket, setEditingTicket] = useState<any>(null);
+  const [customerSearch, setCustomerSearch] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingTicket, setDeletingTicket] = useState<any>(null);
   const [reprintTicket, setReprintTicket] = useState<any>(null);
@@ -182,14 +183,15 @@ export default function Reports() {
   useEffect(() => { loadReport(); loadCatalogs(); }, [businessLine]);
 
   const loadCatalogs = async () => {
-    const [{ data: svcs }, { data: custs }, { data: vehicles }] = await Promise.all([
+    const [{ data: svcs }, custs, { data: vehicles }] = await Promise.all([
       supabase.from("services").select("id, name, service_prices(vehicle_type_id, price, variant_sort)")
         .eq("is_active", true).eq("is_extra", false).eq("business_line", businessLine).order("name"),
-      supabase.from("customers").select("id, name, is_general").order("name"),
+      fetchReportRows((from, to) => supabase.from("customers").select("id, name, is_general")
+        .order("name").order("id").range(from, to)),
       supabase.from("vehicle_types").select("id, name, is_active").order("sort_order"),
     ]);
     setServices(svcs || []);
-    setCustomers(custs || []);
+    setCustomers(custs);
     setVehicleTypes(vehicles || []);
   };
 
@@ -574,6 +576,13 @@ export default function Reports() {
     .sort((a: any, b: any) => a.variant_sort - b.variant_sort)[0];
   const editCurrency = editingTicket?._editCurrency ?? editPayment?.currency ?? "NIO";
   const editRate = Number(editPayment?.exchange_rate) || Number(settings?.exchange_rate) || 36.5;
+  const selectedCustomerId = editingTicket?._editCustomerId ?? editingTicket?.customer_id;
+  const matchingCustomers = customerSearch.trim()
+    ? customers.filter((c: any) => c.name?.toLocaleLowerCase().includes(customerSearch.trim().toLocaleLowerCase())).slice(0, 100)
+    : [];
+  const customerOptions = [...matchingCustomers];
+  const selectedCustomer = customers.find((c: any) => c.id === Number(selectedCustomerId));
+  if (selectedCustomer && !customerOptions.some((c: any) => c.id === selectedCustomer.id)) customerOptions.unshift(selectedCustomer);
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
@@ -926,6 +935,7 @@ export default function Reports() {
                                 if (t.is_membership_sale || t.is_membership_usage || t.is_loyalty_redemption) {
                                   showToast("Los tickets de membresía y canje conservan su registro original"); return;
                                 }
+                                setCustomerSearch("");
                                 setEditingTicket({ ...t, _originalTotal: t.total });
                               }}
                               className="touch-btn p-2 text-secondary hover:bg-secondary/10 rounded"
@@ -1079,17 +1089,26 @@ export default function Reports() {
               {/* Cliente */}
               <div>
                 <label className="block text-sm font-semibold text-foreground mb-1">Cliente</label>
+                <input
+                  type="search"
+                  value={customerSearch}
+                  onChange={(e) => setCustomerSearch(e.target.value)}
+                  className="input-touch w-full mb-2"
+                  placeholder="Buscar cliente por nombre..."
+                  disabled={savingEdit}
+                />
                 <select
                   value={editingTicket._editCustomerId ?? editingTicket.customer_id ?? ""}
                   onChange={(e) => setEditingTicket({ ...editingTicket, _editCustomerId: Number(e.target.value) })}
                   className="input-touch w-full" disabled={savingEdit}
                 >
                   {!editingTicket.customer_id && <option value="">— Sin cliente —</option>}
-                  {editingTicket.customer_id && !customers.some((c: any) => c.id === editingTicket.customer_id) && <option value={editingTicket.customer_id}>{editingTicket.customer_name || "Cliente anterior"}</option>}
-                  {customers.map((c: any) => (
+                  {editingTicket.customer_id && !selectedCustomer && <option value={editingTicket.customer_id}>{editingTicket.customer_name || "Cliente anterior"}</option>}
+                  {customerOptions.map((c: any) => (
                     <option key={c.id} value={c.id}>{c.name}{c.is_general ? " (General)" : ""}</option>
                   ))}
                 </select>
+                {customerSearch.trim() && matchingCustomers.length === 0 && <p className="text-xs text-muted-foreground mt-1">No se encontraron clientes.</p>}
               </div>
 
               {/* Placa */}
