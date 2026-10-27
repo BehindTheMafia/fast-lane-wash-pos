@@ -1,3 +1,6 @@
+import { useTicketRefresh } from "@/hooks/useTicketRefresh";
+import { useQueryClient } from "@tanstack/react-query";
+import { deleteReportTicket, invalidateTicketData } from "@/lib/ticketMutation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
@@ -41,6 +44,7 @@ interface Stats {
 }
 
 export default function Dashboard() {
+  const queryClient = useQueryClient();
   const { businessLine, isBarbershop } = useBusinessLine();
   const { data: settings } = useBusinessSettings();
   const { data: lowStockProducts } = useLowStockProducts();
@@ -234,6 +238,8 @@ export default function Dashboard() {
     loadStats();
   }, [settings, businessLine]);
 
+  useTicketRefresh(loadStats);
+
   const handleDeleteTicket = async (ticketId: number) => {
     if (isCajero) {
       setShowPermissionModal(true);
@@ -245,49 +251,8 @@ export default function Dashboard() {
     }
 
     try {
-      // 1. Check if this ticket has membership wash records
-      const { data: washRecords } = await supabase
-        .from("membership_washes")
-        .select("id, membership_id")
-        .eq("ticket_id", ticketId);
-
-      // 2. If membership usage exists, revert the washes_used counter
-      if (washRecords && washRecords.length > 0) {
-        const washCountByMembership: Record<number, number> = {};
-        washRecords.forEach((w: any) => {
-          washCountByMembership[w.membership_id] = (washCountByMembership[w.membership_id] || 0) + 1;
-        });
-
-        for (const [membershipId, count] of Object.entries(washCountByMembership)) {
-          const { data: membership } = await supabase
-            .from("customer_memberships")
-            .select("washes_used")
-            .eq("id", Number(membershipId))
-            .single();
-
-          if (membership) {
-            const newCount = Math.max(0, (membership.washes_used || 0) - count);
-            await supabase
-              .from("customer_memberships")
-              .update({ washes_used: newCount })
-              .eq("id", Number(membershipId));
-          }
-        }
-
-        // Delete the membership_washes records
-        await supabase
-          .from("membership_washes")
-          .delete()
-          .eq("ticket_id", ticketId);
-      }
-
-      // 3. Delete ticket (cascade handles ticket_items and payments)
-      const { error } = await supabase
-        .from("tickets")
-        .delete()
-        .eq("id", ticketId);
-
-      if (error) throw error;
+      await deleteReportTicket(ticketId);
+      await invalidateTicketData(queryClient);
 
       toast.success("Ticket eliminado correctamente");
       loadStats();

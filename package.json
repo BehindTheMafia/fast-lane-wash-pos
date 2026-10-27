@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "preview:prod": "vite preview --port 4173",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:db": "node --test tests/report-ticket-sync.test.mjs"
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.19",
@@ -73,6 +74,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.11",
     "@eslint/js": "^9.32.0",
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.6.0",

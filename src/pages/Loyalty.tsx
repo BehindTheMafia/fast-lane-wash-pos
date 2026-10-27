@@ -7,7 +7,7 @@ import {
 } from "@/hooks/useLoyaltyV3";
 import { useAuth } from "@/hooks/useAuth";
 import LoyaltyProgramCard from "@/components/loyalty/LoyaltyProgramCard";
-import LoyaltyHistory from "@/components/loyalty/LoyaltyHistory";
+import ReportVisitHistory from "@/components/loyalty/ReportVisitHistory";
 
 interface Customer {
   id: number;
@@ -52,7 +52,7 @@ export default function Loyalty() {
 
   const tabs: { id: Tab; label: string; icon: string; count?: number }[] = [
     { id: "dashboard", label: "Progreso", icon: "fa-chart-pie" },
-    { id: "history", label: "Historial", icon: "fa-clock-rotate-left", count: loyaltyData?.washLog.length },
+    { id: "history", label: "Historial", icon: "fa-clock-rotate-left", count: loyaltyData?.totalVisits },
     { id: "redeemed", label: "Canjes", icon: "fa-receipt", count: redeemedRewards.length },
   ];
 
@@ -253,6 +253,7 @@ export default function Loyalty() {
             ))}
           </div>
 
+          {loyaltyData && !loyaltyError && <p className="text-sm text-muted-foreground">{loyaltyData.totalVisits} visitas de autolavado · Premium: {loyaltyData.categories.premium} · Nítido: {loyaltyData.categories.nitido} · Breve: {loyaltyData.categories.breve}</p>}
           {/* ── Tab Content ── */}
           {loyaltyLoading ? (
             <div className="flex items-center justify-center py-16">
@@ -297,10 +298,7 @@ export default function Loyalty() {
 
               {/* History tab */}
               {activeTab === "history" && (
-                <LoyaltyHistory
-                  washLog={loyaltyData?.washLog ?? []}
-                  redemptions={loyaltyData?.redemptions ?? []}
-                />
+                <ReportVisitHistory visits={loyaltyData?.visits ?? []} />
               )}
 
               {/* Redeemed tab */}
@@ -310,11 +308,9 @@ export default function Loyalty() {
                     <i className="fa-solid fa-receipt" style={{ color: "#456A83" }} />
                     Premios canjeados
                   </h3>
-                  {loyaltyData?.rewards
-                    .filter((r) => r.status === "redeemed")
-                    .map((r) => (
+                  {loyaltyData?.redemptions.map((redemption) => (
                       <div
-                        key={r.id}
+                        key={redemption.id}
                         className="rounded-2xl p-4 flex items-start gap-4 border shadow-xs"
                         style={{ backgroundColor: "#FFFFFF", borderColor: "#E8DECC" }}
                       >
@@ -325,10 +321,10 @@ export default function Loyalty() {
                           <i className="fa-solid fa-check" style={{ color: "#002C47" }} />
                         </div>
                         <div className="flex-1">
-                          <p className="font-bold text-sm" style={{ color: "#002C47" }}>{r.reward_name}</p>
+                          <p className="font-bold text-sm" style={{ color: "#002C47" }}>{redemption.loyalty_rewards?.reward_name || "Premio canjeado"}</p>
                           <p className="text-xs mt-0.5" style={{ color: "#456A83" }}>
-                            Programa: {r.loyalty_programs?.name} · Canjeado el{" "}
-                            {new Date(r.earned_at).toLocaleDateString("es-NI")}
+                            Programa: {redemption.loyalty_rewards?.loyalty_programs?.name} · Canjeado el{" "}
+                            {new Date(redemption.redeemed_at).toLocaleDateString("es-NI")}
                           </p>
                         </div>
                         <span
@@ -339,7 +335,7 @@ export default function Loyalty() {
                         </span>
                       </div>
                     ))}
-                  {(loyaltyData?.rewards.filter((r) => r.status === "redeemed").length ?? 0) === 0 && (
+                  {(loyaltyData?.redemptions.length ?? 0) === 0 && (
                     <div className="text-center py-10 text-sm font-medium" style={{ color: "#456A83" }}>
                       <i className="fa-solid fa-receipt text-3xl mb-2 opacity-30" />
                       <p>Sin premios canjeados</p>

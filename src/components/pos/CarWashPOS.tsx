@@ -1,3 +1,6 @@
+import { useTicketRefresh } from "@/hooks/useTicketRefresh";
+import { useQueryClient } from "@tanstack/react-query";
+import { invalidateTicketData } from "@/lib/ticketMutation";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useServices, useExtras, useBarberServicesForMix } from "@/hooks/useServices";
 import { useVehicleTypes } from "@/hooks/useVehicleTypes";
@@ -5,19 +8,16 @@ import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
-import { niStartOfDay, niNow } from "@/utils/niDate";
+import { niStartOfDay } from "@/utils/niDate";
 import PaymentModal from "@/components/pos/PaymentModal";
 import CustomerModal from "@/components/pos/CustomerModal";
 import TicketPrint from "@/components/pos/TicketPrint";
 import MembershipSelector from "@/components/pos/MembershipSelector";
 import { useMemberships } from "@/hooks/useMemberships";
 import { isServiceEligible, ELIGIBLE_SERVICE_NAMES } from "@/lib/membershipUtils";
-import { checkServiceInventory, recordServiceInventory } from "@/hooks/useCarWashInventory";
+
 import {
   useAvailableRewards,
-  useRecordLoyaltyV3Wash,
-  useRedeemLoyaltyReward,
-  useValidateLoyaltyRedemption,
   findBlockingReward,
   REWARD_SERVICE_MAP,
   REWARD_DISCOUNT_MAP,
@@ -53,6 +53,8 @@ interface Customer {
 }
 
 export default function CarWashPOS() {
+  const queryClient = useQueryClient();
+  const saleRequestId = useRef(crypto.randomUUID());
   const { barbershopVisible } = useBusinessLine();
   const { data: services } = useServices();
   const { data: extras } = useExtras();
@@ -104,14 +106,11 @@ export default function CarWashPOS() {
   const [rewardBlockModal, setRewardBlockModal] = useState<{ show: boolean; rewardId: number | null; serviceName: string }>({ show: false, rewardId: null, serviceName: "" });
   const [selectedLoyaltyReward, setSelectedLoyaltyReward] = useState<LoyaltyReward | null>(null);
 
-  const { memberships, recordWash, getMembershipWithStatus } = useMemberships(customer?.id?.toString());
+  const { memberships, getMembershipWithStatus } = useMemberships(customer?.id?.toString());
 
   // Loyalty v3 hooks
   const customerId = customer && !customer.is_general ? Number(customer.id) : null;
   const { data: availableRewardsV3 = [] } = useAvailableRewards(customerId);
-  const recordLoyaltyV3 = useRecordLoyaltyV3Wash();
-  const redeemLoyaltyV3 = useRedeemLoyaltyReward();
-  const validateLoyaltyV3 = useValidateLoyaltyRedemption();
   const { isAdmin, isOwner } = useAuth();
 
   // Filter active memberships with remaining washes
@@ -277,6 +276,7 @@ export default function CarWashPOS() {
   };
 
   const newTicket = () => {
+    saleRequestId.current = crypto.randomUUID();
     setTicketItems([]);
     setSelectedServiceId(0);
     setSelectedVehicleId(0);
@@ -321,6 +321,8 @@ export default function CarWashPOS() {
     }
   }, [hasActiveMembership, activeMembershipVehicleTypeIds.length]);
 
+  useTicketRefresh(loadRecent);
+
   const handlePaymentComplete = async (paymentData: any) => {
     // Guarda sincrónica con ref (previene race condition de doble-click)
     if (isProcessingSaleRef.current) return;
@@ -331,341 +333,33 @@ export default function CarWashPOS() {
     try {
       if (ticketItems.length === 0 || !user) return;
 
-      // ── Split items by business line ──────────────────────────────────
       const homeItems = ticketItems.filter(i => !i.businessLine || i.businessLine === "car_wash");
-      const crossItems = ticketItems.filter(i => i.businessLine === "barbershop");
-      const crossSubtotal = crossItems.reduce((s, i) => s + i.price, 0);
-      const crossDiscount = crossItems.reduce((s, i) => s + (i.price * i.discountPercent / 100), 0);
-      const crossTotal = crossSubtotal - crossDiscount;
-      const homeTotal = total - crossTotal;
-      const hasCross = crossItems.length > 0 && crossTotal > 0;
-
-      const firstItem = homeItems[0] || ticketItems[0];
-
-      // ── Inventory pre-check ───────────────────────────────────────────────
-      // Collect unique non-extra car_wash service IDs (extras and loyalty are skipped by RPC,
-      // but filter client-side to avoid unnecessary calls).
-      const nonExtraServiceIds = [...new Set(
-        homeItems
-          .filter(i => i.serviceId && i.serviceId !== "loyalty-free" && (!i.businessLine || i.businessLine === "car_wash"))
-          .map(i => Number(i.serviceId))
-          .filter(id => !isNaN(id) && id > 0)
-          // Only non-extra services have inventory; extras are filtered by the RPC, but
-          // we exclude them using the already-loaded services list to reduce round-trips.
-          .filter(id => {
-            const svc = services?.find((s: any) => s.id === id);
-            return !svc || svc.is_extra === false;
-          })
-      )];
-
-      for (const serviceId of nonExtraServiceIds) {
-        const result = await checkServiceInventory(serviceId);
-        if (!result.ok) {
-          const depleted = (result.products || []).filter(p => p.available <= 0);
-          const names = depleted.map(p => p.name).join(", ");
-          throw new Error(`Stock insuficiente para completar el servicio. Productos agotados: ${names}. Por favor repón el inventario antes de registrar esta venta.`);
-        }
-      }
-
-      // Loyalty v3: server-side validation before ticket creation
-      const loyaltyRedemptionItem = homeItems.find(i => i.isLoyaltyRedemption && i.loyaltyRewardId);
-      if (loyaltyRedemptionItem && customerId) {
-        try {
-          const validation = await validateLoyaltyV3.mutateAsync({
-            rewardId: loyaltyRedemptionItem.loyaltyRewardId!,
-            customerId,
-            serviceName: loyaltyRedemptionItem.serviceName,
-          });
-          if (!validation.valid) {
-            throw new Error(
-              validation.error_msg ||
-              `Premio inválido: ${validation.error ?? 'error desconocido'}`
-            );
-          }
-        } catch (valErr: any) {
-          // If it's our validation error, propagate; if RPC not found yet, warn but continue
-          if (valErr.message?.includes('Premio inválido') || valErr.message?.includes('mismatch')) {
-            throw valErr;
-          }
-          console.warn('[LoyaltyV3] Validation RPC not available yet, skipping:', valErr.message);
-        }
-      }
-
-      // Generate ticket number
-      const ticketNumber = `T-${Date.now().toString(36).toUpperCase()}`;
-
-      // Create the ticket (home business line only)
-      const isLoyaltyRedemption = !!loyaltyRedemptionItem;
-      const loyaltyOriginalAmount = loyaltyRedemptionItem?.loyaltyOriginalPrice ?? 0;
-      const loyaltyRewardId = loyaltyRedemptionItem?.loyaltyRewardId ?? null;
-
-      const { data: ticket, error: ticketErr } = await supabase
-        .from("tickets")
-        .insert({
-          ticket_number: ticketNumber,
-          user_id: user.id,
-          customer_id: customer?.id || null,
-          vehicle_type_id: firstItem.vehicleTypeId,
-          vehicle_plate: customer?.plate || "",
-          total: hasCross ? homeTotal : total,
-          status: "paid",
-          business_line: "car_wash",
-          created_at: niNow(),
-          is_loyalty_redemption: isLoyaltyRedemption,
-          loyalty_reward_id: loyaltyRewardId,
-          loyalty_original_amount: loyaltyOriginalAmount,
-        } as any)
-        .select()
-        .single();
-
-      if (ticketErr) throw ticketErr;
-
-      // Create ticket_items for HOME services only
-      for (const item of homeItems) {
-        if (item.serviceId === "loyalty-free") continue;
-        await (supabase as any).from("ticket_items").insert({
-          ticket_id: (ticket as any).id,
-          item_type: "service",
-          service_id: typeof item.serviceId === 'number' ? item.serviceId : null,
-          quantity: 1,
-          price: item.price,
-          service_name_snapshot: item.serviceName || null,
-          price_snapshot: item.price,
-          discount_reason: item.isLoyaltyRedemption ? 'loyalty_redemption' : null,
-        });
-      }
-
-      const rollbackTicket = async () => {
-        await supabase.from("ticket_mixed_payments").delete().eq("ticket_id", (ticket as any).id);
-        await supabase.from("payments").delete().eq("ticket_id", (ticket as any).id);
-        await supabase.from("ticket_items").delete().eq("ticket_id", (ticket as any).id);
-        await supabase.from("tickets").delete().eq("id", (ticket as any).id);
+      const firstItem = homeItems[0];
+      const redemption = homeItems.find(i => i.isLoyaltyRedemption && i.loyaltyRewardId);
+      if (!firstItem || !customer) throw new Error("Selecciona un cliente y un servicio de autolavado");
+      const payload = {
+        customer_id: Number(customer.id), vehicle_plate: customer.plate || "",
+        vehicle_type_id: firstItem.vehicleTypeId || null,
+        membership_id: selectedMembershipId, reward_id: redemption?.loyaltyRewardId || null,
+        loyalty_original_amount: redemption?.loyaltyOriginalPrice || 0,
+        use_legacy_reward: usingLoyaltyWash, exchange_rate: exchangeRate, payment: paymentData,
+        items: ticketItems.filter(i => i.serviceId !== "loyalty-free").map(i => ({
+          service_id: typeof i.serviceId === "number" ? i.serviceId : null,
+          service_name: i.serviceName, price: i.price, discount_percent: i.discountPercent,
+          business_line: i.businessLine || "car_wash", is_loyalty_redemption: !!i.isLoyaltyRedemption,
+        })),
       };
-
-      // ── Record inventory consumption for non-extra car_wash services ──────
-      for (const serviceId of nonExtraServiceIds) {
-        try {
-          await recordServiceInventory(serviceId, (ticket as any).id);
-        } catch (invErr: any) {
-          await rollbackTicket();
-          throw new Error(`Error al registrar consumo de inventario: ${invErr.message}`);
-        }
+      const { data, error } = await (supabase as any).rpc("complete_car_wash_sale", {
+        p_request_id: saleRequestId.current, p_payload: payload,
+      });
+      if (error) throw error;
+      if (!data?.success || !data.ticket) throw new Error(data?.error || "No se pudo registrar la venta");
+      const ticket = data.ticket;
+      await invalidateTicketData(queryClient);
+      if (data.rewards_earned?.length) {
+        const names = [...new Set(data.rewards_earned.map((r: any) => r.reward_name))].join(", ");
+        setTimeout(() => showToast(`🎁 ¡Premio ganado! ${names}`, "success"), 1000);
       }
-
-      // ── Payment amount for home ticket ──
-      const homePaymentAmount = hasCross
-        ? (paymentData.currency === "USD" ? Number((homeTotal / exchangeRate).toFixed(2)) : homeTotal)
-        : paymentData.amount;
-
-      // Create payment record(s)
-      if (paymentData.method === "mixed" && paymentData.mixedPayments?.length) {
-        const { error: mixedPayErr } = await supabase.from("payments").insert({
-          ticket_id: (ticket as any).id,
-          amount: homePaymentAmount,
-          currency: paymentData.currency,
-          payment_method: "mixed",
-          amount_received: paymentData.received,
-          change_amount: paymentData.change,
-          exchange_rate: exchangeRate,
-        } as any);
-
-        if (mixedPayErr) {
-          await rollbackTicket();
-          throw new Error(mixedPayErr.message || "No se pudo registrar el pago mixto");
-        }
-
-        for (const part of paymentData.mixedPayments) {
-          const amountNio =
-            paymentData.currency === "USD"
-              ? Number((part.amount * exchangeRate).toFixed(2))
-              : part.amount;
-          const changeNio =
-            paymentData.currency === "USD"
-              ? Number((part.change * exchangeRate).toFixed(2))
-              : part.change;
-          const appliedNio = amountNio;
-
-          const { error: partErr } = await (supabase as any).from("ticket_mixed_payments").insert({
-            ticket_id: (ticket as any).id,
-            method: part.method,
-            currency: paymentData.currency,
-            amount: part.amount,
-            exchange_rate: exchangeRate,
-            amount_nio: amountNio,
-            applied_nio: appliedNio,
-            change_nio: changeNio,
-          });
-
-          if (partErr) {
-            await rollbackTicket();
-            throw new Error(partErr.message || "No se pudo guardar el desglose del pago mixto");
-          }
-        }
-      } else {
-        const { error: payErr } = await supabase.from("payments").insert({
-          ticket_id: (ticket as any).id,
-          amount: homePaymentAmount,
-          currency: paymentData.currency,
-          payment_method: paymentData.method,
-          amount_received: paymentData.received,
-          change_amount: paymentData.change,
-          exchange_rate: exchangeRate,
-        } as any);
-
-        if (payErr) {
-          await rollbackTicket();
-          throw new Error(payErr.message || "No se pudo registrar el pago");
-        }
-      }
-
-      // ── Create CROSS-LINE ticket for barbershop items ────────────────
-      if (hasCross) {
-        const crossTicketNumber = `B-${Date.now().toString(36).toUpperCase()}`;
-        const crossPaymentAmount = paymentData.currency === "USD"
-          ? Number((crossTotal / exchangeRate).toFixed(2))
-          : crossTotal;
-
-        const { data: crossTicket } = await supabase
-          .from("tickets")
-          .insert({
-            ticket_number: crossTicketNumber,
-            user_id: user.id,
-            customer_id: customer?.id || null,
-            vehicle_type_id: null,
-            vehicle_plate: customer?.plate || "",
-            total: crossTotal,
-            status: "paid",
-            business_line: "barbershop",
-            created_at: niNow(),
-          } as any)
-          .select()
-          .single();
-
-        if (crossTicket) {
-          const crossId = (crossTicket as any).id;
-          for (const item of crossItems) {
-            await (supabase as any).from("ticket_items").insert({
-              ticket_id: crossId,
-              item_type: "service",
-              service_id: item.serviceId,
-              quantity: 1,
-              price: item.price * (1 - item.discountPercent / 100),
-              service_name_snapshot: item.serviceName || null,
-              price_snapshot: item.price,
-            });
-          }
-          // Simple payment for cross ticket (same method, proportional amount)
-          const crossMethod = paymentData.method === "mixed"
-            ? (paymentData.mixedPayments?.[0]?.method || "cash")
-            : paymentData.method;
-          await supabase.from("payments").insert({
-            ticket_id: crossId,
-            amount: crossPaymentAmount,
-            currency: paymentData.currency,
-            payment_method: crossMethod,
-            amount_received: crossPaymentAmount,
-            change_amount: 0,
-            exchange_rate: exchangeRate,
-          } as any);
-        }
-      }
-
-      // Record membership wash if applicable
-      if (selectedMembershipId && ticketItems.length > 0) {
-        try {
-          await recordWash({
-            membershipId: selectedMembershipId,
-            ticketId: (ticket as any).id,
-            serviceId: ticketItems[0].serviceId,
-            isBonus: false,
-          });
-        } catch (err) {
-          console.error('Error recording membership wash:', err);
-        }
-      }
-
-      // Use loyalty free wash if applicable
-      if (usingLoyaltyWash && customer && !customer.is_general) {
-        try {
-          await (supabase.rpc as any)('use_loyalty_free_wash', {
-            p_customer_id: customer.id
-          });
-          console.log('Loyalty free wash redeemed');
-        } catch (err) {
-          console.error('Error redeeming loyalty wash:', err);
-        }
-      }
-
-      // Increment loyalty counter by number of REAL services (exclude loyalty-free items)
-      const realServices = ticketItems.filter(i => i.serviceId !== 'loyalty-free');
-      if (customer && !customer.is_general && realServices.length > 0) {
-        try {
-          const { data: loyaltyData, error: loyaltyError } = await (supabase.rpc as any)('increment_loyalty_visit', {
-            p_customer_id: customer.id,
-            p_ticket_id: (ticket as any).id,
-            p_service_id: realServices[0].serviceId,
-          });
-
-          if (loyaltyError) {
-            console.error('Error incrementing loyalty:', loyaltyError);
-          } else if (loyaltyData) {
-            console.log('Loyalty recorded:', loyaltyData);
-
-            if (loyaltyData.earned_free_wash) {
-              setTimeout(() => {
-                showToast(`🎉 ¡Felicidades ${customer.name}! Has ganado un Pasteado GRATIS. Disponibles: ${loyaltyData.free_washes_available}`, "success");
-              }, 1000);
-            }
-          }
-        } catch (err) {
-          console.error('Error with loyalty program:', err);
-        }
-      }
-
-      // Loyalty v3: register wash for matching programs (Premium / Nítido)
-      // Exclude loyalty-free (legacy), but count any actual service performed
-      if (customer && !customer.is_general) {
-        const realItems = ticketItems.filter(
-          i => i.serviceId !== 'loyalty-free' &&
-               i.serviceId !== 'loyalty-reward' &&
-               typeof i.serviceId === 'number'
-        );
-        for (const item of realItems) {
-          try {
-            const result = await recordLoyaltyV3.mutateAsync({
-              customerId: Number(customer.id),
-              ticketId: (ticket as any).id,
-              serviceId: Number(item.serviceId),
-              userId: user?.id,
-            });
-            if (result.recorded && result.rewards_earned && result.rewards_earned.length > 0) {
-              const rewardNames = result.rewards_earned.map((r: any) => r.reward_name).join(", ");
-              setTimeout(() => {
-                showToast(`🎁 ¡Premio ganado! ${rewardNames}`, "success");
-              }, 1000);
-            }
-          } catch (lvErr) {
-            console.error('[LoyaltyV3] Error recording wash:', lvErr);
-          }
-        }
-
-        // If a loyalty reward was applied as a free item, mark it redeemed now
-        const loyaltyRewardItem = ticketItems.find(i => i.isLoyaltyRedemption);
-        if (loyaltyRewardItem && selectedLoyaltyReward) {
-          try {
-            await redeemLoyaltyV3.mutateAsync({
-              rewardId: selectedLoyaltyReward.id,
-              customerId: Number(customer.id),
-              ticketId: (ticket as any).id,
-              userId: user?.id,
-              notes: 'Canjeado en POS junto con servicio',
-            });
-          } catch (rdErr) {
-            console.error('[LoyaltyV3] Error redeeming reward:', rdErr);
-          }
-        }
-      }
-
 
       setLastTicket({
         ...ticket,

@@ -1,3 +1,5 @@
+import { useTicketRefresh } from "@/hooks/useTicketRefresh";
+import { useCustomerVisits } from "@/hooks/useCustomerVisits";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -32,6 +34,8 @@ export default function Customers() {
   const [loyaltyDetailCustomer, setLoyaltyDetailCustomer] = useState<Customer | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  const visitQuery = useCustomerVisits(customers.map(c => c.id));
+
   const canDelete = isAdmin || isOwner || isOperator;
 
   const loadCount = async () => {
@@ -50,6 +54,8 @@ export default function Customers() {
 
   useEffect(() => { loadCount(); }, []);
   useEffect(() => { load(); }, [search]);
+
+  useTicketRefresh(load);
 
   const handleNew = () => {
     setEditingCustomer(null);
@@ -135,10 +141,7 @@ export default function Customers() {
             </thead>
             <tbody>
               {customers.map((c) => {
-                const visits = c.loyalty_visits || 0;
-                const freeWashesAvailable = (c.loyalty_free_washes_earned || 0) - (c.loyalty_free_washes_used || 0);
-                const progressToNextFree = visits % 8;
-                const progressPercent = (progressToNextFree / 8) * 100;
+                const visits = visitQuery.data?.get(c.id) || {total:0,premium:0,nitido:0,breve:0};
 
                 return (
                   <tr key={c.id} className="border-b border-border last:border-0 hover:bg-muted/30">
@@ -154,25 +157,12 @@ export default function Customers() {
                           onClick={() => setLoyaltyDetailCustomer(c)}
                           className="w-full text-left touch-btn"
                         >
-                          <div className="flex flex-col items-center gap-1">
-                            <div className="flex items-center gap-2 text-xs">
-                              <span className="font-semibold text-primary">{visits} servicios</span>
-                              {freeWashesAvailable > 0 && (
-                                <span className="px-2 py-0.5 rounded-full bg-accent/20 text-accent font-bold">
-                                  <i className="fa-solid fa-gift mr-1" />
-                                  {freeWashesAvailable} gratis
-                                </span>
-                              )}
-                            </div>
-                            <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-                              <div
-                                className="h-full bg-gradient-to-r from-primary to-accent transition-all duration-300"
-                                style={{ width: `${progressPercent}%` }}
-                              />
-                            </div>
-                            <span className="text-xs text-muted-foreground">
-                              {8 - progressToNextFree} servicios para pasteado gratis
-                            </span>
+                          <div className="flex flex-col items-center gap-1 text-xs">
+                            {visitQuery.isError ? <span>No se pudieron cargar las visitas</span> :
+                              visitQuery.isLoading ? <span>Cargando visitas…</span> : <>
+                                <span className="font-semibold text-primary">{visits.total} visitas</span>
+                                <span>Premium: {visits.premium} · Nítido: {visits.nitido} · Breve: {visits.breve}</span>
+                              </>}
                           </div>
                         </button>
                       )}

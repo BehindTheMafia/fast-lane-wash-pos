@@ -1,3 +1,4 @@
+import { useTicketRefresh } from "@/hooks/useTicketRefresh";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
@@ -9,13 +10,15 @@ import ReportsVehicleByDayChart from "@/components/reports/ReportsVehicleByDayCh
 import { buildSalesTrendData, buildVehicleVisitsByDayData } from "@/lib/reportsChartData";
 import { fetchReportRows, fetchReportRowsForIds } from "@/lib/fetchReportRows";
 import { niToday, niFormatDate, niFormatTime } from "@/utils/niDate";
-import { reverseServiceInventory } from "@/hooks/useCarWashInventory";
+import { useQueryClient } from "@tanstack/react-query";
+import { deleteReportTicket, invalidateTicketData } from "@/lib/ticketMutation";
 import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import { BUSINESS_LINE_LABELS } from "@/lib/businessLine";
 
 const methodLabels: Record<string, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia", mixed: "Mixto" };
 
 export default function Reports() {
+  const queryClient = useQueryClient();
   const { businessLine, isBarbershop } = useBusinessLine();
   const { data: settings } = useBusinessSettings();
   const { isCajero } = useAuth();
@@ -185,6 +188,8 @@ export default function Reports() {
     setCustomers(custs || []);
   };
 
+  useTicketRefresh(loadReport);
+
   const handleDeleteConfirm = async () => {
     if (isCajero) {
       setShowPermissionModal(true);
@@ -193,77 +198,8 @@ export default function Reports() {
     if (!deletingTicket) return;
 
     try {
-      // 1. Check if this ticket has membership wash records
-      const { data: washRecords } = await supabase
-        .from("membership_washes")
-        .select("id, membership_id")
-        .eq("ticket_id", deletingTicket.id);
-
-      // 2. If membership usage exists, revert the washes_used counter
-      if (washRecords && washRecords.length > 0) {
-        // Group wash count by membership_id
-        const washCountByMembership: Record<number, number> = {};
-        washRecords.forEach((w: any) => {
-          washCountByMembership[w.membership_id] = (washCountByMembership[w.membership_id] || 0) + 1;
-        });
-
-        // Decrement washes_used for each affected membership
-        for (const [membershipId, count] of Object.entries(washCountByMembership)) {
-          const { data: membership } = await supabase
-            .from("customer_memberships")
-            .select("washes_used")
-            .eq("id", Number(membershipId))
-            .single();
-
-          if (membership) {
-            const newCount = Math.max(0, (membership.washes_used || 0) - count);
-            await supabase
-              .from("customer_memberships")
-              .update({ washes_used: newCount })
-              .eq("id", Number(membershipId));
-          }
-        }
-
-        // Delete the membership_washes records
-        await supabase
-          .from("membership_washes")
-          .delete()
-          .eq("ticket_id", deletingTicket.id);
-      }
-
-      // 3. Reverse car_wash inventory consumption (usage_count / stock_quantity)
-      if (deletingTicket.business_line === "car_wash") {
-        try {
-          await reverseServiceInventory(deletingTicket.id);
-        } catch (invErr: any) {
-          console.error("[Reports] Error reversing inventory:", invErr.message);
-          // Non-fatal: continue with ticket deletion
-        }
-      }
-
-      // 3b. Reverse loyalty progress / wash log / un-redeemed rewards
-      try {
-        const { data: loyaltyResult, error: loyaltyErr } = await (supabase as any).rpc(
-          "reverse_loyalty_on_ticket_delete",
-          { p_ticket_id: deletingTicket.id }
-        );
-        if (loyaltyErr) {
-          console.error("[Reports] Error reversing loyalty:", loyaltyErr.message);
-        } else if (loyaltyResult?.reversed) {
-          console.log("[Reports] Loyalty reversed:", loyaltyResult);
-        }
-      } catch (loyErr: any) {
-        console.error("[Reports] Loyalty reversal exception:", loyErr.message);
-        // Non-fatal: continue with ticket deletion
-      }
-
-      // 4. Delete ticket (cascade will handle ticket_items and payments)
-      const { error } = await supabase
-        .from("tickets")
-        .delete()
-        .eq("id", deletingTicket.id);
-
-      if (error) throw error;
+      await deleteReportTicket(deletingTicket.id);
+      await invalidateTicketData(queryClient);
 
       showToast("Ticket eliminado correctamente");
       setDeletingTicket(null);
@@ -275,64 +211,27 @@ export default function Reports() {
 
   const handleEditSave = async () => {
     if (!editingTicket) return;
-    const exRate = settings?.exchange_rate || 36.5;
     try {
-      // 1. Update ticket fields
-      const { error: ticketErr } = await supabase
-        .from("tickets")
-        .update({
-          plate: editingTicket.vehicle_plate || editingTicket.plate, // Fix: use 'plate' instead of 'vehicle_plate'
-          total: Number(editingTicket.total),
-          customer_id: editingTicket._editCustomerId ?? editingTicket.customer_id,
-          vehicle_type: editingTicket._editVehicleTypeId ?? editingTicket.vehicle_type, // Fix: use 'vehicle_type' instead of 'vehicle_type_id'
-        })
-        .eq("id", editingTicket.id);
-
-      if (ticketErr) throw ticketErr;
-
-      // 2. Update ticket_item service if changed
-      if (editingTicket._editServiceId && editingTicket.ticket_items?.length > 0) {
-        // Find the first service item and update it
-        const itemId = editingTicket.ticket_items[0].id;
-        await supabase
-          .from("ticket_items")
-          .update({
-            service_id: editingTicket._editServiceId,
-            price: Number(editingTicket.total)
-          })
-          .eq("id", itemId);
+      const changes: Record<string, unknown> = {
+        vehicle_plate: editingTicket.vehicle_plate ?? editingTicket.plate,
+        total: Number(editingTicket.total),
+        customer_id: editingTicket._editCustomerId ?? editingTicket.customer_id,
+        vehicle_type_id: editingTicket._editVehicleTypeId ?? editingTicket.vehicle_type_id,
+        service_id: editingTicket._editServiceId,
+      };
+      if (editingTicket._editPaymentMethod && editingTicket._editPaymentMethod !== editingTicket.payments?.[0]?.payment_method) {
+        changes.payment_method = editingTicket._editPaymentMethod;
       }
-
-      const method = editingTicket._editPaymentMethod ?? editingTicket.payments?.[0]?.payment_method ?? "cash";
-      const currency = editingTicket._editCurrency ?? editingTicket.payments?.[0]?.currency ?? "NIO";
-      const amount = Number(editingTicket.total);
-
-      // We use ticket_id to ensure we update the correct associated payment record
-      if (!editingTicket.payments || editingTicket.payments.length === 0) {
-        const { error: payErr } = await supabase.from("payments").insert({
-          ticket_id: editingTicket.id,
-          amount,
-          currency,
-          payment_method: method,
-          amount_received: amount,
-          change_amount: 0,
-          exchange_rate: exRate,
-        } as any);
-        if (payErr) throw payErr;
-      } else {
-        const { error: payErr } = await supabase
-          .from("payments")
-          .update({
-            amount,
-            currency,
-            payment_method: method,
-            amount_received: amount,
-            change_amount: 0,
-            exchange_rate: exRate,
-          })
-          .eq("ticket_id", editingTicket.id);
-        if (payErr) throw payErr;
+      if (editingTicket._editCurrency && editingTicket._editCurrency !== editingTicket.payments?.[0]?.currency) {
+        changes.currency = editingTicket._editCurrency;
       }
+      const { data, error } = await (supabase as any).rpc("edit_report_ticket", {
+        p_ticket_id: editingTicket.id, p_changes: changes,
+        p_expected_updated_at: editingTicket.updated_at || null,
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "No se pudo actualizar el ticket");
+      await invalidateTicketData(queryClient);
 
       showToast("Ticket actualizado correctamente");
       setEditingTicket(null);

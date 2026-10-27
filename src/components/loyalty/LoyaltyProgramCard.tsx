@@ -29,31 +29,18 @@ export default function LoyaltyProgramCard({ progress, program, rewards, custome
 
   // Helper to find reward status for a given milestone
   const getMilestoneRewardStatus = (m: (typeof program.rewards)[0]) => {
-    const matchingReward = rewards.find(
-      (r) =>
-        r.program_id === program.id &&
-        (m.options?.some(
-          (o) =>
-            o.reward_slug === r.reward_slug ||
-            o.reward_slug === r.option_slug
-        ) ||
-          r.reward_slug === m.reward_slug)
-    );
-    const isRedeemed = matchingReward?.status === "redeemed";
-    const isAvailable = matchingReward?.status === "available";
-    const isReached = inCycle >= m.at || isRedeemed || isAvailable;
+    const matchingReward = rewards.find(r => r.program_id === program.id &&
+      r.option_group === `${program.slug}_${m.at}w_c${cycleNum}` &&
+      r.status !== "expired");
+    const isReached = inCycle >= m.at;
+    const isRedeemed = isReached && matchingReward?.status === "redeemed";
+    const isAvailable = isReached && matchingReward?.status === "available";
     return { matchingReward, isRedeemed, isAvailable, isReached };
   };
 
-  // Determine effective washes in cycle: if a milestone was redeemed, customer has reached at least that milestone count
-  const maxRedeemedAt = program.rewards.reduce((max, m) => {
-    const { isRedeemed } = getMilestoneRewardStatus(m);
-    return isRedeemed ? Math.max(max, m.at) : max;
-  }, 0);
-
-  const effectiveInCycle = Math.max(inCycle, maxRedeemedAt);
-  const effectiveTotalWashes = Math.max(totalWashes, maxRedeemedAt);
-  const pct = Math.min(100, Math.round((effectiveInCycle / cycleSize) * 100));
+  const effectiveInCycle = inCycle;
+  const effectiveTotalWashes = totalWashes;
+  const pct = Math.min(100, Math.round((inCycle / cycleSize) * 100));
 
   // Group available rewards by option_group
   // For each choice group: show ONE card with "Elige" button

@@ -35,7 +35,7 @@ interface Props {
 
 type ModeTab = "v3_current" | "legacy_previous";
 
-export default function LoyaltyDetailModal({ customer, onClose, onUpdate }: Props) {
+export default function LoyaltyDetailModal({ customer, onClose }: Props) {
   // Local reactive copy of customer state
   const [localCustomer, setLocalCustomer] = useState<Customer>(customer);
 
@@ -47,35 +47,19 @@ export default function LoyaltyDetailModal({ customer, onClose, onUpdate }: Prop
   const [activeMode, setActiveMode] = useState<ModeTab>("v3_current");
 
   // V3 state & query
-  const { data: loyaltyV3Data, isLoading: loadingV3, refetch: refetchV3 } = useCustomerLoyalty(localCustomer.id);
+  const { data: loyaltyV3Data, isLoading: loadingV3, error: loyaltyError, refetch: refetchV3 } = useCustomerLoyalty(localCustomer.id);
   const { data: programs = [] } = useLoyaltyPrograms();
 
   // Legacy state
   const [legacyHistory, setLegacyHistory] = useState<LoyaltyVisit[]>([]);
   const [loadingLegacy, setLoadingLegacy] = useState(true);
-  const [editingLegacy, setEditingLegacy] = useState(false);
-  const [legacyForm, setLegacyForm] = useState({
-    loyalty_visits: 0,
-    loyalty_free_washes_earned: 0,
-    loyalty_free_washes_used: 0,
-  });
-  const [savingLegacy, setSavingLegacy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
 
-  const legacyVisits = localCustomer.loyalty_visits || 0;
-  const legacyEarned = localCustomer.loyalty_free_washes_earned || 0;
-  const legacyUsed = localCustomer.loyalty_free_washes_used || 0;
-  const legacyAvailable = legacyEarned - legacyUsed;
+  const legacyVisits = loyaltyV3Data?.legacy?.visits ?? 0;
+  const legacyEarned = loyaltyV3Data?.legacy?.earned ?? 0;
+  const legacyUsed = loyaltyV3Data?.legacy?.used ?? 0;
+  const legacyAvailable = Math.max(0, legacyEarned - legacyUsed);
   const legacyProgressToNext = legacyVisits % 8;
   const legacyProgressPercent = (legacyProgressToNext / 8) * 100;
-
-  useEffect(() => {
-    setLegacyForm({
-      loyalty_visits: legacyVisits,
-      loyalty_free_washes_earned: legacyEarned,
-      loyalty_free_washes_used: legacyUsed,
-    });
-  }, [localCustomer]);
 
   // Load Legacy history
   useEffect(() => {
@@ -83,8 +67,9 @@ export default function LoyaltyDetailModal({ customer, onClose, onUpdate }: Prop
       setLoadingLegacy(true);
       const { data } = await (supabase as any)
         .from("loyalty_visits")
-        .select("*, services(name)")
+        .select("*, services(name), tickets!inner(customer_id,status,business_line)")
         .eq("customer_id", localCustomer.id)
+        .eq("tickets.customer_id", localCustomer.id).eq("tickets.status", "paid").eq("tickets.business_line", "car_wash")
         .order("created_at", { ascending: false })
         .limit(50);
       if (data) {
@@ -95,47 +80,18 @@ export default function LoyaltyDetailModal({ customer, onClose, onUpdate }: Prop
     loadLegacyHistory();
   }, [localCustomer.id]);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  const handleSaveLegacy = async () => {
-    setSavingLegacy(true);
-    try {
-      const { error } = await supabase
-        .from("customers")
-        .update({
-          loyalty_visits: legacyForm.loyalty_visits,
-          loyalty_free_washes_earned: legacyForm.loyalty_free_washes_earned,
-          loyalty_free_washes_used: legacyForm.loyalty_free_washes_used,
-        })
-        .eq("id", localCustomer.id);
-
-      if (error) {
-        showToast("Error al guardar: " + error.message);
-      } else {
-        showToast("Contadores antiguos actualizados");
-        setLocalCustomer(prev => ({
-          ...prev,
-          loyalty_visits: legacyForm.loyalty_visits,
-          loyalty_free_washes_earned: legacyForm.loyalty_free_washes_earned,
-          loyalty_free_washes_used: legacyForm.loyalty_free_washes_used,
-        }));
-        setEditingLegacy(false);
-        onUpdate();
-      }
-    } catch (err: any) {
-      showToast(err.message || "Error al guardar");
-    } finally {
-      setSavingLegacy(false);
-    }
-  };
-
   // V3 calculations
   const availableRewardsV3 = loyaltyV3Data?.rewards.filter(r => r.status === "available") ?? [];
   const washLogV3 = loyaltyV3Data?.washLog ?? [];
   const redemptionsV3 = loyaltyV3Data?.redemptions ?? [];
+
+  if (loyaltyError) return <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-content" onClick={e => e.stopPropagation()}>
+      <p role="alert">No se pudo cargar el historial de lealtad.</p>
+      <button onClick={() => refetchV3()} className="touch-btn underline">Reintentar</button>
+      <button onClick={onClose} className="touch-btn">Cerrar</button>
+    </div>
+  </div>;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -161,15 +117,16 @@ export default function LoyaltyDetailModal({ customer, onClose, onUpdate }: Prop
                 {localCustomer.phone && <span><i className="fa-solid fa-phone mr-1 text-secondary" />{localCustomer.phone}</span>}
               </p>
             </div>
-            {localCustomer.loyalty_last_visit && (
+            {loyaltyV3Data?.lastVisit && (
               <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-lg">
                 <i className="fa-solid fa-clock mr-1 text-secondary" />
-                Última visita: {new Date(localCustomer.loyalty_last_visit).toLocaleDateString("es-NI")}
+                Última visita: {new Date(loyaltyV3Data.lastVisit).toLocaleDateString("es-NI")}
               </span>
             )}
           </div>
         </div>
 
+        {loyaltyV3Data && <p className="text-sm mb-4">{loyaltyV3Data.totalVisits} visitas · Premium: {loyaltyV3Data.categories.premium} · Nítido: {loyaltyV3Data.categories.nitido} · Breve: {loyaltyV3Data.categories.breve}</p>}
         {/* Mode Selector Tabs (V3 vs Legacy) */}
         <div className="flex gap-1 bg-muted/60 p-1 rounded-xl mb-4 border border-border/20">
           <button
@@ -441,72 +398,6 @@ export default function LoyaltyDetailModal({ customer, onClose, onUpdate }: Prop
               </p>
             </div>
 
-            {/* Edit Legacy counters */}
-            <div className="flex gap-2">
-              {!editingLegacy ? (
-                <button
-                  onClick={() => setEditingLegacy(true)}
-                  className="touch-btn px-4 py-2 rounded-xl bg-secondary/10 text-secondary font-semibold flex items-center gap-2 hover:bg-secondary/20"
-                >
-                  <i className="fa-solid fa-pen" />Editar contadores antiguos
-                </button>
-              ) : (
-                <div className="w-full space-y-3 p-4 bg-muted/30 border border-border/40 rounded-xl animate-fade-in">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Servicios</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={legacyForm.loyalty_visits}
-                        onChange={(e) => setLegacyForm({ ...legacyForm, loyalty_visits: parseInt(e.target.value) || 0 })}
-                        className="input-touch text-center"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Ganados</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={legacyForm.loyalty_free_washes_earned}
-                        onChange={(e) => setLegacyForm({ ...legacyForm, loyalty_free_washes_earned: parseInt(e.target.value) || 0 })}
-                        className="input-touch text-center"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Usados</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={legacyForm.loyalty_free_washes_used}
-                        onChange={(e) => setLegacyForm({ ...legacyForm, loyalty_free_washes_used: parseInt(e.target.value) || 0 })}
-                        className="input-touch text-center"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => {
-                        setEditingLegacy(false);
-                        setLegacyForm({ loyalty_visits: legacyVisits, loyalty_free_washes_earned: legacyEarned, loyalty_free_washes_used: legacyUsed });
-                      }}
-                      className="touch-btn flex-1 py-2 rounded-xl border border-border text-foreground font-semibold"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      onClick={handleSaveLegacy}
-                      disabled={savingLegacy}
-                      className="touch-btn flex-1 py-2 rounded-xl bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      <i className="fa-solid fa-floppy-disk" />
-                      {savingLegacy ? "Guardando..." : "Guardar"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* Legacy History */}
             <div>
               <h3 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
@@ -558,12 +449,7 @@ export default function LoyaltyDetailModal({ customer, onClose, onUpdate }: Prop
           </div>
         )}
 
-        {toast && (
-          <div className="toast-success fixed bottom-4 right-4 z-50">
-            <i className="fa-solid fa-circle-check mr-2" />
-            {toast}
-          </div>
-        )}
+
       </div>
     </div>
   );
