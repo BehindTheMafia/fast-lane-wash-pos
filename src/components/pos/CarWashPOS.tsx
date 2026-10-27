@@ -331,19 +331,23 @@ export default function CarWashPOS() {
 
     console.log("[POS] handlePaymentComplete:", paymentData, "Exchange Rate:", exchangeRate);
     try {
-      if (ticketItems.length === 0 || !user) return;
-
-      const homeItems = ticketItems.filter(i => !i.businessLine || i.businessLine === "car_wash");
+      if (!user) throw new Error("Inicia sesión para registrar la venta");
+      const saleItems = ticketItems.filter(i => i.serviceId !== "loyalty-free");
+      const homeItems = saleItems.filter(i => !i.businessLine || i.businessLine === "car_wash");
       const firstItem = homeItems[0];
       const redemption = homeItems.find(i => i.isLoyaltyRedemption && i.loyaltyRewardId);
       if (!firstItem || !customer) throw new Error("Selecciona un cliente y un servicio de autolavado");
+      if (saleItems.some(i =>
+        !(typeof i.serviceId === "number" && Number.isInteger(i.serviceId) && i.serviceId > 0)
+        && !(i.serviceId == null && i.serviceName.trim())
+      )) throw new Error("Cada concepto debe tener un servicio o nombre válido");
       const payload = {
         customer_id: Number(customer.id), vehicle_plate: customer.plate || "",
         vehicle_type_id: firstItem.vehicleTypeId || null,
         membership_id: selectedMembershipId, reward_id: redemption?.loyaltyRewardId || null,
         loyalty_original_amount: redemption?.loyaltyOriginalPrice || 0,
         use_legacy_reward: usingLoyaltyWash, exchange_rate: exchangeRate, payment: paymentData,
-        items: ticketItems.filter(i => i.serviceId !== "loyalty-free").map(i => ({
+        items: saleItems.map(i => ({
           service_id: typeof i.serviceId === "number" ? i.serviceId : null,
           service_name: i.serviceName, price: i.price, discount_percent: i.discountPercent,
           business_line: i.businessLine || "car_wash", is_loyalty_redemption: !!i.isLoyaltyRedemption,

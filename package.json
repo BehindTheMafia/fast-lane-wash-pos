@@ -13,7 +13,7 @@
     "preview:prod": "vite preview --port 4173",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:db": "node --test tests/report-ticket-sync.test.mjs"
+    "test:db": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.19",
