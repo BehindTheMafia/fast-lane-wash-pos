@@ -18,7 +18,7 @@ interface PaymentModalProps {
     received: number;
     change: number;
     mixedPayments?: MixedPaymentPart[];
-  }) => void;
+  }) => void | Promise<void>;
 }
 
 type PaymentMethod = "cash" | "card" | "transfer" | "mixed";
@@ -152,50 +152,55 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
   };
 
   // ── Confirm handler ───────────────────────────────────
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (isSubmittingRef.current || !canConfirm) return;
     isSubmittingRef.current = true;
     setIsSubmitting(true);
 
-    if (method === "mixed") {
-      const parts: MixedPaymentPart[] = [];
+    try {
+      if (method === "mixed") {
+        const parts: MixedPaymentPart[] = [];
 
-      activeMethods.forEach(m => {
-        const amt = finalAmounts[m.id];
-        if (amt > 0) {
-          if (m.id === "cash") {
-            parts.push({
-              method: "cash",
-              amount: +amt.toFixed(2),
-              received: mixedCashReceivedNum,
-              change: +mixedCashChange.toFixed(2),
-            });
-          } else {
-            parts.push({
-              method: m.id,
-              amount: +amt.toFixed(2),
-              received: +amt.toFixed(2),
-              change: 0,
-            });
+        activeMethods.forEach(m => {
+          const amt = finalAmounts[m.id];
+          if (amt > 0) {
+            if (m.id === "cash") {
+              parts.push({
+                method: "cash",
+                amount: +amt.toFixed(2),
+                received: mixedCashReceivedNum,
+                change: +mixedCashChange.toFixed(2),
+              });
+            } else {
+              parts.push({
+                method: m.id,
+                amount: +amt.toFixed(2),
+                received: +amt.toFixed(2),
+                change: 0,
+              });
+            }
           }
-        }
-      });
+        });
 
-      const totalReceived = parts.reduce((s, p) => s + p.received, 0);
-      const totalChange = parts.reduce((s, p) => s + p.change, 0);
+        const totalReceived = parts.reduce((s, p) => s + p.received, 0);
+        const totalChange = parts.reduce((s, p) => s + p.change, 0);
 
-      onConfirm({
-        currency,
-        method: "mixed",
-        amount: totalInCurrency,
-        received: +totalReceived.toFixed(2),
-        change: +totalChange.toFixed(2),
-        mixedPayments: parts,
-      });
-    } else if (method === "cash") {
-      onConfirm({ currency, method, amount: totalInCurrency, received: receivedNum, change });
-    } else {
-      onConfirm({ currency, method, amount: totalInCurrency, received: totalInCurrency, change: 0 });
+        await onConfirm({
+          currency,
+          method: "mixed",
+          amount: totalInCurrency,
+          received: +totalReceived.toFixed(2),
+          change: +totalChange.toFixed(2),
+          mixedPayments: parts,
+        });
+      } else if (method === "cash") {
+        await onConfirm({ currency, method, amount: totalInCurrency, received: receivedNum, change });
+      } else {
+        await onConfirm({ currency, method, amount: totalInCurrency, received: totalInCurrency, change: 0 });
+      }
+    } finally {
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
     }
   };
 
@@ -218,13 +223,13 @@ export default function PaymentModal({ total, exchangeRate, onClose, onConfirm }
   ];
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={() => { if (!isSubmittingRef.current) onClose(); }}>
       <div className="modal-content animate-scale-in max-w-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold text-foreground">
             <i className="fa-solid fa-money-bill-wave mr-2 text-secondary" />Registrar Pago
           </h2>
-          <button onClick={onClose} className="touch-btn p-2 text-muted-foreground hover:text-foreground">
+          <button onClick={onClose} disabled={isSubmitting} className="touch-btn p-2 text-muted-foreground hover:text-foreground">
             <i className="fa-solid fa-xmark text-xl" />
           </button>
         </div>

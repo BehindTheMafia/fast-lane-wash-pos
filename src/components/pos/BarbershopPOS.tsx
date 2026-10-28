@@ -1,4 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { invalidateTicketData } from "@/lib/ticketMutation";
+import { useDurableCheckout } from "@/hooks/useDurableCheckout";
+import CheckoutRecoveryNotice from "./CheckoutRecoveryNotice";
 import { useBarberServices } from "@/hooks/useServices";
 import { useCarWashServicesForMix } from "@/hooks/useServices";
 import { useProducts } from "@/hooks/useProducts";
@@ -7,31 +11,29 @@ import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useBusinessLine } from "@/contexts/BusinessLineContext";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
-import { niStartOfDay, niNow } from "@/utils/niDate";
+import { niStartOfDay } from "@/utils/niDate";
 import PaymentModal from "@/components/pos/PaymentModal";
 import CustomerModal from "@/components/pos/CustomerModal";
 import TicketPrint from "@/components/pos/TicketPrint";
+import {
+  type BarberCartItem, type BarberCustomer as Customer, type BarberPayment, type BarberSalePayload,
+} from "@/lib/barbershopSaleRequest";
 
-export interface BarberCartItem {
-  itemType: "service" | "product";
-  serviceId?: number;
-  productId?: number;
-  name: string;
-  price: number;
-  quantity: number;
-  discountPercent: number;
-  maxStock?: number;
-}
+export type { BarberCartItem } from "@/lib/barbershopSaleRequest";
 
-interface Customer {
-  id: number;
-  name: string;
-  plate: string;
-  phone: string;
-  is_general: boolean;
+interface BarberDraft {
+  exchangeRate: number;
+  customer: Customer | null;
+  ticketItems: BarberCartItem[];
+  customConcept: string;
+  customAmount: string;
+  showCustomChargeModal: boolean;
+  mixVehicleId: number;
 }
+interface BarberReceipt { customer: Customer | null; items: BarberCartItem[]; subtotal: number; discount: number }
 
 export default function BarbershopPOS() {
+  const queryClient = useQueryClient();
   const { carWashVisible } = useBusinessLine();
   const { data: services } = useBarberServices();
   const { data: products } = useProducts();
@@ -39,8 +41,12 @@ export default function BarbershopPOS() {
   const { data: vehicleTypes } = useVehicleTypes();
   const { data: settings } = useBusinessSettings();
   const { user } = useAuth();
+  const activeUserId = useRef(user?.id);
+  activeUserId.current = user?.id;
 
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const currentCustomer = useRef(customer);
+  currentCustomer.current = customer;
   const [ticketItems, setTicketItems] = useState<BarberCartItem[]>([]);
   const [showCustomChargeModal, setShowCustomChargeModal] = useState(false);
   const [customConcept, setCustomConcept] = useState("");
@@ -51,24 +57,12 @@ export default function BarbershopPOS() {
   const [lastTicket, setLastTicket] = useState<Record<string, unknown> | null>(null);
   const [recentTickets, setRecentTickets] = useState<Record<string, unknown>[]>([]);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
-  const isProcessingSaleRef = useRef(false);
-  const [isProcessingSale, setIsProcessingSale] = useState(false);
   const [showCarWashSection, setShowCarWashSection] = useState(false);
   const [showMobileCart, setShowMobileCart] = useState(false);
   const [mixVehicleId, setMixVehicleId] = useState<number>(0);
 
-  const exchangeRate = settings?.exchange_rate || 36.5;
-
-  useEffect(() => {
-    supabase
-      .from("customers")
-      .select("id, name, plate, phone, is_general")
-      .eq("is_general", true)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) setCustomer(data as Customer);
-      });
-  }, []);
+  const [draftExchangeRate, setDraftExchangeRate] = useState<number | null>(null);
+  const exchangeRate = draftExchangeRate ?? settings?.exchange_rate ?? 36.5;
 
   const loadRecent = useCallback(async () => {
     const { data } = await supabase
@@ -87,14 +81,11 @@ export default function BarbershopPOS() {
   };
 
   const lineTotal = (item: BarberCartItem) =>
-    item.price * item.quantity * (1 - item.discountPercent / 100);
+    Math.round((item.price * item.quantity * (1 - item.discountPercent / 100) + Number.EPSILON) * 100) / 100;
 
   const subtotal = ticketItems.reduce((s, i) => s + i.price * i.quantity, 0);
-  const totalDiscount = ticketItems.reduce(
-    (s, i) => s + i.price * i.quantity * (i.discountPercent / 100),
-    0
-  );
-  const total = subtotal - totalDiscount;
+  const total = Math.round(ticketItems.reduce((sum, item) => sum + lineTotal(item), 0) * 100) / 100;
+  const totalDiscount = subtotal - total;
 
   const addService = (svc: { id: number; name: string; base_price: number | null }) => {
     const price = Number(svc.base_price ?? 0);
@@ -180,6 +171,9 @@ export default function BarbershopPOS() {
   };
 
   const newTicket = () => {
+    const owner = user?.id;
+    setCustomer(null);
+    setDraftExchangeRate(null);
     setTicketItems([]);
     supabase
       .from("customers")
@@ -187,164 +181,52 @@ export default function BarbershopPOS() {
       .eq("is_general", true)
       .maybeSingle()
       .then(({ data }) => {
-        if (data) setCustomer(data as Customer);
+        if (data && owner === activeUserId.current && !currentCustomer.current) setCustomer(data as Customer);
       });
   };
 
-  const handlePaymentComplete = async (paymentData: {
-    method: string;
-    amount: number;
-    currency: string;
-    received: number;
-    change: number;
-    mixedPayments?: { method: string; amount: number; received: number; change: number }[];
-  }) => {
-    if (isProcessingSaleRef.current) return;
-    isProcessingSaleRef.current = true;
-    setIsProcessingSale(true);
-
-    try {
-      if (ticketItems.length === 0 || !user) return;
-
-      const ticketNumber = `B-${Date.now().toString(36).toUpperCase()}`;
-
-      const { data: ticket, error: ticketErr } = await supabase
-        .from("tickets")
-        .insert({
-          ticket_number: ticketNumber,
-          user_id: user.id,
-          customer_id: customer?.id || null,
-          vehicle_type_id: null,
-          vehicle_plate: "",
-          total,
-          status: "paid",
-          business_line: "barbershop",
-          created_at: niNow(),
-        } as never)
-        .select()
-        .single();
-
-      if (ticketErr) throw ticketErr;
-      const ticketId = (ticket as { id: number }).id;
-
-      for (const item of ticketItems) {
-        const linePrice = lineTotal(item) / item.quantity;
-        const payload: Record<string, unknown> = {
-          ticket_id: ticketId,
-          item_type: item.itemType,
-          quantity: item.quantity,
-          price: lineTotal(item),
-          service_name_snapshot: item.name,
-          price_snapshot: linePrice,
-        };
-        if (item.itemType === "service") {
-          payload.service_id = item.serviceId;
-        } else {
-          payload.product_id = item.productId;
-        }
-        const { error: itemErr } = await supabase
-          .from("ticket_items")
-          .insert(payload as never);
-        if (itemErr) throw itemErr;
+  const checkout = useDurableCheckout<BarberSalePayload, BarberReceipt, BarberDraft>({
+    businessLine: "barbershop", userId: user?.id,
+    draft: { exchangeRate, customer, ticketItems, customConcept, customAmount, showCustomChargeModal, mixVehicleId },
+    restore: (draft, record) => {
+      if (draft && !Array.isArray(draft.ticketItems)) throw new Error("El borrador del ticket no es válido. Revisa Reportes antes de continuar.");
+      setShowPayment(false); setShowPrint(false); setLastTicket(null);
+      const restored = draft ?? (record ? { customer: record.receipt.customer, ticketItems: record.receipt.items } : null);
+      setDraftExchangeRate(restored?.ticketItems?.length ? draft?.exchangeRate ?? record?.payload.exchange_rate ?? null : null);
+      setTicketItems(restored?.ticketItems ?? []);
+      setCustomer(restored?.customer ?? null);
+      setCustomConcept(draft?.customConcept ?? ""); setCustomAmount(draft?.customAmount ?? "");
+      setShowCustomChargeModal(draft?.showCustomChargeModal ?? false); setMixVehicleId(draft?.mixVehicleId ?? 0);
+      if (!restored?.customer && !restored?.ticketItems?.length) {
+        const owner = user?.id;
+        supabase.from("customers").select("id, name, plate, phone, is_general").eq("is_general", true).maybeSingle()
+          .then(({data}) => { if (owner === activeUserId.current && !currentCustomer.current && data) setCustomer(data as Customer); });
       }
-
-      const productLines = ticketItems.filter((i) => i.itemType === "product");
-      for (const item of productLines) {
-        const { error: stockErr } = await supabase.rpc("decrement_product_stock", {
-          p_product_id: item.productId!,
-          p_qty: item.quantity,
-          p_ticket_id: ticketId,
-        });
-        if (stockErr) throw new Error(stockErr.message || "Error al descontar inventario");
-      }
-
-      const rollbackTicket = async () => {
-        await supabase.from("ticket_mixed_payments").delete().eq("ticket_id", ticketId);
-        await supabase.from("payments").delete().eq("ticket_id", ticketId);
-        await supabase.from("ticket_items").delete().eq("ticket_id", ticketId);
-        await supabase.from("tickets").delete().eq("id", ticketId);
-      };
-
-      if (paymentData.method === "mixed" && paymentData.mixedPayments?.length) {
-        const { error: mixedPayErr } = await supabase.from("payments").insert({
-          ticket_id: ticketId,
-          amount: paymentData.amount,
-          currency: paymentData.currency,
-          payment_method: "mixed",
-          amount_received: paymentData.received,
-          change_amount: paymentData.change,
-          exchange_rate: exchangeRate,
-        } as never);
-        if (mixedPayErr) {
-          await rollbackTicket();
-          throw new Error(mixedPayErr.message);
-        }
-        for (const part of paymentData.mixedPayments) {
-          const amountNio =
-            paymentData.currency === "USD"
-              ? Number((part.amount * exchangeRate).toFixed(2))
-              : part.amount;
-          const changeNio =
-            paymentData.currency === "USD"
-              ? Number((part.change * exchangeRate).toFixed(2))
-              : part.change;
-          const { error: partErr } = await supabase.from("ticket_mixed_payments").insert({
-            ticket_id: ticketId,
-            method: part.method,
-            currency: paymentData.currency,
-            amount: part.amount,
-            exchange_rate: exchangeRate,
-            amount_nio: amountNio,
-            applied_nio: amountNio,
-            change_nio: changeNio,
-          } as never);
-          if (partErr) {
-            await rollbackTicket();
-            throw new Error(partErr.message);
-          }
-        }
-      } else {
-        const { error: payErr } = await supabase.from("payments").insert({
-          ticket_id: ticketId,
-          amount: paymentData.amount,
-          currency: paymentData.currency,
-          payment_method: paymentData.method,
-          amount_received: paymentData.received,
-          change_amount: paymentData.change,
-          exchange_rate: exchangeRate,
-        } as never);
-        if (payErr) {
-          await rollbackTicket();
-          throw new Error(payErr.message);
-        }
-      }
-
-      setLastTicket({
-        ...ticket,
-        business_line: "barbershop",
-        customer,
-        items: ticketItems,
-        subtotal,
-        discount: totalDiscount,
-        payment: paymentData,
-        settings,
-      });
-      setShowPayment(false);
-      setShowPrint(true);
+    },
+    confirmed: (request, result) => {
+      setLastTicket({ ...result.ticket, business_line: "barbershop", ...request.receipt,
+        payment: request.payload.payment, settings: { ...settings, exchange_rate: request.payload.exchange_rate } });
+      setShowPayment(false); setShowPrint(true);
       showToast("Venta registrada correctamente");
-      loadRecent();
-      newTicket();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Error al registrar venta";
-      showToast(message, "error");
-    } finally {
-      isProcessingSaleRef.current = false;
-      setIsProcessingSale(false);
-    }
+      void loadRecent().catch(() => {});
+      void invalidateTicketData(queryClient).catch(() => showToast("Venta confirmada. La actualización del panel está pendiente.", "error"));
+    },
+    rejected: message => { setShowPayment(false); showToast(message, "error"); },
+  });
+
+  const handlePaymentComplete = async (paymentData: BarberPayment) => {
+    if (!user || ticketItems.length === 0) return;
+    await checkout.start({
+      customer_id: customer?.id ?? null, exchange_rate: exchangeRate,
+      items: ticketItems.map(item => ({ item_type: item.itemType, service_id: item.serviceId ?? null,
+        product_id: item.productId ?? null, name: item.name, quantity: item.quantity, line_total: lineTotal(item) })),
+      payment: paymentData,
+    }, { customer, items: ticketItems, subtotal, discount: totalDiscount });
   };
 
   return (
     <div className="flex flex-col lg:flex-row h-full w-full relative">
+      <fieldset className="contents" style={{display: checkout.ready ? "contents" : "none"}} disabled={checkout.blocked || !user}>
       <div className="hidden xl:flex flex-col w-72 border-r border-border bg-card/50 overflow-auto">
         <div className="p-4 border-b border-border flex items-center justify-between">
           <h3 className="font-bold text-foreground text-sm">
@@ -644,7 +526,7 @@ export default function BarbershopPOS() {
           </div>
           <button
             type="button"
-            disabled={ticketItems.length === 0 || isProcessingSale}
+            disabled={ticketItems.length === 0 || checkout.blocked}
             onClick={() => setShowPayment(true)}
             className="btn-cobrar w-full h-16 disabled:opacity-50 font-bold text-xl"
           >
@@ -756,15 +638,6 @@ export default function BarbershopPOS() {
           </div>
         </div>
       )}
-      {showPrint && lastTicket && (
-        <TicketPrint
-          ticket={lastTicket}
-          onClose={() => {
-            setShowPrint(false);
-            newTicket();
-          }}
-        />
-      )}
       {toast && (
         <div className={toast.type === "success" ? "toast-success" : "toast-error"}>
           {toast.msg}
@@ -791,6 +664,17 @@ export default function BarbershopPOS() {
           </button>
         </div>
       )}
+      </fieldset>
+      {checkout.ready && showPrint && lastTicket && (
+        <TicketPrint
+          ticket={lastTicket}
+          onClose={() => {
+            if (checkout.acknowledge()) { setShowPrint(false); newTicket(); }
+          }}
+        />
+      )}
+      <CheckoutRecoveryNotice {...checkout} />
+
     </div>
   );
 }

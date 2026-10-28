@@ -1,3 +1,6 @@
+import { useDurableCheckout } from "@/hooks/useDurableCheckout";
+import CheckoutRecoveryNotice from "./CheckoutRecoveryNotice";
+import type { BarberPayment as SalePayment } from "@/lib/barbershopSaleRequest";
 import { useTicketRefresh } from "@/hooks/useTicketRefresh";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateTicketData } from "@/lib/ticketMutation";
@@ -52,9 +55,31 @@ interface Customer {
   is_general: boolean;
 }
 
+interface CarWashDraft {
+  exchangeRate: number;
+  customer: Customer | null;
+  ticketItems: TicketItem[];
+  selectedVehicleId: number;
+  selectedServiceId: number;
+  selectedMembershipId: number | null;
+  selectedMembership: any;
+  usingLoyaltyWash: boolean;
+  selectedLoyaltyReward: LoyaltyReward | null;
+  customConcept: string;
+  customAmount: string;
+  showCustomChargeModal: boolean;
+}
+interface CarWashReceipt { customer: Customer | null; items: TicketItem[]; subtotal: number; discount: number }
+interface CarWashPayload {
+  customer_id: number; vehicle_plate: string; vehicle_type_id: number | null;
+  membership_id: number | null; reward_id: number | null; loyalty_original_amount: number;
+  use_legacy_reward: boolean; exchange_rate: number; payment: SalePayment;
+  items: { service_id: number | null; service_name: string; price: number; discount_percent: number;
+    business_line: string; is_loyalty_redemption: boolean }[];
+}
+
 export default function CarWashPOS() {
   const queryClient = useQueryClient();
-  const saleRequestId = useRef(crypto.randomUUID());
   const { barbershopVisible } = useBusinessLine();
   const { data: services } = useServices();
   const { data: extras } = useExtras();
@@ -62,6 +87,9 @@ export default function CarWashPOS() {
   const { data: vehicleTypes } = useVehicleTypes();
   const { data: settings } = useBusinessSettings();
   const { user } = useAuth();
+  const activeUserId = useRef(user?.id);
+  activeUserId.current = user?.id;
+  const restoringCustomerId = useRef<string | number | undefined>(undefined);
 
   // Combine normal services and extras for loyalty reward lookup
   const allServicesAndExtras = useMemo(() => {
@@ -82,6 +110,8 @@ export default function CarWashPOS() {
   const [customConcept, setCustomConcept] = useState("");
   const [customAmount, setCustomAmount] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const currentCustomer = useRef(customer);
+  currentCustomer.current = customer;
   const [ticketItems, setTicketItems] = useState<TicketItem[]>([]);
   const [showPayment, setShowPayment] = useState(false);
   const [showCustomer, setShowCustomer] = useState(false);
@@ -89,9 +119,6 @@ export default function CarWashPOS() {
   const [lastTicket, setLastTicket] = useState<any>(null);
   const [recentTickets, setRecentTickets] = useState<any[]>([]);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
-  // useRef para guarda sincrónica (evita race condition con useState que es async)
-  const isProcessingSaleRef = useRef(false);
-  const [isProcessingSale, setIsProcessingSale] = useState(false);
   const [selectedMembershipId, setSelectedMembershipId] = useState<number | null>(null);
   const [selectedMembership, setSelectedMembership] = useState<any>(null);
   const [showBarberSection, setShowBarberSection] = useState(false);
@@ -129,34 +156,25 @@ export default function CarWashPOS() {
     return Array.from(new Set(activeMemberships.map(m => m.vehicle_type_id).filter(Boolean)));
   }, [activeMemberships]);
 
-  const exchangeRate = settings?.exchange_rate || 36.5;
+  const [draftExchangeRate, setDraftExchangeRate] = useState<number | null>(null);
+  const exchangeRate = draftExchangeRate ?? settings?.exchange_rate ?? 36.5;
 
-  // Load general customer on mount
+  // Refresh live balances without overwriting the restored draft's redemption choice.
   useEffect(() => {
-    supabase.from("customers").select("id, name, plate, phone, is_general").eq("is_general", true).maybeSingle().then(({ data }) => {
-      if (data) setCustomer(data as any as Customer);
-    });
-  }, []);
-
-  // Load loyalty data whenever customer changes
-  useEffect(() => {
+    let active = true;
+    const restored = restoringCustomerId.current !== undefined && restoringCustomerId.current === customer?.id;
+    restoringCustomerId.current = undefined;
     if (customer && !customer.is_general) {
-      supabase.from("customers")
-        .select("loyalty_visits, loyalty_free_washes_earned, loyalty_free_washes_used")
-        .eq("id", customer.id)
-        .single()
-        .then(({ data }: any) => {
-          if (data) {
-            const available = (data.loyalty_free_washes_earned || 0) - (data.loyalty_free_washes_used || 0);
-            setLoyaltyFreeWashes(available);
+      supabase.from("customers").select("loyalty_visits, loyalty_free_washes_earned, loyalty_free_washes_used")
+        .eq("id", customer.id).single().then(({data}: any) => {
+          if (active && data) {
+            setLoyaltyFreeWashes((data.loyalty_free_washes_earned || 0) - (data.loyalty_free_washes_used || 0));
             setLoyaltyProgress((data.loyalty_visits || 0) % 8);
           }
         });
-    } else {
-      setLoyaltyFreeWashes(0);
-      setLoyaltyProgress(0);
-    }
-    setUsingLoyaltyWash(false);
+    } else { setLoyaltyFreeWashes(0); setLoyaltyProgress(0); }
+    if (!restored) setUsingLoyaltyWash(false);
+    return () => { active = false; };
   }, [customer?.id]);
 
   // Load recent tickets on demand
@@ -276,7 +294,9 @@ export default function CarWashPOS() {
   };
 
   const newTicket = () => {
-    saleRequestId.current = crypto.randomUUID();
+    const owner = user?.id;
+    setCustomer(null);
+    setDraftExchangeRate(null);
     setTicketItems([]);
     setSelectedServiceId(0);
     setSelectedVehicleId(0);
@@ -285,7 +305,7 @@ export default function CarWashPOS() {
     setUsingLoyaltyWash(false);
     setSelectedLoyaltyReward(null);
     supabase.from("customers").select("*").eq("is_general", true).maybeSingle().then(({ data }) => {
-      if (data) setCustomer(data as any as Customer);
+      if (data && owner === activeUserId.current && !currentCustomer.current) setCustomer(data as any as Customer);
     });
   };
 
@@ -323,13 +343,40 @@ export default function CarWashPOS() {
 
   useTicketRefresh(loadRecent);
 
-  const handlePaymentComplete = async (paymentData: any) => {
-    // Guarda sincrónica con ref (previene race condition de doble-click)
-    if (isProcessingSaleRef.current) return;
-    isProcessingSaleRef.current = true;
-    setIsProcessingSale(true);
+  const checkout = useDurableCheckout<CarWashPayload, CarWashReceipt, CarWashDraft>({
+    businessLine: "car_wash", userId: user?.id,
+    draft: { exchangeRate, customer, ticketItems, selectedVehicleId, selectedServiceId, selectedMembershipId, selectedMembership,
+      usingLoyaltyWash, selectedLoyaltyReward, customConcept, customAmount, showCustomChargeModal },
+    restore: (draft, record) => {
+      if (draft && !Array.isArray(draft.ticketItems)) throw new Error("El borrador del ticket no es válido. Revisa Reportes antes de continuar.");
+      setShowPayment(false); setShowPrint(false); setLastTicket(null);
+      const restored = draft ?? (record ? { customer: record.receipt.customer, ticketItems: record.receipt.items } : null);
+      setDraftExchangeRate(restored?.ticketItems?.length ? draft?.exchangeRate ?? record?.payload.exchange_rate ?? null : null);
+      restoringCustomerId.current = restored?.customer?.id;
+      setCustomer(restored?.customer ?? null); setTicketItems(restored?.ticketItems ?? []);
+      setSelectedVehicleId(draft?.selectedVehicleId ?? 0); setSelectedServiceId(draft?.selectedServiceId ?? 0);
+      setSelectedMembershipId(draft?.selectedMembershipId ?? null); setSelectedMembership(draft?.selectedMembership ?? null);
+      setUsingLoyaltyWash(draft?.usingLoyaltyWash ?? false); setSelectedLoyaltyReward(draft?.selectedLoyaltyReward ?? null);
+      setCustomConcept(draft?.customConcept ?? ""); setCustomAmount(draft?.customAmount ?? "");
+      setShowCustomChargeModal(draft?.showCustomChargeModal ?? false);
+      if (!restored?.customer && !restored?.ticketItems?.length) {
+        const owner = user?.id;
+        supabase.from("customers").select("id, name, plate, phone, is_general").eq("is_general", true).maybeSingle()
+          .then(({data}) => { if (owner === activeUserId.current && !currentCustomer.current && data) setCustomer(data as any as Customer); });
+      }
+    },
+    confirmed: (request, result) => {
+      setLastTicket({ ...result.ticket, business_line: "car_wash", ...request.receipt,
+        payment: request.payload.payment, settings: { ...settings, exchange_rate: request.payload.exchange_rate } });
+      setShowPayment(false); setShowPrint(true); showToast("Venta registrada correctamente");
+      if (result.rewards_earned?.length) showToast(`🎁 ¡Premio ganado! ${[...new Set(result.rewards_earned.map(r => r.reward_name))].join(", ")}`, "success");
+      void loadRecent().catch(() => {});
+      void invalidateTicketData(queryClient).catch(() => showToast("Venta confirmada. La actualización del panel está pendiente.", "error"));
+    },
+    rejected: message => { setShowPayment(false); showToast(message, "error"); },
+  });
 
-    console.log("[POS] handlePaymentComplete:", paymentData, "Exchange Rate:", exchangeRate);
+  const handlePaymentComplete = async (paymentData: SalePayment) => {
     try {
       if (!user) throw new Error("Inicia sesión para registrar la venta");
       const saleItems = ticketItems.filter(i => i.serviceId !== "loyalty-free");
@@ -337,59 +384,23 @@ export default function CarWashPOS() {
       const firstItem = homeItems[0];
       const redemption = homeItems.find(i => i.isLoyaltyRedemption && i.loyaltyRewardId);
       if (!firstItem || !customer) throw new Error("Selecciona un cliente y un servicio de autolavado");
-      if (saleItems.some(i =>
-        !(typeof i.serviceId === "number" && Number.isInteger(i.serviceId) && i.serviceId > 0)
-        && !(i.serviceId == null && i.serviceName.trim())
-      )) throw new Error("Cada concepto debe tener un servicio o nombre válido");
-      const payload = {
-        customer_id: Number(customer.id), vehicle_plate: customer.plate || "",
-        vehicle_type_id: firstItem.vehicleTypeId || null,
+      if (saleItems.some(i => !(typeof i.serviceId === "number" && Number.isInteger(i.serviceId) && i.serviceId > 0)
+        && !(i.serviceId == null && i.serviceName.trim()))) throw new Error("Cada concepto debe tener un servicio o nombre válido");
+      await checkout.start({
+        customer_id: Number(customer.id), vehicle_plate: customer.plate || "", vehicle_type_id: firstItem.vehicleTypeId || null,
         membership_id: selectedMembershipId, reward_id: redemption?.loyaltyRewardId || null,
-        loyalty_original_amount: redemption?.loyaltyOriginalPrice || 0,
-        use_legacy_reward: usingLoyaltyWash, exchange_rate: exchangeRate, payment: paymentData,
-        items: saleItems.map(i => ({
-          service_id: typeof i.serviceId === "number" ? i.serviceId : null,
+        loyalty_original_amount: redemption?.loyaltyOriginalPrice || 0, use_legacy_reward: usingLoyaltyWash,
+        exchange_rate: exchangeRate, payment: paymentData,
+        items: saleItems.map(i => ({service_id: typeof i.serviceId === "number" ? i.serviceId : null,
           service_name: i.serviceName, price: i.price, discount_percent: i.discountPercent,
-          business_line: i.businessLine || "car_wash", is_loyalty_redemption: !!i.isLoyaltyRedemption,
-        })),
-      };
-      const { data, error } = await (supabase as any).rpc("complete_car_wash_sale", {
-        p_request_id: saleRequestId.current, p_payload: payload,
-      });
-      if (error) throw error;
-      if (!data?.success || !data.ticket) throw new Error(data?.error || "No se pudo registrar la venta");
-      const ticket = data.ticket;
-      await invalidateTicketData(queryClient);
-      if (data.rewards_earned?.length) {
-        const names = [...new Set(data.rewards_earned.map((r: any) => r.reward_name))].join(", ");
-        setTimeout(() => showToast(`🎁 ¡Premio ganado! ${names}`, "success"), 1000);
-      }
-
-      setLastTicket({
-        ...ticket,
-        business_line: "car_wash",
-        customer,
-        items: ticketItems,
-        subtotal,
-        discount: totalDiscount,
-        payment: paymentData,
-        settings,
-      });
-      setShowPayment(false);
-      setShowPrint(true);
-      showToast("Venta registrada correctamente");
-      loadRecent();
-      newTicket();
-    } catch (err: any) {
-      showToast(err.message || "Error al registrar venta", "error");
-    } finally {
-      isProcessingSaleRef.current = false;
-      setIsProcessingSale(false);
-    }
+          business_line: i.businessLine || "car_wash", is_loyalty_redemption: !!i.isLoyaltyRedemption})),
+      }, { customer, items: ticketItems, subtotal, discount: totalDiscount });
+    } catch (error: any) { showToast(error.message || "No se pudo proteger el cobro", "error"); }
   };
 
   return (
     <div className="flex flex-col lg:flex-row h-full w-full relative">
+      <fieldset className="contents" style={{display: checkout.ready ? "contents" : "none"}} disabled={checkout.blocked || !user}>
       {/* Left: Recent */}
       <div className="hidden xl:flex flex-col w-72 border-r border-border bg-card/50 overflow-auto">
         <div className="p-4 border-b border-border flex items-center justify-between">
@@ -1038,15 +1049,6 @@ export default function CarWashPOS() {
           </div>
         </div>
       )}
-      {showPrint && lastTicket && (
-        <TicketPrint
-          ticket={lastTicket}
-          onClose={() => {
-            setShowPrint(false);
-            newTicket();
-          }}
-        />
-      )}
 
       {toast && (
         <div
@@ -1080,6 +1082,17 @@ export default function CarWashPOS() {
           </button>
         </div>
       )}
+      </fieldset>
+      {checkout.ready && showPrint && lastTicket && (
+        <TicketPrint
+          ticket={lastTicket}
+          onClose={() => {
+            if (checkout.acknowledge()) { setShowPrint(false); newTicket(); }
+          }}
+        />
+      )}
+
+      <CheckoutRecoveryNotice {...checkout} />
     </div>
   );
 }

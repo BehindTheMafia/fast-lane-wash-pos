@@ -1,7 +1,8 @@
 import { useTicketRefresh } from "@/hooks/useTicketRefresh";
 import { useQueryClient } from "@tanstack/react-query";
 import { deleteReportTicket, invalidateTicketData } from "@/lib/ticketMutation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { fetchReportRows } from "@/lib/fetchReportRows";
 import { supabase } from "@/integrations/supabase/client";
 import { useBusinessSettings } from "@/hooks/useBusinessSettings";
 import { useAuth } from "@/hooks/useAuth";
@@ -61,181 +62,165 @@ export default function Dashboard() {
     ticketCount: 0, topServices: [], topVehicles: [], recentTickets: [],
   });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [printTicket, setPrintTicket] = useState<any>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [loadingPrint, setLoadingPrint] = useState<number | null>(null);
   const [mixedBreakdownMap, setMixedBreakdownMap] = useState<Record<string, { method: string; applied_nio: number; currency: string; amount: number }[]>>({});
+  const loadVersion = useRef(0);
 
   const loadStats = async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
     const todayISO = niStartOfDay();
 
-    // 1. Fetch tickets (without payments join - fetch separately for reliability)
-    const { data: tickets, error: ticketsErr } = await supabase
-      .from("tickets")
-      .select("*, vehicle_types(name)")
-      .eq("business_line", businessLine)
-      .gte("created_at", todayISO)
-      .eq("status", "paid")
-      .order("created_at", { ascending: false });
+    try {
+      // Each page contains the ticket, items and payment from one database snapshot.
+      const tickets = await fetchReportRows<any>((from, to) => supabase
+        .from("tickets")
+        .select("*, vehicle_types(name), payments(*), ticket_items(ticket_id, services(name), products(name), service_name_snapshot, item_type), ticket_mixed_payments(*)")
+        .eq("business_line", businessLine)
+        .gte("created_at", todayISO)
+        .eq("status", "paid")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to));
 
-    if (ticketsErr) console.error("[Dashboard] tickets error:", ticketsErr.message);
+      if (version !== loadVersion.current) return;
+      setLoadError(null);
 
-    if (!tickets || tickets.length === 0) {
-      setStats({
-        totalSalesNIO: 0, payNIO: 0, payUSD: 0,
-        cashNIO: 0, cardNIO: 0, transferNIO: 0,
-        mixedTotal: 0, mixedCashNIO: 0, mixedCardNIO: 0, mixedTransferNIO: 0,
-        cashTickets: 0, cardTickets: 0, transferTickets: 0, mixedTickets: 0,
-        ticketCount: 0, topServices: [], topVehicles: [], recentTickets: [],
-      });
-      setLoading(false);
-      return;
-    }
-
-    const ticketIds = tickets.map((t: any) => t.id);
-
-    // 2. Fetch payments separately for these tickets
-    const { data: paymentsRaw, error: paymentsErr } = await supabase
-      .from("payments")
-      .select("*")
-      .in("ticket_id", ticketIds);
-
-    if (paymentsErr) console.error("[Dashboard] payments error:", paymentsErr.message);
-
-    // Build a payments map: ticket_id -> payments[]
-    // Use String() keys to prevent UUID/number type mismatch
-    const paymentsMap: Record<string, any[]> = {};
-    (paymentsRaw || []).forEach((p: any) => {
-      const key = String(p.ticket_id);
-      if (!paymentsMap[key]) paymentsMap[key] = [];
-      paymentsMap[key].push(p);
-    });
-
-    // Merge payments into tickets
-    const ticketsWithPayments = tickets.map((t: any) => ({
-      ...t,
-      payments: paymentsMap[String(t.id)] || [],
-    }));
-
-    // 3. Fetch ticket_items with services
-    const { data: ticketItems } = await supabase
-      .from("ticket_items")
-      .select("ticket_id, services(name), products(name), service_name_snapshot, item_type")
-      .in("ticket_id", ticketIds) as any;
-
-    const rate = settings?.exchange_rate || 36.5;
-    let totalNIO = 0;
-    const svcCount: Record<string, number> = {};
-    const vehCount: Record<string, number> = {};
-
-    ticketsWithPayments.forEach((t: any) => {
-      totalNIO += Number(t.total);
-      const vn = (t.vehicle_types as any)?.name || "N/A";
-      vehCount[vn] = (vehCount[vn] || 0) + 1;
-    });
-
-    (ticketItems || []).forEach((ti: any) => {
-      const svcName =
-        ti.service_name_snapshot ||
-        (ti.products as any)?.name ||
-        (ti.services as any)?.name ||
-        "Otro";
-      svcCount[svcName] = (svcCount[svcName] || 0) + 1;
-    });
-
-    // 4. Payment method breakdown
-    // payNIO/payUSD: exclude "mixed" payments (amount = full NIO equivalent of ticket).
-    // For mixed, we distribute from ticket_mixed_payments parts (step 5).
-    let payNIO = 0, payUSD = 0;
-    let cashNIO = 0, cardNIO = 0, transferNIO = 0;
-    let cashTickets = 0, cardTickets = 0, transferTickets = 0, mixedTickets = 0;
-
-    ticketsWithPayments.forEach((t: any) => {
-      const tPayments: any[] = t.payments || [];
-      tPayments.forEach((p: any) => {
-        if (p.payment_method !== "mixed") {
-          // Only non-mixed payments contribute to payNIO/payUSD here
-          if (p.currency === "USD") payUSD += Number(p.amount);
-          else payNIO += Number(p.amount);
-        }
-        // Mixed payments: payNIO/payUSD will be updated in step 5 from parts
-      });
-
-      // Count tickets per method based on primary payment
-      const primaryPayment = tPayments[0];
-      if (primaryPayment) {
-        const m = primaryPayment.payment_method;
-        // Convert USD to NIO so cashNIO/cardNIO/transferNIO always represent NIO equivalents
-        const amtRaw = Number(primaryPayment.amount);
-        const amt = primaryPayment.currency === "USD" ? amtRaw * rate : amtRaw;
-        if (m === "cash") { cashNIO += amt; cashTickets++; }
-        else if (m === "card") { cardNIO += amt; cardTickets++; }
-        else if (m === "transfer") { transferNIO += amt; transferTickets++; }
-        else if (m === "mixed") { mixedTickets++; }
+      if (!tickets || tickets.length === 0) {
+        setStats({
+          totalSalesNIO: 0, payNIO: 0, payUSD: 0,
+          cashNIO: 0, cardNIO: 0, transferNIO: 0,
+          mixedTotal: 0, mixedCashNIO: 0, mixedCardNIO: 0, mixedTransferNIO: 0,
+          cashTickets: 0, cardTickets: 0, transferTickets: 0, mixedTickets: 0,
+          ticketCount: 0, topServices: [], topVehicles: [], recentTickets: [],
+        });
+        setMixedBreakdownMap({});
+        setLoading(false);
+        return;
       }
-    });
 
-    // 5. Fetch mixed payment breakdowns
-    let mixedCashNIO = 0, mixedCardNIO = 0, mixedTransferNIO = 0;
-    const bMap: Record<string, { method: string; applied_nio: number; currency: string; amount: number }[]> = {};
-    let mixedCashUSD = 0, mixedCardUSD = 0, mixedTransferUSD = 0;
+      // The ticket and its payments come from the same database snapshot.
+      const ticketsWithPayments = tickets;
 
-    const { data: mixedParts, error: mixedPartsErr } = await (supabase as any)
-      .from("ticket_mixed_payments")
-      .select("*")
-      .in("ticket_id", ticketIds);
+      const ticketItems = tickets.flatMap((t: any) => t.ticket_items || []);
 
-    if (mixedPartsErr) console.error("[Dashboard] ticket_mixed_payments error:", mixedPartsErr.message);
+      const rate = settings?.exchange_rate || 36.5;
+      let totalNIO = 0;
+      const svcCount: Record<string, number> = {};
+      const vehCount: Record<string, number> = {};
 
-    if (mixedParts && mixedParts.length > 0) {
-      mixedParts.forEach((mp: any) => {
-        const isUSD = mp.currency === "USD";
-        const applied = Math.max(0, Number(mp.applied_nio) || 0);
-        const partAmount = Number(mp.amount) || 0;
-
-        if (isUSD) {
-          if (mp.method === "cash") mixedCashUSD += partAmount;
-          else if (mp.method === "card") mixedCardUSD += partAmount;
-          else if (mp.method === "transfer") mixedTransferUSD += partAmount;
-          // Contribute to currency totals
-          payUSD += partAmount;
-        } else {
-          const nioAmount = applied > 0 ? applied : partAmount;
-          if (mp.method === "cash") { mixedCashNIO += nioAmount; cashNIO += nioAmount; }
-          else if (mp.method === "card") { mixedCardNIO += nioAmount; cardNIO += nioAmount; }
-          else if (mp.method === "transfer") { mixedTransferNIO += nioAmount; transferNIO += nioAmount; }
-          // Contribute to currency totals
-          payNIO += nioAmount;
-        }
-
-        const tid = String(mp.ticket_id);
-        if (!bMap[tid]) bMap[tid] = [];
-        bMap[tid].push({ method: mp.method, applied_nio: applied, currency: mp.currency || "NIO", amount: partAmount });
+      ticketsWithPayments.forEach((t: any) => {
+        totalNIO += Number(t.total);
+        const vn = (t.vehicle_types as any)?.name || "N/A";
+        vehCount[vn] = (vehCount[vn] || 0) + 1;
       });
+
+      (ticketItems || []).forEach((ti: any) => {
+        const svcName =
+          ti.service_name_snapshot ||
+          (ti.products as any)?.name ||
+          (ti.services as any)?.name ||
+          "Otro";
+        svcCount[svcName] = (svcCount[svcName] || 0) + 1;
+      });
+
+      // 4. Payment method breakdown
+      // payNIO/payUSD: exclude "mixed" payments (amount = full NIO equivalent of ticket).
+      // For mixed, we distribute from ticket_mixed_payments parts (step 5).
+      let payNIO = 0, payUSD = 0;
+      let cashNIO = 0, cardNIO = 0, transferNIO = 0;
+      let cashTickets = 0, cardTickets = 0, transferTickets = 0, mixedTickets = 0;
+
+      ticketsWithPayments.forEach((t: any) => {
+        const tPayments: any[] = t.payments || [];
+        tPayments.forEach((p: any) => {
+          if (p.payment_method !== "mixed") {
+            // Only non-mixed payments contribute to payNIO/payUSD here
+            if (p.currency === "USD") payUSD += Number(p.amount);
+            else payNIO += Number(p.amount);
+          }
+          // Mixed payments: payNIO/payUSD will be updated in step 5 from parts
+        });
+
+        // Count tickets per method based on primary payment
+        const primaryPayment = tPayments[0];
+        if (primaryPayment) {
+          const m = primaryPayment.payment_method;
+          // Convert USD to NIO so cashNIO/cardNIO/transferNIO always represent NIO equivalents
+          const amtRaw = Number(primaryPayment.amount);
+          const amt = primaryPayment.currency === "USD" ? amtRaw * rate : amtRaw;
+          if (m === "cash") { cashNIO += amt; cashTickets++; }
+          else if (m === "card") { cardNIO += amt; cardTickets++; }
+          else if (m === "transfer") { transferNIO += amt; transferTickets++; }
+          else if (m === "mixed") { mixedTickets++; }
+        }
+      });
+
+      // 5. Fetch mixed payment breakdowns
+      let mixedCashNIO = 0, mixedCardNIO = 0, mixedTransferNIO = 0;
+      const bMap: Record<string, { method: string; applied_nio: number; currency: string; amount: number }[]> = {};
+      let mixedCashUSD = 0, mixedCardUSD = 0, mixedTransferUSD = 0;
+
+      const mixedParts = tickets.flatMap((t: any) => t.ticket_mixed_payments || []);
+
+      if (mixedParts && mixedParts.length > 0) {
+        mixedParts.forEach((mp: any) => {
+          const isUSD = mp.currency === "USD";
+          const applied = Math.max(0, Number(mp.applied_nio) || 0);
+          const partAmount = Number(mp.amount) || 0;
+
+          if (isUSD) {
+            if (mp.method === "cash") mixedCashUSD += partAmount;
+            else if (mp.method === "card") mixedCardUSD += partAmount;
+            else if (mp.method === "transfer") mixedTransferUSD += partAmount;
+            // Contribute to currency totals
+            payUSD += partAmount;
+          } else {
+            const nioAmount = applied > 0 ? applied : partAmount;
+            if (mp.method === "cash") { mixedCashNIO += nioAmount; cashNIO += nioAmount; }
+            else if (mp.method === "card") { mixedCardNIO += nioAmount; cardNIO += nioAmount; }
+            else if (mp.method === "transfer") { mixedTransferNIO += nioAmount; transferNIO += nioAmount; }
+            // Contribute to currency totals
+            payNIO += nioAmount;
+          }
+
+          const tid = String(mp.ticket_id);
+          if (!bMap[tid]) bMap[tid] = [];
+          bMap[tid].push({ method: mp.method, applied_nio: applied, currency: mp.currency || "NIO", amount: partAmount });
+        });
+      }
+      setMixedBreakdownMap(bMap);
+
+      const mixedTotal = mixedCashNIO + mixedCardNIO + mixedTransferNIO
+        + (mixedCashUSD + mixedCardUSD + mixedTransferUSD) * rate;
+
+      setStats({
+        totalSalesNIO: totalNIO,
+        payNIO, payUSD,
+        cashNIO, cardNIO, transferNIO,
+        mixedTotal, mixedCashNIO, mixedCardNIO, mixedTransferNIO,
+        cashTickets, cardTickets, transferTickets, mixedTickets,
+        ticketCount: tickets.length,
+        topServices: Object.entries(svcCount).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+        topVehicles: Object.entries(vehCount).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
+        recentTickets: ticketsWithPayments,
+      });
+    } catch (error) {
+      if (version !== loadVersion.current) return;
+      console.error("[Dashboard] load error:", error);
+      setLoadError("No se pudo cargar el panel completo. Comprueba la conexión e inténtalo de nuevo.");
+    } finally {
+      if (version === loadVersion.current) setLoading(false);
     }
-    setMixedBreakdownMap(bMap);
-
-    const mixedTotal = mixedCashNIO + mixedCardNIO + mixedTransferNIO
-      + (mixedCashUSD + mixedCardUSD + mixedTransferUSD) * rate;
-
-    setStats({
-      totalSalesNIO: totalNIO,
-      payNIO, payUSD,
-      cashNIO, cardNIO, transferNIO,
-      mixedTotal, mixedCashNIO, mixedCardNIO, mixedTransferNIO,
-      cashTickets, cardTickets, transferTickets, mixedTickets,
-      ticketCount: tickets.length,
-      topServices: Object.entries(svcCount).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
-      topVehicles: Object.entries(vehCount).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
-      recentTickets: ticketsWithPayments,
-    });
-    setLoading(false);
   };
 
 
   useEffect(() => {
     loadStats();
+    return () => { loadVersion.current++; };
   }, [settings, businessLine]);
 
   useTicketRefresh(loadStats);
@@ -358,7 +343,13 @@ export default function Dashboard() {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
+    return <div role="status" aria-label="Cargando panel" className="flex items-center justify-center h-full"><i className="fa-solid fa-spinner fa-spin text-3xl text-accent" /></div>;
+  }
+
+  if (loadError) {
+    return <div role="alert" className="p-6 text-destructive">
+      {loadError} <button type="button" onClick={loadStats} className="font-semibold underline">Reintentar</button>
+    </div>;
   }
 
   const formatTime = (iso: string) => niFormatTime(iso);
@@ -371,6 +362,11 @@ export default function Dashboard() {
         Dashboard — {BUSINESS_LINE_LABELS[businessLine]} — Hoy
       </h2>
 
+      {stats.recentTickets.some((t: any) => !methodLabels[t.payments?.[0]?.payment_method]) && (
+        <div role="alert" className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-800">
+          Hay tickets sin pago disponible. Actualiza el panel y verifica el ticket antes de eliminarlo o cerrar caja.
+        </div>
+      )}
       {/* Metric cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="pos-card p-6 text-center">
@@ -563,7 +559,7 @@ export default function Dashboard() {
                   </tr>
                 )}
                 {stats.recentTickets.map((t: any, idx: number) => {
-                  const payMethod = t.payments?.[0]?.payment_method || "—";
+                  const payMethod = t.payments?.[0]?.payment_method || "Pago no disponible";
                   const isMixed = payMethod === "mixed";
                   const mixedParts = isMixed ? (mixedBreakdownMap[String(t.id)] || []) : [];
                   return (

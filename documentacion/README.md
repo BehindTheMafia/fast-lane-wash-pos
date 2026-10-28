@@ -53,6 +53,11 @@ npm run preview:prod
 
 ## 📚 Documentación
 
+- [Recuperación de tickets y cobros ante cortes de conexión](RECUPERACION_CONEXION_POS.md)
+
+- [Criterios de idempotencia del cobro de barbería](IDEMPOTENCIA_BARBERIA.md)
+- [Pruebas del cobro de autolavado y limitaciones](PRUEBAS_AUTOLAVADO.md)
+
 - `DEPLOYMENT_GUIDE.md` - Guía completa de deployment
 - `AUDITORIA_SEGURIDAD.md` - Reporte de seguridad
 - `MEJORAS_LEALTAD_CRUD.md` - Documentación del programa de lealtad
