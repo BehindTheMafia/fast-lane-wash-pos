@@ -22,6 +22,22 @@ beforeEach(()=>{vi.useFakeTimers();network.rpc.mockReset();network.rpc.mockResol
 afterEach(()=>{cleanup();vi.useRealTimers();vi.restoreAllMocks();});
 
 describe('connection-loss recovery',()=>{
+  it.each(['car_wash','barbershop'] as const)('%s: a duplicate is rejected, preserved for review and never queued for later charging',async line=>{
+    network.rpc.mockResolvedValueOnce({data:null,error:{code:'P0001',message:'Posible venta duplicada',details:JSON.stringify({
+      code:'DUPLICATE_SALE',ticket_id:4407,ticket_number:'T-ORIGINAL',business_line:line,retry_after_seconds:30,
+    })}});
+    const view=mount('one',line);await flush();
+    await act(async()=>{await view.result.current.start(payload,receipt);});
+    expect(view.result.current.record).toMatchObject({state:'rejected',retryable:false,duplicateSale:{ticketId:4407}});
+    expect(view.confirmed).not.toHaveBeenCalled();
+    await advance(120_000);expect(network.rpc).toHaveBeenCalledTimes(1);
+    view.unmount();const restored=mount('one',line);await flush();
+    expect(restored.result.current.record?.duplicateSale?.ticketId).toBe(4407);
+    await act(async()=>{restored.result.current.dismissDuplicate();});
+    expect(restored.result.current.record?.duplicateSale).toBeUndefined();
+    expect(readCheckout(line,'one')?.state).toBe('rejected');
+    await advance(60_000);expect(network.rpc).toHaveBeenCalledTimes(1);
+  });
   it('saves an offline sale without sending or marking it paid, then confirms the same identity on reconnection',async()=>{
     Object.defineProperty(navigator,'onLine',{configurable:true,value:false});
     const view=mount();await flush();

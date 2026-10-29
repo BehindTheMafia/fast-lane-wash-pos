@@ -1,4 +1,11 @@
-import type { BusinessLine } from './businessLine';
+import { isBusinessLine, type BusinessLine } from './businessLine';
+
+export interface DuplicateSale {
+  ticketId: number;
+  ticketNumber: string;
+  businessLine: BusinessLine;
+  retryAfterSeconds: number;
+}
 
 export interface CheckoutRecord<P = unknown, R = unknown, D = unknown> {
   version: 2;
@@ -12,6 +19,7 @@ export interface CheckoutRecord<P = unknown, R = unknown, D = unknown> {
   result?: CheckoutResult;
   error?: string;
   retryable?: boolean;
+  duplicateSale?: DuplicateSale;
 }
 export interface CheckoutResult {
   success: true;
@@ -47,7 +55,7 @@ export function prepareCheckout<P, R, D>(line: BusinessLine, userId: string, pay
   return record;
 }
 
-export function updateCheckout<P, R, D>(request: CheckoutRecord<P, R, D>, changes: Pick<CheckoutRecord<P, R, D>, 'state'> & Partial<Pick<CheckoutRecord<P, R, D>, 'result' | 'error' | 'retryable'>>, storage: Storage = localStorage): CheckoutRecord<P, R, D> {
+export function updateCheckout<P, R, D>(request: CheckoutRecord<P, R, D>, changes: Pick<CheckoutRecord<P, R, D>, 'state'> & Partial<Pick<CheckoutRecord<P, R, D>, 'result' | 'error' | 'retryable' | 'duplicateSale'>>, storage: Storage = localStorage): CheckoutRecord<P, R, D> {
   const current = readCheckout<P, R, D>(request.businessLine, request.userId, storage);
   if (!current || current.id !== request.id || JSON.stringify(current.payload) !== JSON.stringify(request.payload)) {
     throw new Error('El cobro local cambió. Recupera el ticket antes de continuar.');
@@ -114,4 +122,15 @@ export function isRetryableTransportFailure(error: unknown): boolean {
   if (!error || typeof error !== 'object') return true;
   const code = 'code' in error ? error.code : undefined;
   return !code || code === 'PGRST000' || (typeof code === 'string' && /^(08|53|57)/.test(code));
+}
+
+export function duplicateSaleFromError(error: unknown): DuplicateSale | undefined {
+  if (!error || typeof error !== 'object' || !('details' in error) || typeof error.details !== 'string') return;
+  try {
+    const detail = JSON.parse(error.details);
+    if (detail?.code !== 'DUPLICATE_SALE' || !Number.isSafeInteger(detail.ticket_id) || detail.ticket_id <= 0 ||
+      typeof detail.ticket_number !== 'string' || !detail.ticket_number || !isBusinessLine(detail.business_line) ||
+      !Number.isInteger(detail.retry_after_seconds) || detail.retry_after_seconds < 1 || detail.retry_after_seconds > 30) return;
+    return {ticketId: detail.ticket_id, ticketNumber: detail.ticket_number, businessLine: detail.business_line, retryAfterSeconds: detail.retry_after_seconds};
+  } catch { return; }
 }

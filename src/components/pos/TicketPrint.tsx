@@ -5,9 +5,11 @@ import { niFormatDate, niFormatTime } from "@/utils/niDate";
 interface Props {
   ticket: any;
   onClose: () => void;
+  closeLabel?: string;
+  closeOnBackdrop?: boolean;
 }
 
-export default function TicketPrint({ ticket, onClose }: Props) {
+export default function TicketPrint({ ticket, onClose, closeLabel = 'Cerrar', closeOnBackdrop = true }: Props) {
   const [isPrintingBT, setIsPrintingBT] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -452,7 +454,7 @@ export default function TicketPrint({ ticket, onClose }: Props) {
   );
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={closeOnBackdrop ? onClose : undefined}>
       <div className="modal-content animate-scale-in max-w-sm" onClick={(e) => e.stopPropagation()}>
 
         {/* ── Área de impresión ── */}
@@ -513,7 +515,7 @@ export default function TicketPrint({ ticket, onClose }: Props) {
             )}
           </div>
           <button onClick={onClose} className="touch-btn w-full border border-border text-foreground py-3 rounded-xl font-semibold">
-            Cerrar
+            {closeLabel}
           </button>
         </div>
       </div>

@@ -1086,6 +1086,8 @@ export default function CarWashPOS() {
       {checkout.ready && showPrint && lastTicket && (
         <TicketPrint
           ticket={lastTicket}
+          closeLabel="Nueva atención"
+          closeOnBackdrop={false}
           onClose={() => {
             if (checkout.acknowledge()) { setShowPrint(false); newTicket(); }
           }}

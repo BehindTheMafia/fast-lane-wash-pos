@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  acknowledgeCheckout, checkoutKey, draftKey, isDefinitiveSaleRejection, isRetryableTransportFailure,
+  acknowledgeCheckout, checkoutKey, draftKey, duplicateSaleFromError, isDefinitiveSaleRejection, isRetryableTransportFailure,
   migrateBarberRecovery, prepareCheckout, readCheckout, readDraft, updateCheckout, writeDraft,
 } from './checkoutRecovery';
 const payload={payment:{method:'cash',amount:150,currency:'NIO',received:200,change:50},items:[{name:'Corte'}]};
@@ -70,6 +70,13 @@ describe('durable sale records',()=>{
 });
 
 describe('failure classification',()=>{
+  it('recognizes a server duplicate as a proven rollback with a validated original ticket',()=>{
+    const error={code:'P0001',details:JSON.stringify({code:'DUPLICATE_SALE',ticket_id:4407,ticket_number:'T-ORIGINAL',business_line:'car_wash',retry_after_seconds:18})};
+    expect(isDefinitiveSaleRejection(error)).toBe(true);
+    expect(isRetryableTransportFailure(error)).toBe(false);
+    expect(duplicateSaleFromError(error)).toEqual({ticketId:4407,ticketNumber:'T-ORIGINAL',businessLine:'car_wash',retryAfterSeconds:18});
+    for(const details of ['invalid','null','{}',JSON.stringify({code:'DUPLICATE_SALE',ticket_id:-1})]) expect(duplicateSaleFromError({details})).toBeUndefined();
+  });
   it('keeps both old and new RPC identity conflicts unresolved',()=>{
     expect(isDefinitiveSaleRejection({code:'P0001',details:'IDEMPOTENCY_CONFLICT'})).toBe(false);
     expect(isDefinitiveSaleRejection({code:'P0001',message:'La solicitud ya existe con otros datos. Reintenta con los datos originales.'})).toBe(false);

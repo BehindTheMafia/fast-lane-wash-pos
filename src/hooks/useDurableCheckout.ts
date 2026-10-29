@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { supabase } from '@/integrations/supabase/client';
 import type { BusinessLine } from '@/lib/businessLine';
 import {
-  acknowledgeCheckout, checkoutError, checkoutKey, draftKey, editorLockKey, isDefinitiveSaleRejection, isRetryableTransportFailure,
+  acknowledgeCheckout, checkoutError, checkoutKey, draftKey, duplicateSaleFromError, editorLockKey, isDefinitiveSaleRejection, isRetryableTransportFailure,
   migrateBarberRecovery, prepareCheckout, readCheckout, readDraft, updateCheckout, writeDraft,
   type CheckoutRecord, type CheckoutResult,
 } from '@/lib/checkoutRecovery';
@@ -145,7 +145,8 @@ export function useDurableCheckout<P, R, D>(options: Options<P, R, D>) {
       if (generation.current !== epoch || request.userId !== activeUser.current) return;
       const message = checkoutError(error);
       try {
-        const updated = updateCheckout(request, {state: isDefinitiveSaleRejection(error) ? 'rejected' : 'pending', error: message, retryable: isRetryableTransportFailure(error)});
+        const updated = updateCheckout(request, {state: isDefinitiveSaleRejection(error) ? 'rejected' : 'pending', error: message,
+          retryable: isRetryableTransportFailure(error), duplicateSale: duplicateSaleFromError(error)});
         setRecord(updated);
         if (updated.state === 'rejected') callbacks.current.rejected(message);
       } catch (storageError) { setIssue(checkoutError(storageError)); }
@@ -203,6 +204,16 @@ export function useDurableCheckout<P, R, D>(options: Options<P, R, D>) {
     } catch (error) { setIssue(checkoutError(error)); return false; }
   }, [businessLine, userId, scope]);
 
+  const dismissDuplicate = useCallback(() => {
+    if (!userId || !owned.current || ownedScope.current !== scope || inFlight.current || issue) return;
+    try {
+      const saved = readCheckout<P, R, D>(businessLine, userId);
+      if (saved?.state === 'rejected' && saved.duplicateSale) {
+        setRecord(updateCheckout(saved, {state: 'rejected', duplicateSale: undefined}));
+      }
+    } catch (error) { setIssue(checkoutError(error)); }
+  }, [businessLine, userId, issue, scope]);
+
   const backup = useCallback(() => {
     const accessible = !!userId && owned.current && ownedScope.current === scope;
     let raw: {draft: string | null; checkout: string | null; legacy: string | null} | null = null;
@@ -219,7 +230,7 @@ export function useDurableCheckout<P, R, D>(options: Options<P, R, D>) {
   const ownsThisScope = !!scope && ownedScope.current === scope;
 
   return {
-    ready: ready && ownsThisScope, issue, record: ownsThisScope ? record : null, processing, online, start, retry, acknowledge, backup,
+    ready: ready && ownsThisScope, issue, record: ownsThisScope ? record : null, processing, online, start, retry, acknowledge, dismissDuplicate, backup,
     blocked: !ready || !ownsThisScope || !!issue || processing || record?.state === 'pending' || record?.state === 'confirmed',
   };
 }
